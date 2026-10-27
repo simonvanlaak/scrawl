@@ -13,6 +13,7 @@
 //! read them (`input`). See `docs/linux.md`.
 
 pub mod atspi;
+pub mod auto_paste;
 pub mod clipboard;
 pub mod hyprland;
 pub mod input;

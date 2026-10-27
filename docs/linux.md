@@ -61,6 +61,8 @@ XWayland sees the pointer only over X11 windows and keeps the last place it saw 
 
 The clipboard goes through `wl-copy`, as on KDE Wayland.
 
+`autoPasteDraft` is an off-by-default shortcut experiment. On a Hyprland Wayland recording started by the record shortcut, it remembers the exact focused window before opening Scrawl's UI. After a complete bundle exists, it tries the guarded image-first handoff only if that same window is still focused; it never raises another window or presses Send. It consumes the attempt once, does not start dev-site/agent routing for that capture, and does not overwrite the user's clipboard with the normal automatic Copy. The completed pill and a notification report the manual `contact-sheet.png` + `summary.md` fallback when it skips. The current `draftHandoff` Linux receiver has no verified T3 editor/attachment observer, so **the experiment currently refuses before any paste**; do not enable it as a working chat integration. Completing #3's real unsent composer check and editor-level identity is required before claiming #6's X1 acceptance.
+
 Not done: a click's position still comes from XWayland (see above; `j/cursorpos` would answer it), and a Region capture of the second monitor failed in testing with a PipeWire `not-negotiated` error while Display on it and Region on the first monitor worked.
 
 ## Scrawl's own windows are in the recording

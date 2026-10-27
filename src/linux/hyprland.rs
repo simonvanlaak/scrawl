@@ -64,6 +64,25 @@ fn request(command: &str) -> Result<String> {
     Ok(reply)
 }
 
+/// Exact window identity, not merely the application or its last focused window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FocusedWindow {
+    pub address: String,
+    pub pid: u32,
+    pub class: String,
+}
+
+pub fn focused_window() -> Result<FocusedWindow> {
+    let value: serde_json::Value = serde_json::from_str(&request("j/activewindow")?)?;
+    let address = value["address"].as_str().filter(|s| !s.is_empty() && *s != "0x0")
+        .context("No focused window")?.to_owned();
+    let pid = value["pid"].as_u64().and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n != 0).context("Focused window has no PID")?;
+    let class = value["class"].as_str().filter(|s| !s.is_empty())
+        .context("Focused window has no class")?.to_owned();
+    Ok(FocusedWindow { address, pid, class })
+}
+
 fn syntax() -> Result<Syntax> {
     let mut cached = SYNTAX
         .lock()

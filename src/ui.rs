@@ -653,6 +653,8 @@ struct ActiveRecording {
     target: TargetInfo,
     bundle_dir: PathBuf,
     source: CaptureSource,
+    #[cfg(target_os = "linux")]
+    auto_paste: Option<crate::linux::auto_paste::Attempt>,
     _metal_overlay: Option<LaserOverlay>,
 }
 
@@ -723,6 +725,8 @@ pub struct ScrawlCoordinator {
     display_rect: [f32; 4],
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
+    #[cfg(target_os = "linux")]
+    pending_auto_paste: Option<crate::linux::auto_paste::Attempt>,
     review_bundle: Option<(PathBuf, ScrawlBundle)>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
@@ -821,6 +825,8 @@ impl ScrawlCoordinator {
             display_rect: [0.0, 0.0, 1440.0, 900.0],
             paste_drag_start: None,
             recording_shortcut_key: false,
+            #[cfg(target_os = "linux")]
+            pending_auto_paste: None,
             review_bundle: initial_bundle,
             review_status: None,
             selected_tab: ReviewTab::ContactSheet,
@@ -908,6 +914,8 @@ impl ScrawlCoordinator {
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_image_and_text(&dir) {
                 scrawl_log(format!("paste_bundle_image_and_text error: {err}"));
+                #[cfg(target_os = "linux")]
+                crate::linux::shell::notify("Paste stopped", &format!("{err:#}. Manually attach the contact sheet and paste summary.md from {}", dir.display()));
             }
         });
     }
@@ -1230,7 +1238,25 @@ impl ScrawlCoordinator {
                 // Esc can cancel before the picker or a recording exists.
                 self.playback.take();
             }
-            Action::RecordScreen => self.record_screen_now(cx),
+            Action::RecordScreen => {
+                #[cfg(target_os = "linux")]
+                {
+                    self.pending_auto_paste =
+                        (crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
+                            && crate::linux::hyprland::running()
+                            && crate::linux::wayland_session()
+                            && !self.lab)
+                            .then(|| crate::linux::auto_paste::Attempt::new(
+                                crate::linux::hyprland::focused_window()
+                                    .map_err(|error| format!("No original chat window: {error:#}")),
+                            ));
+                }
+                self.record_screen_now(cx);
+                #[cfg(target_os = "linux")]
+                if !self.is_recording() {
+                    self.pending_auto_paste = None;
+                }
+            }
             Action::RecordSelected => self.record_selected_mode(cx),
             Action::Finish => self.finish_recording(cx),
         }
@@ -1987,6 +2013,8 @@ impl ScrawlCoordinator {
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_at_target(&dir, click_target) {
                 scrawl_log(format!("paste_bundle_at_target error: {err}"));
+                #[cfg(target_os = "linux")]
+                crate::linux::shell::notify("Paste stopped", &format!("{err:#}. Manually attach the contact sheet and paste summary.md from {}", dir.display()));
             }
         });
     }
@@ -2595,6 +2623,8 @@ impl ScrawlCoordinator {
                 audio: audio_recorder,
                 windows: window_log,
             },
+            #[cfg(target_os = "linux")]
+            auto_paste: self.pending_auto_paste.take(),
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -2637,6 +2667,8 @@ impl ScrawlCoordinator {
             target,
             bundle_dir: PathBuf::new(),
             source: CaptureSource::Lab,
+            #[cfg(target_os = "linux")]
+            auto_paste: None,
             _metal_overlay: None,
         });
         self.present_recording_island(cx);
@@ -2736,6 +2768,8 @@ impl ScrawlCoordinator {
             target,
             bundle_dir,
             source: CaptureSource::Phone(session),
+            #[cfg(target_os = "linux")]
+            auto_paste: None,
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -2775,6 +2809,12 @@ impl ScrawlCoordinator {
         let Some(rec) = self.active_recording.take() else {
             return;
         };
+        #[cfg(target_os = "linux")]
+        let auto_paste = rec.auto_paste.and_then(|mut attempt| attempt.take());
+        #[cfg(target_os = "linux")]
+        let auto_active = auto_paste.is_some();
+        #[cfg(not(target_os = "linux"))]
+        let auto_active = false;
         let (events, strokes) = self.telemetry.finish_session();
         let bundle_dir = rec.bundle_dir;
         let target = rec.target;
@@ -2821,13 +2861,13 @@ impl ScrawlCoordinator {
             .flatten();
         let captured = target.bundle_id.clone();
         let finish_started = Instant::now();
-        let route = (screen && !smart).then(|| {
+        let route = (screen && !smart && !auto_active).then(|| {
             let (front, captured) = (front.clone(), captured.clone());
             std::thread::spawn(move || {
                 crate::routing::route_capture(front.as_deref(), captured.as_deref())
             })
         });
-        let look = (screen && smart).then(|| {
+        let look = (screen && smart && !auto_active).then(|| {
             std::thread::spawn(move || {
                 crate::routing::look_capture(front.as_deref(), captured.as_deref())
             })
@@ -2916,9 +2956,41 @@ impl ScrawlCoordinator {
                         }
                     };
                     let frame_count = bundle.keyframes.len();
-                    let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
+                    if !auto_active {
+                        let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
+                    }
+                    #[cfg(target_os = "linux")]
+                    if let Some(target) = auto_paste {
+                        match target {
+                            Ok(original) => {
+                                let handoff_dir = dir.clone();
+                                std::thread::spawn(move || {
+                                    if let Err(error) = crate::handoff::paste_bundle_into_original_draft(
+                                        &handoff_dir, &original,
+                                    ) {
+                                        scrawl_log(format!("Automatic draft paste skipped: {error:#}"));
+                                        crate::linux::shell::notify(
+                                            "Draft paste skipped",
+                                            &format!("{error:#}. Manually attach contact-sheet.png and paste summary.md from {}", handoff_dir.display()),
+                                        );
+                                    }
+                                });
+                            }
+                            Err(reason) => {
+                                crate::linux::shell::notify(
+                                    "Draft paste skipped",
+                                    &format!("{reason}. Manually attach contact-sheet.png and paste summary.md from {}", dir.display()),
+                                );
+                            }
+                        }
+                    }
                     coord.completed_dir = Some(dir.clone());
                     coord.last_local_capture_ms = crate::now_epoch_ms();
+                    if auto_active {
+                        // The current Linux receiver deliberately refuses without an attachment
+                        // observer. Never say "Copied" when the user's clipboard was preserved.
+                        coord.completed_note = Some("Saved · paste unavailable".into());
+                    }
                     if route.is_some() || look.is_some() {
                         coord.routing = Some(dir.clone());
                         routed = Some((dir.clone(), look.is_some().then(|| bundle.clone())));

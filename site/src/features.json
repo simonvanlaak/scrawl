@@ -256,6 +256,24 @@
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
+      "id": "draft-handoff",
+      "group": "finish",
+      "name": "Guarded draft handoff",
+      "says": "Scaffolds image-first and text-second paste with focus and attachment checks. The Linux receiver currently refuses before touching the draft because it cannot verify the editor or attachment.",
+      "status": "experiment:draftHandoff",
+      "platforms": ["linux"],
+      "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]
+    },
+    {
+      "id": "auto-paste-draft",
+      "group": "finish",
+      "name": "Paste a finished capture into its original draft",
+      "says": "Scaffolds a one-use handoff bound to the recording's original window. The Linux receiver still refuses before pasting; automatic draft paste is not working yet.",
+      "status": "experiment:autoPasteDraft",
+      "platforms": ["linux"],
+      "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]
+    },
+    {
       "id": "review-window",
       "group": "finish",
       "name": "Review window",

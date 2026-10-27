@@ -48,6 +48,22 @@ Dev pages that load `/sdk.js` add what only the page knows (`src/page.rs`, `src/
 
 Off by default (see Experiments in `AGENTS.md`). With it on and Apple Speech the transcriber, `AudioRecorder::start` also starts `scrawl-helper transcribe-stream` (one SpeechAnalyzer, finalized results only; it never downloads a model, so one that isn't installed fails at once) and a thread that feeds it the recorder's 16 kHz buffer as `audio::pcm16` every 160 ms. `RecordedAudio.live` carries it to `transcribe::transcribe`, which sends the samples it hasn't had from the finished WAV, closes its input and waits up to 6 s for the tail; the helper must report exactly the WAV's sample count. Word times are therefore the WAV's own, and match one SpeechAnalyzer pass over `audio.wav` word for word and millisecond for millisecond (the batch path splits recordings over 22 s at silences and transcribes the pieces in parallel, so long recordings can differ from it at the cuts). Any failure is logged (`Live transcription failed, …`) and the WAV is transcribed as before; Hex, iPhone and imported recordings never stream. `scrawl reprocess B --out O --bench 1 --live-speed 1` replays a bundle's audio into it in real time and logs `Live transcription: N words, … tail N ms` and the finish timings.
 
+## Experiment `pauseTranscribe` (`src/pause_transcribe.rs`, `src/speech.rs`)
+
+Off by default on Linux with the local Parakeet transcriber. The worker reads only
+new microphone samples, uses `audio::speech_islands` and Hex's short-blip filter,
+and waits for at least three seconds of audio plus 700 ms of quiet before sending
+a chunk (with 200 ms of trailing audio) to its reusable model session. Its pending
+buffer is capped at 60 seconds; if it falls behind or finds no safe cut, it fails
+back to whole-WAV transcription rather than dropping audio. At stop it reads the finished
+WAV to transcribe only the unprocessed tail, joins ordered text and absolute word
+times, and falls back to the normal whole-WAV path on any failure. Hex and command
+transcribers are unchanged. To compare without a live microphone, use
+`scrawl reprocess B --out O --bench 1 --live-speed 1 --experiment pauseTranscribe`
+on a Linux machine with Parakeet installed; `--live-speed` replays the saved WAV
+at real speed before timing finalization. Compare with a normal reprocess of the
+same bundle: chunk boundaries can change recognition even when finish is faster.
+
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`)
 
 Off by default; Windows only. A finished capture (and `scrawl send` to the clipboard) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.

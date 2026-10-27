@@ -140,6 +140,8 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
         };
     };
     let live = audio.live.take();
+    #[cfg(target_os = "linux")]
+    let pause = audio.pause.take();
     let engine = Engine::preferred();
     run(
         engine,
@@ -149,6 +151,13 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
             Engine::Command => try_command(wav, audio),
         },
         || {
+            #[cfg(target_os = "linux")]
+            if let Some(pause) = pause {
+                match pause.finish(&audio.wav_bytes) {
+                    Ok(transcript) => return transcript,
+                    Err(error) => crate::capture::scrawl_log(format!("Pause transcription failed, transcribing the recording: {error:#}")),
+                }
+            }
             live.and_then(|live| finish_live(live, audio))
                 .unwrap_or_else(|| apple(wav))
         },

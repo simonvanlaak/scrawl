@@ -991,6 +991,8 @@ mod tests {
             duration_ms: 6_000,
             wav_bytes: audio::encode_wav_16k(&samples).unwrap(),
             live: Default::default(),
+            #[cfg(target_os = "linux")]
+            pause: Default::default(),
         };
         let transcript = transcribe_audio(&client(fake.port), "parakeet_v3", "en", &audio).unwrap();
         assert_eq!(fake.requests.lock().unwrap().len(), 2);

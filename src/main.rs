@@ -30,6 +30,8 @@ mod keyframes;
 #[cfg(target_os = "macos")]
 mod laser_overlay;
 mod live_transcribe;
+#[cfg(target_os = "linux")]
+mod pause_transcribe;
 mod mic;
 mod model;
 mod native;
@@ -1872,6 +1874,12 @@ fn main() -> Result<()> {
                             ..Default::default()
                         };
                         let iter_wav = wav_bytes.clone();
+                        #[cfg(target_os = "linux")]
+                        let pause = match (live_speed, &iter_wav) {
+                            (Some(speed), Some(wav)) if pause_transcribe::wanted() => Some(pause_transcribe::simulate(wav, speed)?),
+                            _ => None,
+                        };
+                        #[cfg(not(target_os = "linux"))]
                         let live = match (live_speed, &iter_wav) {
                             (Some(speed), Some(wav)) => {
                                 Some(live_transcribe::simulate(wav, speed)?)
@@ -1883,7 +1891,10 @@ fn main() -> Result<()> {
                             .map(audio::recorded_audio_from_wav)
                             .transpose()?
                             .map(|mut recorded| {
-                                recorded.live = live_transcribe::Slot::new(live);
+                                #[cfg(not(target_os = "linux"))]
+                                { recorded.live = live_transcribe::Slot::new(live); }
+                                #[cfg(target_os = "linux")]
+                                { recorded.pause = pause_transcribe::Slot::new(pause); }
                                 recorded
                             });
                         iter_activity.stop_started = Some(t0);

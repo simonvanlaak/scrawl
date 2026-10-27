@@ -801,9 +801,9 @@
       "group": "install",
       "name": "Linux AppImage",
       "says": "AppImages for x86_64 and aarch64 (Ubuntu 24.04+), published by hand as linux-preview-N.",
-      "status": "branch:feat/linux",
+      "status": "main",
       "platforms": ["linux"],
-      "added": "2026-10-19",
+      "added": "2026-10-26",
       "pr": 24
     },
     {
@@ -869,10 +869,10 @@
       "id": "linux",
       "group": "platforms",
       "name": "Linux preview",
-      "says": "X11, and GNOME and KDE on Wayland through XWayland; without the iPhone, export, agent context, Sparkle or the tab URL.",
-      "status": "branch:feat/linux",
+      "says": "X11, and GNOME, KDE and Hyprland on Wayland through XWayland; without the iPhone, export, agent context, Sparkle or the tab URL.",
+      "status": "main",
       "platforms": ["linux"],
-      "added": "2026-10-19",
+      "added": "2026-10-26",
       "pr": 24
     }
   ]

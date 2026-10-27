@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+#[cfg(target_os = "linux")]
+use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Application, Bounds, BoxShadow, Context, Div, Entity, FocusHandle, FontWeight,
@@ -16,6 +18,8 @@ use gpui::{
 #[cfg_attr(target_os = "windows", path = "ui/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "ui/linux.rs")]
 mod platform;
+#[cfg(target_os = "linux")]
+mod whiteboard;
 use platform::{
     PillChrome, install_status_bar, pointer_on_hud_pill, reduce_motion, set_status_inbox_count,
     set_status_text,
@@ -292,11 +296,17 @@ fn recording_trail_widths(window: &Window, chips: bool, iphone: bool) -> Vec<f32
             .map(|&mode| segment_width(window, mode))
             .collect()
     } else {
-        vec![
-            chip_width(window, "Cancel", FontWeight::MEDIUM),
-            chip_width(window, "Finish", FontWeight::SEMIBOLD),
-        ]
+        let mut widths = vec![chip_width(window, "Cancel", FontWeight::MEDIUM)];
+        if whiteboard_enabled() {
+            widths.push(chip_width(window, "Whiteboard", FontWeight::MEDIUM));
+        }
+        widths.push(chip_width(window, "Finish", FontWeight::SEMIBOLD));
+        widths
     }
+}
+
+fn whiteboard_enabled() -> bool {
+    cfg!(target_os = "linux") && crate::handoff::experiment("whiteboard")
 }
 
 /// Trace names for a Recording capsule's trailing group, with each item's opacity.
@@ -312,7 +322,12 @@ fn trail_keys(
             .map(|m| format!("chip:{}", m.label()))
             .collect()
     } else {
-        ["cancel", "finish"].map(String::from).to_vec()
+        let mut names = vec!["cancel".to_string()];
+        if whiteboard_enabled() {
+            names.push("whiteboard".to_string());
+        }
+        names.push("finish".to_string());
+        names
     };
     names
         .into_iter()
@@ -669,6 +684,8 @@ impl ActiveRecording {
 /// Shared coordinator owned by the GPUI app.
 pub struct ScrawlCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
+    #[cfg(target_os = "linux")]
+    whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
     playback: Option<crate::playback::Guard>,
     picker_metal_overlay: Option<LaserOverlay>,
@@ -782,6 +799,8 @@ impl ScrawlCoordinator {
         crate::playback::warm_up();
         Self {
             telemetry,
+            #[cfg(target_os = "linux")]
+            whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
             playback: None,
             picker_metal_overlay: None,
@@ -2502,6 +2521,8 @@ impl ScrawlCoordinator {
             self.cancel_recording(cx);
             return;
         }
+        #[cfg(target_os = "linux")]
+        self.whiteboard.borrow_mut().clear();
         self.begin_playback();
         let started = Instant::now();
         scrawl_log(format!(
@@ -2821,6 +2842,8 @@ impl ScrawlCoordinator {
             .flatten();
         let captured = target.bundle_id.clone();
         let finish_started = Instant::now();
+        #[cfg(target_os = "linux")]
+        let final_whiteboard = screen.then(|| self.whiteboard.borrow().clone());
         let route = (screen && !smart).then(|| {
             let (front, captured) = (front.clone(), captured.clone());
             std::thread::spawn(move || {
@@ -2891,7 +2914,15 @@ impl ScrawlCoordinator {
                         recorded_audio,
                         None,
                         activity,
-                    );
+                    )
+                    .map(|(dir, bundle, summary)| {
+                        #[cfg(target_os = "linux")]
+                        let (bundle, summary) = match &final_whiteboard {
+                            Some(board) => whiteboard::finish_handoff(&dir, bundle, summary, board),
+                            None => (bundle, summary),
+                        };
+                        (dir, bundle, summary)
+                    });
                     (finalized, duration_ms)
                 })
                 .await;
@@ -3799,7 +3830,7 @@ impl HudPillWindow {
         }
         let c_cancel = self.coordinator.clone();
         let c_finish = self.coordinator.clone();
-        group
+        let group = group
             .child(
                 pill_chip("hud-cancel", "Cancel")
                     .opacity(alpha(0))
@@ -3808,10 +3839,25 @@ impl HudPillWindow {
                             c_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
                         })
                     }),
+            );
+        #[cfg(target_os = "linux")]
+        let group = group.when(whiteboard_enabled(), |group| {
+            let c_board = self.coordinator.clone();
+            group.child(
+                pill_chip("hud-whiteboard", "Whiteboard")
+                    .opacity(alpha(1))
+                    .when(interactive, |d| {
+                        d.on_click(move |_, _, cx| {
+                            let coord = c_board.clone();
+                            cx.defer(move |cx| whiteboard::open(&coord, cx));
+                        })
+                    }),
             )
+        });
+        group
             .child(
                 primary_chip("hud-done", "Finish")
-                    .opacity(alpha(1))
+                    .opacity(alpha(if whiteboard_enabled() { 2 } else { 1 }))
                     .when(interactive, |d| {
                         d.on_click(move |_, _, cx| {
                             c_finish.update(cx, |coord, cx| coord.finish_recording(cx));

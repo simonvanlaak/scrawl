@@ -61,6 +61,20 @@ XWayland sees the pointer only over X11 windows and keeps the last place it saw 
 
 The clipboard goes through `wl-copy`, as on KDE Wayland.
 
+With `"experiments": {"whiteboard": true}`, the recording controls offer **Whiteboard**.
+It opens a separate native window over the ongoing display capture: draw without holding ⇧,
+use Undo or Clear, and close/reopen it without losing the current session's strokes. Resizing
+reveals more of the fixed paper instead of scaling marks. On Hyprland the window is floated
+after it maps so it can move and resize without tiling the browser; the recording remains
+one continuous screen-and-voice session. The board appears in the captured video like any
+other window. The experiment is off by default.
+At finish, a nonempty board also gets its own last contact-sheet tile: the final strokes
+on white paper, cropped to their bounds for readability even if the window was closed or
+small when recording stopped. The numbered tile and stroke count appear in `summary.md`;
+the screen keyframes still show where the board was beside the browser. Clear removes
+the drawing from this final tile. An ordinary clipboard copy is text only; use Paste
+to attach the contact sheet and text to an agent composer.
+
 Not done: a click's position still comes from XWayland (see above; `j/cursorpos` would answer it), and a Region capture of the second monitor failed in testing with a PipeWire `not-negotiated` error while Display on it and Region on the first monitor worked.
 
 ## Scrawl's own windows are in the recording

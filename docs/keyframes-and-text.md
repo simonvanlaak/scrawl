@@ -53,10 +53,12 @@ Off by default (see Experiments in `AGENTS.md`). With it on and Apple Speech the
 Off by default on Linux with the local Parakeet transcriber. The worker reads only
 new microphone samples, uses `audio::speech_islands` and Hex's short-blip filter,
 and waits for at least three seconds of audio plus 700 ms of quiet before sending
-a chunk (with 200 ms of trailing audio) to its reusable model session. Its pending
-buffer is capped at 60 seconds; if it falls behind or finds no safe cut, it fails
-back to whole-WAV transcription rather than dropping audio. At stop it reads the finished
-WAV to transcribe only the unprocessed tail, joins ordered text and absolute word
+a chunk to its reusable model session. Each early chunk starts 200 ms before its
+first speech island and ends 200 ms after the last, instead of feeding a long
+silent lead-in to Parakeet. Its pending buffer is capped at 60 seconds; if it
+falls behind or finds no safe cut, it falls back to whole-WAV transcription
+rather than dropping audio. At stop it reads the finished WAV to transcribe only
+the unprocessed tail, joins ordered text and absolute word
 times, and falls back to the normal whole-WAV path on any failure. Hex and command
 transcribers are unchanged. To compare without a live microphone, use
 `scrawl reprocess B --out O --bench 1 --live-speed 1 --experiment pauseTranscribe`

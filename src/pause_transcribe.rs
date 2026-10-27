@@ -68,9 +68,11 @@ impl Pause {
                             read_at = captured.len();
                         }
                     }
-                    if let Some(end) = pause_boundary(&pending, 0) {
-                        let part =
-                            transcribe(&pending[..end], consumed as u64 * 1_000 / RATE as u64)?;
+                    if let Some((start, end)) = pause_boundary(&pending) {
+                        let part = transcribe(
+                            &pending[start..end],
+                            (consumed + start) as u64 * 1_000 / RATE as u64,
+                        )?;
                         parts.push(part);
                         pending.drain(..end);
                         consumed += end;
@@ -124,20 +126,23 @@ impl Drop for Pause {
     }
 }
 
-fn pause_boundary(samples: &[f32], consumed: usize) -> Option<usize> {
+fn pause_boundary(samples: &[f32]) -> Option<(usize, usize)> {
     let islands = crate::audio::speech_islands(samples);
     let clips = crate::hex::plan_clips(&islands, samples.len() as u64 * 1_000 / RATE as u64);
+    // Match the normal Parakeet path's lead-in; draining still advances through all captured audio.
+    let start = clips.first()?.0.saturating_sub(PAD_MS as u64) as usize * RATE / 1_000;
+    // Eligibility uses elapsed capture time, not the trimmed input length: a short
+    // phrase after initial silence should still run before Stop.
     clips
         .into_iter()
         .map(|(_, end_ms)| end_ms as usize * RATE / 1_000)
         .map(|end| (end, end.saturating_add(PAD_MS * RATE / 1_000)))
         .filter(|&(end, boundary)| {
-            boundary > consumed
-                && boundary - consumed >= MIN_CHUNK_MS * RATE / 1_000
+            boundary >= MIN_CHUNK_MS * RATE / 1_000
                 && end + QUIET_MS * RATE / 1_000 <= samples.len()
         })
         .last()
-        .map(|(_, boundary)| boundary)
+        .map(|(_, boundary)| (start, boundary))
 }
 
 /// Feed a saved WAV at microphone speed for a repeatable CLI comparison.
@@ -241,6 +246,49 @@ mod tests {
     }
 
     #[test]
+    fn early_chunk_trims_leading_silence_without_shifting_word_times() {
+        let samples = Arc::new(Mutex::new(vec![0.0; 2 * RATE]));
+        let (sent, received) = mpsc::channel();
+        let pause = Pause::start_with(Arc::clone(&samples), move |chunk, offset| {
+            sent.send((chunk.len(), offset)).unwrap();
+            Ok(TranscriptData {
+                source: "test".into(),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        samples.lock().unwrap().extend(vec![0.2; 4 * RATE]);
+        samples.lock().unwrap().extend(vec![0.0; RATE]);
+        let (length, offset) = received
+            .recv_timeout(Duration::from_secs(3))
+            .expect("first phrase should be transcribed during recording");
+        assert_eq!(offset, 1_800);
+        assert_eq!(length, 4 * RATE + 2 * PAD_MS * RATE / 1_000);
+        let wav = crate::audio::encode_wav_16k(&samples.lock().unwrap()).unwrap();
+        pause.finish(&wav).unwrap();
+    }
+
+    #[test]
+    fn short_phrase_after_silence_still_runs_before_stop() {
+        let samples = Arc::new(Mutex::new(vec![0.0; 2 * RATE]));
+        let (sent, received) = mpsc::channel();
+        let pause = Pause::start_with(Arc::clone(&samples), move |chunk, offset| {
+            sent.send((chunk.len(), offset)).unwrap();
+            Ok(TranscriptData::default())
+        })
+        .unwrap();
+        samples.lock().unwrap().extend(vec![0.2; RATE]);
+        samples.lock().unwrap().extend(vec![0.0; RATE]);
+        let (length, offset) = received
+            .recv_timeout(Duration::from_secs(3))
+            .expect("a short phrase after silence must be processed during recording");
+        assert_eq!(offset, 1_800);
+        assert_eq!(length, RATE + 2 * PAD_MS * RATE / 1_000);
+        let wav = crate::audio::encode_wav_16k(&samples.lock().unwrap()).unwrap();
+        pause.finish(&wav).unwrap();
+    }
+
+    #[test]
     fn tail_audio_is_not_discarded_by_the_speech_detector() {
         let samples = Arc::new(Mutex::new(vec![0.2; 4 * RATE]));
         samples.lock().unwrap().extend(vec![0.0; RATE]);
@@ -268,12 +316,12 @@ mod tests {
         samples.extend(vec![0.0; RATE * 4 / 10]);
         samples.extend(vec![0.2; RATE]);
         samples.extend(vec![0.0; RATE]);
-        assert_eq!(pause_boundary(&samples, 0), None);
+        assert_eq!(pause_boundary(&samples), None);
         samples.extend(vec![0.2; RATE * 2]);
         samples.extend(vec![0.0; RATE]);
         assert_eq!(
-            pause_boundary(&samples, 0),
-            Some(5 * RATE + RATE * 4 / 10 + RATE / 5)
+            pause_boundary(&samples),
+            Some((0, 5 * RATE + RATE * 4 / 10 + RATE / 5))
         );
     }
 
@@ -282,7 +330,7 @@ mod tests {
         let mut samples = vec![0.0; 4 * RATE];
         samples.extend(vec![0.2; RATE / 20]);
         samples.extend(vec![0.0; RATE]);
-        assert_eq!(pause_boundary(&samples, 0), None);
+        assert_eq!(pause_boundary(&samples), None);
     }
 
     #[test]

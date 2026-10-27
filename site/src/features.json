@@ -205,6 +205,15 @@
       "docs": ["README.md#transcribing-while-recording-experiment", "docs/keyframes-and-text.md"]
     },
     {
+      "id": "pause-transcribe",
+      "group": "record",
+      "name": "Transcribe at pauses",
+      "says": "On Linux, processes completed speech during recording with Parakeet and finishes the remaining audio at stop.",
+      "status": "experiment:pauseTranscribe",
+      "platforms": ["linux"],
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
       "id": "straight-line",
       "group": "record",
       "name": "Straight lines",

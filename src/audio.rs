@@ -13,6 +13,8 @@ pub struct RecordedAudio {
     pub wav_bytes: Vec<u8>,
     /// The transcription that ran while recording, if one did (`live_transcribe`).
     pub live: crate::live_transcribe::Slot,
+    #[cfg(target_os = "linux")]
+    pub pause: crate::pause_transcribe::Slot,
 }
 
 pub struct AudioRecorder {
@@ -21,6 +23,8 @@ pub struct AudioRecorder {
     samples: Arc<Mutex<Vec<f32>>>,
     error: Arc<Mutex<Option<String>>>,
     live: Option<crate::live_transcribe::Live>,
+    #[cfg(target_os = "linux")]
+    pause: Option<crate::pause_transcribe::Pause>,
 }
 
 impl AudioRecorder {
@@ -53,12 +57,20 @@ impl AudioRecorder {
                 })
                 .ok()
             });
+        #[cfg(target_os = "linux")]
+        let pause = crate::pause_transcribe::wanted()
+            .then(|| crate::pause_transcribe::Pause::start(Arc::clone(&samples)))
+            .and_then(|result| {
+                result.inspect_err(|error| crate::capture::scrawl_log(format!("Pause transcription: {error:#}"))).ok()
+            });
         Ok(Self {
             worker: Some(worker),
             stop_sender: Some(stop_sender),
             samples,
             error,
             live,
+            #[cfg(target_os = "linux")]
+            pause,
         })
     }
 
@@ -194,6 +206,8 @@ impl AudioRecorder {
             duration_ms,
             wav_bytes,
             live: crate::live_transcribe::Slot::new(self.live.take()),
+            #[cfg(target_os = "linux")]
+            pause: crate::pause_transcribe::Slot::new(self.pause.take()),
         })
     }
 }
@@ -272,6 +286,8 @@ pub fn recorded_audio_from_wav(wav_bytes: Vec<u8>) -> Result<RecordedAudio> {
         duration_ms: sample_count as u64 * 1_000 / u64::from(SAMPLE_RATE),
         wav_bytes,
         live: Default::default(),
+        #[cfg(target_os = "linux")]
+        pause: Default::default(),
     })
 }
 
@@ -412,6 +428,8 @@ mod tests {
             samples,
             error: Arc::new(Mutex::new(None)),
             live: None,
+            #[cfg(target_os = "linux")]
+            pause: None,
         }
         .stop()
         .unwrap();
@@ -432,6 +450,8 @@ mod tests {
             samples: Arc::new(Mutex::new(samples)),
             error: Arc::new(Mutex::new(Some("Device disconnected".into()))),
             live: None,
+            #[cfg(target_os = "linux")]
+            pause: None,
         };
         assert_eq!(recorder(vec![0.1; 160]).stop().unwrap().sample_count, 160);
         assert!(recorder(Vec::new()).stop().is_err());
@@ -445,6 +465,8 @@ mod tests {
             samples: Arc::new(Mutex::new(Vec::new())),
             error: Arc::new(Mutex::new(None)),
             live: None,
+            #[cfg(target_os = "linux")]
+            pause: None,
         };
         assert!(
             recorder

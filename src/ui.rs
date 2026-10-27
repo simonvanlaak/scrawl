@@ -4416,6 +4416,26 @@ enum BadgeAnchor {
 /// after trimming).
 const MIN_AREA_SIDE: f32 = 36.0;
 
+fn review_neighbor<'a>(
+    history: &'a [PathBuf],
+    current: &std::path::Path,
+    older: bool,
+) -> Option<&'a PathBuf> {
+    let index = history.iter().position(|path| path == current)?;
+    if older {
+        history.get(index + 1)
+    } else {
+        index.checked_sub(1).and_then(|index| history.get(index))
+    }
+}
+
+fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<String> {
+    status
+        .filter(|message| message.starts_with("Could not open capture:"))
+        .map(str::to_owned)
+        .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
+}
+
 /// A point dragged past the picker's display (global points), pulled back onto its edge: an
 /// area belongs to the display the drag started on, which the picker stays on while dragging.
 fn clamp_point([x, y]: [f32; 2], [dx, dy, dw, dh]: [f32; 4]) -> [f32; 2] {
@@ -4476,6 +4496,8 @@ pub struct BundleReviewWindow {
     cached_sheet_path: Option<PathBuf>,
     cached_sheet_image: Option<Arc<Image>>,
     cached_frames: Vec<Option<Arc<Image>>>,
+    history: Vec<PathBuf>,
+    history_error: Option<String>,
 }
 
 impl BundleReviewWindow {
@@ -4486,6 +4508,22 @@ impl BundleReviewWindow {
             cached_sheet_path: None,
             cached_sheet_image: None,
             cached_frames: Vec::new(),
+            history_error: None,
+            history: Vec::new(),
+        }
+    }
+
+    fn update_history(&mut self, result: anyhow::Result<Vec<PathBuf>>, cx: &mut Context<Self>) {
+        let error = result.as_ref().err().map(ToString::to_string);
+        if let Ok(paths) = result {
+            if self.history != paths || self.history_error.is_some() {
+                self.history = paths;
+                self.history_error = None;
+                cx.notify();
+            }
+        } else if self.history_error != error {
+            self.history_error = error;
+            cx.notify();
         }
     }
 
@@ -4586,6 +4624,15 @@ impl Render for BundleReviewWindow {
         };
 
         self.ensure_images(&dir, &bundle);
+        let history_position = self.history.iter().position(|path| path == &dir);
+        let newer = history_position
+            .and_then(|_| review_neighbor(&self.history, &dir, false))
+            .cloned();
+        let older = history_position
+            .and_then(|_| review_neighbor(&self.history, &dir, true))
+            .cloned();
+        let history_count = self.history.len();
+        let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
             (Some(app), Some(win)) if !win.is_empty() && win != app => {
@@ -4602,6 +4649,8 @@ impl Render for BundleReviewWindow {
         let c_send = self.coordinator.clone();
         let c_tab_sheet = self.coordinator.clone();
         let c_tab_frames = self.coordinator.clone();
+        let c_newer = self.coordinator.clone();
+        let c_older = self.coordinator.clone();
         let copy_dir = dir.clone();
         let send_dir = dir.clone();
 
@@ -4733,6 +4782,28 @@ impl Render for BundleReviewWindow {
                             )
                             .child(
                                 div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .when_some(newer, |d, path| {
+                                        d.child(action_button("review-newer", "← Newer", false)
+                                            .on_click(move |_, _, cx| {
+                                                open_review_capture(&c_newer, &path, cx);
+                                            }))
+                                    })
+                                    .when_some(history_position, |d, index| {
+                                        d.child(format!("{} / {}", index + 1, history_count))
+                                    })
+                                    .when_some(older, |d, path| {
+                                        d.child(action_button("review-older", "Older →", false)
+                                            .on_click(move |_, _, cx| {
+                                                open_review_capture(&c_older, &path, cx);
+                                            }))
+                                    }),
+                            )
+                            .child(
+                                div()
                                     .min_w_0()
                                     .truncate()
                                     .text_size(px(12.0))
@@ -4819,6 +4890,19 @@ impl Render for BundleReviewWindow {
                             ),
                     )
                     .children(platform::caption_buttons()),
+            )
+            .when_some(
+                review_notice,
+                |root, message| {
+                    root.child(
+                        div()
+                            .px_5()
+                            .py_2()
+                            .text_size(px(12.0))
+                            .text_color(rgb(TEXT_COLOR))
+                            .child(message),
+                    )
+                },
             )
             .child(
                 // Main Workspace: Stage on Left + Timeline Sidebar on Right
@@ -5366,6 +5450,24 @@ fn close_review_window(cx: &mut App) {
     }
 }
 
+fn open_review_capture(coord: &Entity<ScrawlCoordinator>, path: &std::path::Path, cx: &mut App) {
+    match crate::handoff::load_bundle(path) {
+        Ok(bundle) => {
+            coord.update(cx, |coord, cx| {
+                coord.mark_handled(path);
+                coord.set_review_bundle(bundle, None);
+                cx.notify();
+            });
+        }
+        Err(error) => {
+            coord.update(cx, |coord, cx| {
+                coord.review_status = Some(format!("Could not open capture: {error}"));
+                cx.notify();
+            });
+        }
+    }
+}
+
 /// Opens the review window in front with the keys. A menu bar (accessory) app isn't active when
 /// its menu is used, and the cooperative `NSApp.activate()` may leave the window behind the app
 /// in front, so it activates ignoring other apps once the window exists.
@@ -5403,8 +5505,28 @@ fn open_review_window(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
             platform::decorate_app_window(window);
             let focus = cx.focus_handle();
             window.focus(&focus);
-            cx.new(|cx| {
+            cx.new(|cx: &mut Context<BundleReviewWindow>| {
                 cx.observe(&coord_clone, |_, _, cx| cx.notify()).detach();
+                cx.spawn(async move |view, cx| {
+                    loop {
+                        let history = cx
+                            .background_executor()
+                            .spawn(async {
+                                crate::handoff::capture_history(
+                                    &crate::handoff::default_captures_dir(),
+                                )
+                            })
+                            .await;
+                        if view
+                            .update(cx, |review, cx| review.update_history(history, cx))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        cx.background_executor().timer(Duration::from_secs(2)).await;
+                    }
+                })
+                .detach();
                 BundleReviewWindow::new(coord_clone, focus)
             })
         },
@@ -5700,6 +5822,28 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_history_stops_at_both_ends() {
+        let paths = vec![PathBuf::from("new"), PathBuf::from("middle"), PathBuf::from("old")];
+        assert_eq!(review_neighbor(&paths, &paths[0], true), Some(&paths[1]));
+        assert_eq!(review_neighbor(&paths, &paths[1], false), Some(&paths[0]));
+        assert_eq!(review_neighbor(&paths, &paths[2], true), None);
+        assert_eq!(review_neighbor(&paths, &paths[0], false), None);
+        assert_eq!(review_neighbor(&paths, &PathBuf::from("elsewhere"), true), None);
+    }
+
+    #[test]
+    fn review_navigation_failure_takes_priority_over_history_scan_failure() {
+        assert_eq!(
+            review_notice(Some("scan failed"), Some("Could not open capture: removed")),
+            Some("Could not open capture: removed".to_owned())
+        );
+        assert_eq!(
+            review_notice(Some("scan failed"), Some("Ready")),
+            Some("Could not read captures: scan failed".to_owned())
+        );
+    }
 
     #[test]
     fn recording_controls_offer_whiteboard_by_default_on_linux() {

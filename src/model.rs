@@ -561,6 +561,7 @@ pub enum KeyframeReason {
     SceneChange,
     Speech,
     Initial,
+    Whiteboard,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

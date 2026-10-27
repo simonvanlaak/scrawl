@@ -4,6 +4,7 @@ use crate::sketch::{FreehandOptions, freehand_outline, slice_laser_window, smoot
 use std::path::Path;
 
 type Color = [u8; 4];
+const MAX_SHEET_TILES: usize = MAX_KEYFRAMES + 1;
 const RED: Color = [255, 59, 48, 255];
 const WHITE: Color = [255, 255, 255, 255];
 const TEXT: Color = [242, 242, 242, 255];
@@ -730,7 +731,7 @@ fn plan_contact_sheet_rows(aspects: &[f32]) -> Vec<std::ops::Range<usize>> {
     ) {
         if idx == n {
             let r_count = current.len() as f32;
-            let mut row_aspects = [0.0f32; MAX_KEYFRAMES];
+            let mut row_aspects = [0.0f32; MAX_SHEET_TILES];
             let mut inv_sum = 0.0f32;
             let mut log_row_sum = 0.0f32;
             for (r_idx, row) in current.iter().enumerate() {
@@ -743,8 +744,8 @@ fn plan_contact_sheet_rows(aspects: &[f32]) -> Vec<std::ops::Range<usize>> {
             let sheet_pen = (sheet_aspect / target_sheet).ln().powi(2) * 1.8;
 
             // Relative displayed area of frame `i` in row `r` is `a_i / A_r^2`.
-            let mut areas = [0.0f32; MAX_KEYFRAMES];
-            let mut log_areas = [0.0f32; MAX_KEYFRAMES];
+            let mut areas = [0.0f32; MAX_SHEET_TILES];
+            let mut log_areas = [0.0f32; MAX_SHEET_TILES];
             let mut log_area_sum = 0.0f32;
             for (r_idx, row) in current.iter().enumerate() {
                 let a_r = row_aspects[r_idx];
@@ -864,7 +865,8 @@ pub fn render_contact_sheet_for_duration(
     duration_ms: u64,
     annotated_frames: &[(Keyframe, RgbaFrame)],
 ) -> RgbaFrame {
-    let frames = &annotated_frames[..annotated_frames.len().min(MAX_KEYFRAMES)];
+    // Selection is capped at MAX_KEYFRAMES; a finished whiteboard may add one paper tile.
+    let frames = &annotated_frames[..annotated_frames.len().min(MAX_SHEET_TILES)];
     if frames.is_empty() {
         let mut sheet = solid(640, 360, SHEET_BG);
         sheet.t_ms = duration_ms;
@@ -2163,8 +2165,9 @@ mod tests {
     }
 
     #[test]
-    fn contact_sheets_lay_out_up_to_twelve_frames() {
-        for count in [1, 2, 3, 4, 7, 9, 12] {
+    fn contact_sheets_lay_out_up_to_thirteen_frames() {
+        // Twelve selected screen frames plus the finished whiteboard paper.
+        for count in [1, 2, 3, 4, 7, 9, 12, 13] {
             for size in [(1280, 800), (736, 1600), (930, 975)] {
                 let frames: Vec<_> = (1..=count)
                     .map(|i| {

@@ -211,6 +211,36 @@ fn run(command: &str) -> Result<()> {
     }
 }
 
+/// A normal GPUI window is tiled by Hyprland. Float only the whiteboard, not Scrawl's
+/// picker or capsule, so the browser can stay beside a movable, resizable paper window.
+pub fn float_whiteboard() -> Result<()> {
+    let clients: Vec<serde_json::Value> = serde_json::from_str(&request("j/clients")?)?;
+    let Some(board) = clients.iter().find(|client| {
+        client["title"].as_str() == Some("Scrawl Whiteboard")
+            && client["pid"].as_u64() == Some(u64::from(std::process::id()))
+    }) else {
+        bail!("Whiteboard window not mapped yet");
+    };
+    if board["floating"].as_bool() == Some(true) {
+        return Ok(());
+    }
+    let address = board["address"].as_str().context("Whiteboard window has no address")?;
+    match syntax()? {
+        Syntax::Lua => run(&format!(
+            "eval local w = hl.get_windows({{ title = 'Scrawl Whiteboard' }})[1]; \
+             assert(w and w.address == '{}', 'Whiteboard window changed'); \
+             hl.dispatch(hl.dsp.window.float({{ action = 'set', window = w }})); \
+             hl.dispatch(hl.dsp.window.resize({{ x = 560, y = 460, window = w }}))",
+            address
+        ))?,
+        Syntax::Hyprlang => {
+            run(&format!("dispatch setfloating address:{address}"))?;
+            run(&format!("dispatch resizewindowpixel exact 560 460,address:{address}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn unbind(carbon_modifiers: u32, key: &str) -> Result<()> {
     let mask = modmask(carbon_modifiers);
     match syntax()? {

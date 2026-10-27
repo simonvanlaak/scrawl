@@ -838,6 +838,15 @@ pub fn summary_markdown_with(
         let texts = crate::agent_context::keyframe_texts(bundle);
         let mut shown_screen = start_screen;
         for (frame, text) in bundle.keyframes.iter().zip(texts) {
+            if frame.reason == KeyframeReason::Whiteboard {
+                out.push_str(&format!(
+                    "- #{} ({}) {}\n",
+                    frame.index,
+                    format_clock(frame.t),
+                    frame.event
+                ));
+                continue;
+            }
             let screen = bundle.screen_at(frame.t);
             let screen_marker = match screen {
                 Some(name) if screen != shown_screen => format!(" ⟨{}⟩", context_value(name)),

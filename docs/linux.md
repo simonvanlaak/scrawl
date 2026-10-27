@@ -61,6 +61,20 @@ XWayland sees the pointer only over X11 windows and keeps the last place it saw 
 
 The clipboard goes through `wl-copy`, as on KDE Wayland.
 
+With `"experiments": {"whiteboard": true}`, the recording controls offer **Whiteboard**.
+It opens a separate native window over the ongoing display capture: draw without holding ⇧,
+use Undo or Clear, and close/reopen it without losing the current session's strokes. Resizing
+reveals more of the fixed paper instead of scaling marks. On Hyprland the window is floated
+after it maps so it can move and resize without tiling the browser; the recording remains
+one continuous screen-and-voice session. The board appears in the captured video like any
+other window. The experiment is off by default.
+At finish, a nonempty board also gets its own last contact-sheet tile: the final strokes
+on white paper, cropped to their bounds for readability even if the window was closed or
+small when recording stopped. The numbered tile and stroke count appear in `summary.md`;
+the screen keyframes still show where the board was beside the browser. Clear removes
+the drawing from this final tile. An ordinary clipboard copy is text only; use Paste
+to attach the contact sheet and text to an agent composer.
+
 `autoPasteDraft` is an off-by-default shortcut experiment. On a Hyprland Wayland recording started by the record shortcut, it remembers the exact focused window before opening Scrawl's UI. It preflights receiver support before changing the completion path: a missing original window or unsupported composer keeps normal routing and Copy. With a supported receiver, after a complete bundle exists it tries the guarded image-first handoff only if that same window is still focused; it never raises another window or presses Send. It consumes the attempt once and, only after successful preflight, skips dev-site/agent routing and the normal completion-time clipboard overwrite. The completed pill and a notification report the manual `contact-sheet.png` + `summary.md` fallback when it skips. The current `draftHandoff` Linux receiver has no verified T3 editor/attachment observer, so **the experiment currently refuses before any paste**; do not enable it as a working chat integration. Completing #3's real unsent composer check and editor-level identity is required before claiming #6's X1 acceptance.
 
 Not done: a click's position still comes from XWayland (see above; `j/cursorpos` would answer it), and a Region capture of the second monitor failed in testing with a PipeWire `not-negotiated` error while Display on it and Region on the first monitor worked.

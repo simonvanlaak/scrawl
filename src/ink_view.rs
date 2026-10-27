@@ -21,6 +21,9 @@ const TAIL_MS: u64 = 420;
 #[derive(Clone, Copy)]
 pub(crate) struct Placement {
     pub rect: [f64; 4],
+    // Windows maps physical screen points with the monitor scale; Linux uses GPUI's
+    // actual window scale, which can differ from the monitor's reported scale.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub scale: f32,
 }
 
@@ -67,7 +70,7 @@ impl OverlayView {
         }
     }
 
-    fn scene(&self, screen: [f32; 2]) -> Option<Scene> {
+    fn scene(&self, screen: [f32; 2], viewport_scale: f32) -> Option<Scene> {
         let t = &self.telemetry;
         let active = t.active.load(Ordering::Acquire);
         let selecting = t.selecting.load(Ordering::Acquire);
@@ -96,6 +99,11 @@ impl OverlayView {
             .placement
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // XWayland's GPUI scale can differ from the monitor's reported scale.
+        // Screen coordinates are physical pixels, so use the window's actual paint scale.
+        #[cfg(target_os = "linux")]
+        let k = screen_to_view_scale(viewport_scale);
+        #[cfg(target_os = "windows")]
         let k = 1.0 / placement.scale;
         let [ox, oy] = [placement.rect[0] as f32, placement.rect[1] as f32];
         let local = |x: f32, y: f32| [(x - ox) * k, (y - oy) * k];
@@ -231,6 +239,11 @@ impl OverlayView {
             screen,
         })
     }
+}
+
+#[cfg(target_os = "linux")]
+fn screen_to_view_scale(viewport_scale: f32) -> f32 {
+    1.0 / viewport_scale
 }
 
 fn pt(p: [f32; 2], origin: Point<Pixels>) -> Point<Pixels> {
@@ -460,7 +473,7 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, window: &mut Window) {
 impl Render for OverlayView {
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let size = window.viewport_size();
-        let scene = self.scene([f32::from(size.width), f32::from(size.height)]);
+        let scene = self.scene([f32::from(size.width), f32::from(size.height)], window.scale_factor());
         // Telemetry changes on other threads; follow it every frame while the overlay is up.
         window.request_animation_frame();
         canvas(
@@ -472,5 +485,20 @@ impl Render for OverlayView {
             },
         )
         .size_full()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use super::screen_to_view_scale;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fractional_xwayland_scale_keeps_ink_under_the_physical_cursor() {
+        let logical_x = 360.0 * screen_to_view_scale(1.083_333_4);
+        assert!((logical_x * 1.083_333_4 - 360.0).abs() < 0.001);
+        // Monitor scale must not be applied again if GPUI already paints at that scale.
+        assert_eq!(screen_to_view_scale(2.0), 0.5);
     }
 }

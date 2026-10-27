@@ -527,19 +527,14 @@ fn keycode(keysym: u32) -> Option<u8> {
 /// Pastes into the app in front: Ctrl+V, or Ctrl+Shift+V in a terminal (Ctrl+V is a control
 /// character there). On Wayland through the RemoteDesktop portal, which asks once; on X11
 /// through XTEST. A Ctrl the user still holds is left alone.
-pub fn post_synthetic_cmd_v() {
+pub fn try_post_synthetic_cmd_v() -> anyhow::Result<()> {
     let shift = super::is_frontmost_terminal();
     if linux::wayland_session() {
-        if let Err(error) = linux::portal::send_paste(shift) {
-            scrawl_log(format!(
-                "paste: the RemoteDesktop portal refused: {error:#}"
-            ));
-        }
-        return;
+        return linux::portal::send_paste(shift)
+            .map_err(|error| anyhow::anyhow!("the RemoteDesktop portal refused: {error:#}"));
     }
     let (Some(ctrl), Some(v)) = (keycode(XK_CONTROL_L), keycode(XK_V)) else {
-        scrawl_log("paste: no key types Ctrl or V");
-        return;
+        anyhow::bail!("no key types Ctrl or V");
     };
     let held = held_now().mods;
     let mut events = Vec::new();
@@ -558,8 +553,9 @@ pub fn post_synthetic_cmd_v() {
         events.push((3, ctrl));
     }
     if !xtest(&events) {
-        scrawl_log("paste: XTEST refused the keystroke");
+        anyhow::bail!("XTEST refused the keystroke");
     }
+    Ok(())
 }
 
 /// A left click at a global point (X11 only: Wayland lets no app move the pointer).

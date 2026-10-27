@@ -297,7 +297,10 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     crate::capture::wait_for_modifiers_released(350);
 
     #[cfg(target_os = "linux")]
-    if experiment("draftHandoff") {
+    if experiment("draftHandoff")
+        && crate::linux::hyprland::running()
+        && crate::linux::wayland_session()
+    {
         return run_draft_handoff(
             &image,
             &summary,
@@ -347,6 +350,14 @@ pub(crate) fn paste_bundle_into_original_draft(
     run_draft_handoff_at(
         &image, &summary, &sheet_path, false, original, &mut LinuxDraftHandoff,
     )
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn draft_receiver_preflight(
+    original: &crate::linux::hyprland::FocusedWindow,
+) -> Result<()> {
+    LinuxDraftHandoff.supported(original)
+        .context("Use the normal Copy and routing path for this composer")
 }
 
 fn paste_synthetic_checked() -> Result<()> {
@@ -1904,6 +1915,10 @@ mod tests {
             &target, &mut LinuxDraftHandoff,
         ).unwrap_err();
         assert!(format!("{error:#}").contains("No verified attachment observer"));
+        assert!(
+            format!("{:#}", draft_receiver_preflight(&target).unwrap_err())
+                .contains("No verified attachment observer")
+        );
     }
 
     #[cfg(target_os = "linux")]

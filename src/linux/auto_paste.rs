@@ -21,6 +21,16 @@ impl Attempt {
     pub fn take(&mut self) -> Option<Result<FocusedWindow, String>> {
         self.0.take()
     }
+
+    /// Refuse an unsupported receiver before finish suppresses routing or normal Copy.
+    pub fn take_ready(
+        &mut self,
+        preflight: impl FnOnce(&FocusedWindow) -> Result<(), String>,
+    ) -> Option<Result<FocusedWindow, String>> {
+        self.take().map(|target| target.and_then(|window| {
+            preflight(&window).map(|()| window)
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -52,5 +62,27 @@ mod tests {
         other = original.clone();
         other.pid = 43;
         assert!(!window_matches(&original, &other));
+    }
+
+    #[test]
+    fn failed_target_or_receiver_keeps_normal_copy_and_routing() {
+        let original = FocusedWindow {
+            address: "0xabc".into(), pid: 42, class: "com.t3tools.T3Code".into(),
+        };
+        let mut missing = Attempt::new(Err("No original window".into()));
+        let result = missing.take_ready(|_| panic!("no target to preflight"));
+        assert!(!result.as_ref().is_some_and(Result::is_ok));
+        assert_eq!(result.unwrap().unwrap_err(), "No original window");
+
+        let mut unsupported = Attempt::new(Ok(original.clone()));
+        let result = unsupported.take_ready(|_| Err("No attachment observer".into()));
+        assert!(!result.as_ref().is_some_and(Result::is_ok));
+        assert_eq!(result.unwrap().unwrap_err(), "No attachment observer");
+        assert!(unsupported.take_ready(|_| Ok(())).is_none());
+
+        let mut supported = Attempt::new(Ok(original.clone()));
+        let result = supported.take_ready(|_| Ok(()));
+        assert!(result.as_ref().is_some_and(Result::is_ok));
+        assert_eq!(result.unwrap().unwrap(), original);
     }
 }

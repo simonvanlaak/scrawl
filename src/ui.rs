@@ -2810,9 +2810,14 @@ impl ScrawlCoordinator {
             return;
         };
         #[cfg(target_os = "linux")]
-        let auto_paste = rec.auto_paste.and_then(|mut attempt| attempt.take());
+        let auto_paste = rec.auto_paste.and_then(|mut attempt| {
+            attempt.take_ready(|original| {
+                crate::handoff::draft_receiver_preflight(original)
+                    .map_err(|error| format!("{error:#}"))
+            })
+        });
         #[cfg(target_os = "linux")]
-        let auto_active = auto_paste.is_some();
+        let auto_active = auto_paste.as_ref().is_some_and(Result::is_ok);
         #[cfg(not(target_os = "linux"))]
         let auto_active = false;
         let (events, strokes) = self.telemetry.finish_session();

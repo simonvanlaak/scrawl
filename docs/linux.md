@@ -61,13 +61,13 @@ XWayland sees the pointer only over X11 windows and keeps the last place it saw 
 
 The clipboard goes through `wl-copy`, as on KDE Wayland.
 
-With `"experiments": {"whiteboard": true}`, the recording controls offer **Whiteboard**.
+On Linux, the recording controls offer **Whiteboard** by default.
 It opens a separate native window over the ongoing display capture: draw without holding ⇧,
 use Undo or Clear, and close/reopen it without losing the current session's strokes. Resizing
 reveals more of the fixed paper instead of scaling marks. On Hyprland the window is floated
 after it maps so it can move and resize without tiling the browser; the recording remains
 one continuous screen-and-voice session. The board appears in the captured video like any
-other window. The experiment is off by default.
+other window.
 At finish, a nonempty board also gets its own last contact-sheet tile: the final strokes
 on white paper, cropped to their bounds for readability even if the window was closed or
 small when recording stopped. The numbered tile and stroke count appear in `summary.md`;

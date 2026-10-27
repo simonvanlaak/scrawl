@@ -151,6 +151,7 @@ struct SettingsState: Decodable, Equatable {
   var version = "0.3.2"
   var login = SettingsLogin()
   var autoSend = true
+  var remotePhoneIngest = false
   var shortcuts: [SettingsShortcut] = [
     SettingsShortcut(),
     SettingsShortcut(kind: "paste", title: "Paste last capture", label: "⌥⇧V", key: "V", clearable: true),
@@ -919,6 +920,11 @@ struct SettingsView: View {
         SettingsRow(title: "Send dev-site captures to OpenCode") {
           SettingsSwitch(on: state.autoSend) { model.set("autoSend", $0) }
         }
+        SettingsSeparator()
+        SettingsRow(title: "Allow phone uploads from other devices") {
+          SettingsSwitch(on: state.remotePhoneIngest) { model.set("remotePhoneIngest", $0) }
+        }
+        SettingsCaption(text: "Off keeps the ingest port on this computer only. Cabled iPhone capture still works.")
         SettingsSeparator()
         SettingsRow(title: "Lower other audio while recording") {
           SettingsSwitch(on: state.lowerPlayback) { model.set("lowerPlayback", $0) }

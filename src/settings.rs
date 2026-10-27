@@ -675,6 +675,7 @@ pub struct View {
     pub version: String,
     pub login: LoginView,
     pub auto_send: bool,
+    pub remote_phone_ingest: bool,
     pub shortcuts: Vec<ShortcutView>,
     pub microphone: MicrophoneView,
     pub transcriber: TranscriberView,
@@ -1016,7 +1017,7 @@ fn shortcut_view(
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum Action {
-    /// A settings control: `launchAtLogin`, `autoSend`, `videoExport`, `lowerPlayback` (bool),
+    /// A settings control: `launchAtLogin`, `autoSend`, `remotePhoneIngest`, `videoExport`, `lowerPlayback` (bool),
     /// `playbackLevel` (u8), `microphone` ("default" or a device id), `transcriber`
     /// ("apple"/"hex"/"command"), `hexModel` (an id), `hexLanguage` (a code), `appleLocale`
     /// (a locale id or "auto"), `retention` (a preset id).
@@ -1251,6 +1252,13 @@ impl Panel {
                     return Effect::OpenLoginItems;
                 }
             }
+            ("remotePhoneIngest", serde_json::Value::Bool(on)) => {
+                if let Err(error) = crate::phone::change_remote_phone_setting(|| {
+                    crate::handoff::set_config_value_in(&path, key, (*on).into())
+                }) {
+                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                }
+            }
             ("autoSend" | "videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
                 write(key, (*on).into())
             }
@@ -1392,6 +1400,7 @@ impl Panel {
                 needs_approval: login == LoginItem::NeedsApproval,
             },
             auto_send: config.auto_send.unwrap_or(true),
+            remote_phone_ingest: config.remote_phone_ingest.unwrap_or(false),
             shortcuts: ShortcutKind::ALL
                 .into_iter()
                 .map(|kind| {
@@ -2386,6 +2395,7 @@ mod tests {
             )
         };
         assert!(panel.view(&host).auto_send);
+        assert!(!panel.view(&host).remote_phone_ingest);
         assert!(!panel.view(&host).lower_playback);
         assert_eq!(panel.view(&host).playback_level, 20);
         set(&mut panel, &mut host, "lowerPlayback", true.into());
@@ -2396,6 +2406,7 @@ mod tests {
         assert!(Panel::default().view(&host).lower_playback);
         assert_eq!(Panel::default().view(&host).playback_level, 35);
         set(&mut panel, &mut host, "autoSend", false.into());
+        set(&mut panel, &mut host, "remotePhoneIngest", true.into());
         set(&mut panel, &mut host, "videoExport", true.into());
         set(&mut panel, &mut host, "transcriber", "hex".into());
         assert_eq!(
@@ -2405,6 +2416,7 @@ mod tests {
         set(&mut panel, &mut host, "transcriber", "nonsense".into());
         let view = panel.view(&host);
         assert!(!view.auto_send && view.video_export);
+        assert!(view.remote_phone_ingest);
         assert_eq!(view.retention.preset, Some("month"));
         assert_eq!(
             view.retention.note,
@@ -2416,6 +2428,7 @@ mod tests {
         let config = read_json(&host.path);
         assert_eq!(config["transcriber"], "hex");
         assert_eq!(config["ingestToken"], "secret");
+        assert_eq!(config["remotePhoneIngest"], true);
         set(&mut panel, &mut host, "hexModel", "parakeet".into());
         assert_eq!(read_json(&host.path)["hexModel"], "parakeet");
         assert_eq!(panel.view(&host).transcriber.language, "en");

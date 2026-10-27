@@ -118,9 +118,9 @@
       "group": "record",
       "name": "Floating whiteboard",
       "says": "Open a movable, resizable paper window from the recording controls while the screen capture continues; draw, undo, clear, and close or reopen without losing strokes. The final drawing gets a dedicated contact-sheet tile and a numbered summary line.",
-      "status": "experiment:whiteboard",
+      "status": "main",
       "platforms": ["linux"],
-      "note": "The board is captured as a window in the video and its final state is a paper tile, not a separate desktop-ink mark. Off by default.",
+      "note": "The board is captured as a window in the video and its final state is a paper tile, not a separate desktop-ink mark. Available from the recording controls by default on Linux.",
       "docs": ["docs/linux.md"]
     },
     {

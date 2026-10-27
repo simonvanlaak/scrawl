@@ -306,7 +306,7 @@ fn recording_trail_widths(window: &Window, chips: bool, iphone: bool) -> Vec<f32
 }
 
 fn whiteboard_enabled() -> bool {
-    cfg!(target_os = "linux") && crate::handoff::experiment("whiteboard")
+    cfg!(target_os = "linux")
 }
 
 /// Trace names for a Recording capsule's trailing group, with each item's opacity.
@@ -5700,6 +5700,16 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_controls_offer_whiteboard_by_default_on_linux() {
+        assert_eq!(whiteboard_enabled(), cfg!(target_os = "linux"));
+        let controls = trail_keys(false, false, &[], "hud-");
+        assert_eq!(
+            controls.iter().any(|item| item.as_ref().is_some_and(|(name, _)| name == "hud-whiteboard")),
+            cfg!(target_os = "linux")
+        );
+    }
 
     #[test]
     fn island_geometry_is_concentric() {

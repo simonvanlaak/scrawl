@@ -302,6 +302,15 @@
       "docs": ["README.md#usage"]
     },
     {
+      "id": "capture-history",
+      "group": "finish",
+      "name": "Browse older captures",
+      "says": "The review window steps through completed captures from newest to oldest without leaving the window.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/capture.md"]
+    },
+    {
       "id": "recover",
       "group": "finish",
       "name": "Recover unbuilt captures",

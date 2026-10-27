@@ -652,6 +652,9 @@ pub struct Config {
     pub agent_opencode: Option<String>,
     #[serde(default)]
     pub ingest_token: Option<String>,
+    /// Whether the GUI's ScrawlKit listener accepts other devices (absent: loopback only).
+    #[serde(default)]
+    pub remote_phone_ingest: Option<bool>,
     #[serde(default, alias = "tetherApps")]
     pub usb_apps: Vec<String>,
     /// `false` turns Screen-capture auto-crop off; an object overrides its settings.

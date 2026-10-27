@@ -1238,10 +1238,10 @@ pub fn format_setup_link(
     Ok(format!("{scheme}://scrawl?{}", query.join("&")))
 }
 
-/// Starts Scrawl's background ScrawlKit ingest inside the GUI app: an HTTP server on
-/// `0.0.0.0:47777` the phone uploads to, and a cabled-iPhone `devicectl` watcher for when the
-/// network can't reach the Mac. Each recording becomes a `.scrawl` bundle, lands on the clipboard
-/// and is queued into the OpenCode session matching the app.
+/// Starts Scrawl's background ScrawlKit ingest inside the GUI app: a loopback HTTP server
+/// on port 47777 (all IPv4 interfaces only when remote phone ingest is enabled), and a
+/// cabled-iPhone `devicectl` watcher for when the network can't reach the Mac. Each recording
+/// becomes a `.scrawl` bundle, lands on the clipboard and is queued into the matching session.
 pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
     if let Err(err) = crate::handoff::ensure_ingest_token() {
         scrawl_log(format!("ingest token setup failed: {err:#}"));
@@ -1263,7 +1263,7 @@ pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
     let _ = std::thread::Builder::new()
         .name("scrawl-ingest-http".into())
         .spawn(move || {
-            if let Err(err) = serve_http(DEFAULT_INGEST_PORT, http_cfg) {
+            if let Err(err) = serve_http(DEFAULT_INGEST_PORT, http_cfg, true) {
                 scrawl_log(format!("ingest server: {err:#}"));
             }
         });
@@ -1284,36 +1284,316 @@ pub fn run_ingest_server(port: u16, usb: bool, no_opencode: bool) -> Result<()> 
     if usb {
         spawn_usb_poller(config.clone());
     }
-    serve_http(port, config)
+    serve_http(port, config, false)
 }
 
-fn serve_http(port: u16, config: IngestConfig) -> Result<()> {
-    let addr = format!("0.0.0.0:{port}");
+#[derive(Default)]
+struct RemoteClients {
+    generation: std::sync::atomic::AtomicU64,
+    next_id: std::sync::atomic::AtomicU64,
+    streams: Mutex<BTreeMap<u64, std::net::TcpStream>>,
+}
+
+impl RemoteClients {
+    fn register(self: &Arc<Self>, stream: &std::net::TcpStream) -> Result<(RemoteClient, u64)> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut streams = self.streams.lock().unwrap();
+        let epoch = self.generation.load(SeqCst);
+        let id = self.next_id.fetch_add(1, SeqCst);
+        streams.insert(id, stream.try_clone()?);
+        Ok((RemoteClient { clients: Arc::clone(self), id }, epoch))
+    }
+
+    fn revoke(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let streams = self.streams.lock().unwrap();
+        self.generation.fetch_add(1, SeqCst);
+        for stream in streams.values() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    fn effect<T>(
+        &self,
+        epoch: u64,
+        enabled: impl FnOnce() -> bool,
+        action: impl FnOnce() -> T,
+    ) -> Result<T> {
+        let _setting = REMOTE_SETTING_GATE.lock().unwrap();
+        let _streams = self.streams.lock().unwrap();
+        ensure!(
+            self.generation.load(std::sync::atomic::Ordering::SeqCst) == epoch && enabled(),
+            "Remote phone ingest is off"
+        );
+        Ok(action())
+    }
+}
+
+struct RemoteClient {
+    clients: Arc<RemoteClients>,
+    id: u64,
+}
+
+// Settings and the listener run in this same process. Count every switch
+// attempt before writing, so a quick off/on cannot disappear between polls.
+static REMOTE_SETTING_CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static REMOTE_SETTING_GATE: Mutex<()> = Mutex::new(());
+
+pub(crate) fn change_remote_phone_setting(write: impl FnOnce() -> Result<()>) -> Result<()> {
+    let _setting = REMOTE_SETTING_GATE.lock().unwrap();
+    REMOTE_SETTING_CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    write()
+}
+
+#[cfg(test)]
+fn remote_phone_setting_changed() {
+    change_remote_phone_setting(|| Ok(())).unwrap();
+}
+
+fn revoke_on_setting_change(
+    clients: &RemoteClients,
+    observed: &mut u64,
+    listener: &mut Option<std::net::TcpListener>,
+    bound: &mut Option<bool>,
+    last_wanted: &mut Option<bool>,
+) {
+    let current = REMOTE_SETTING_CHANGES.load(std::sync::atomic::Ordering::SeqCst);
+    if current != *observed {
+        clients.revoke();
+        // Also discard connections still waiting in the kernel's accept queue.
+        // Rebind even when an off/on pair ended at the old setting.
+        *listener = None;
+        *bound = None;
+        *last_wanted = None;
+        *observed = current;
+    }
+}
+
+impl Drop for RemoteClient {
+    fn drop(&mut self) {
+        self.clients.streams.lock().unwrap().remove(&self.id);
+    }
+}
+
+pub(crate) trait IngestPolicy {
+    fn allowed(&self) -> bool;
+
+    fn effect<T>(&self, action: impl FnOnce() -> T) -> Result<T> {
+        ensure!(self.allowed(), "Remote phone ingest is off");
+        Ok(action())
+    }
+}
+
+impl<F: Fn() -> bool> IngestPolicy for F {
+    fn allowed(&self) -> bool {
+        self()
+    }
+}
+
+struct ListenerPolicy<'a> {
+    managed: bool,
+    clients: &'a RemoteClients,
+    epoch: Option<u64>,
+    setting_epoch: u64,
+}
+
+impl IngestPolicy for ListenerPolicy<'_> {
+    fn allowed(&self) -> bool {
+        !self.managed
+            || self.epoch.is_none_or(|epoch| {
+                self.clients.generation.load(std::sync::atomic::Ordering::SeqCst) == epoch
+                    && REMOTE_SETTING_CHANGES.load(std::sync::atomic::Ordering::SeqCst)
+                        == self.setting_epoch
+                    && crate::handoff::load_config_from(&crate::handoff::default_config_path())
+                        .remote_phone_ingest
+                        .unwrap_or(false)
+            })
+    }
+
+    fn effect<T>(&self, action: impl FnOnce() -> T) -> Result<T> {
+        if self.managed && let Some(epoch) = self.epoch {
+            // Revocation takes this same lock, so switch-off cannot complete
+            // between permission check and a short registry/staging mutation.
+            self.clients.effect(epoch, || self.allowed(), action)
+        } else {
+            Ok(action())
+        }
+    }
+}
+
+fn bind_ingest_listener(port: u16, remote: bool) -> Result<std::net::TcpListener> {
+    let host = if remote { "0.0.0.0" } else { "127.0.0.1" };
+    let addr = format!("{host}:{port}");
     let listener = std::net::TcpListener::bind(&addr)
-        .with_context(|| format!("port {port} already in use"))?;
+        .with_context(|| format!("could not bind ingest to {addr}"))?;
+    listener.set_nonblocking(true)?;
     scrawl_log(format!("ingest server listening on {addr}"));
+    Ok(listener)
+}
+
+fn rebind_ingest_listener(
+    port: u16,
+    listener: &mut Option<std::net::TcpListener>,
+    bound: &mut Option<bool>,
+    wanted: bool,
+) -> Result<()> {
+    rebind_ingest_listener_with(port, listener, bound, wanted, bind_ingest_listener)
+}
+
+fn rebind_ingest_listener_with(
+    port: u16,
+    listener: &mut Option<std::net::TcpListener>,
+    bound: &mut Option<bool>,
+    wanted: bool,
+    mut bind: impl FnMut(u16, bool) -> Result<std::net::TcpListener>,
+) -> Result<()> {
+    if *bound == Some(wanted) {
+        return Ok(());
+    }
+    // Drop the all-interfaces socket first. A failed local bind must not
+    // leave the remote listener alive.
+    *listener = None;
+    *bound = None;
+    match bind(port, wanted) {
+        Ok(socket) => {
+            *listener = Some(socket);
+            *bound = Some(wanted);
+            Ok(())
+        }
+        Err(err) => {
+            // Enabling remote access must not also break local dev-page routing.
+            // Disabling remote access fails closed if even loopback cannot bind.
+            if wanted && let Ok(local) = bind(port, false) {
+                *listener = Some(local);
+                *bound = Some(false);
+            }
+            Err(err)
+        }
+    }
+}
+
+fn refresh_ingest_listener_with(
+    port: u16,
+    listener: &mut Option<std::net::TcpListener>,
+    bound: &mut Option<bool>,
+    wanted: bool,
+    last_wanted: &mut Option<bool>,
+    bind: impl FnMut(u16, bool) -> Result<std::net::TcpListener>,
+) -> Result<()> {
+    // A failed enable leaves loopback in place until the setting changes.
+    if *last_wanted == Some(wanted) && listener.is_some() {
+        return Ok(());
+    }
+    *last_wanted = Some(wanted);
+    rebind_ingest_listener_with(port, listener, bound, wanted, bind)
+}
+
+fn accept_ingest_connection(
+    listener: &std::net::TcpListener,
+    managed: bool,
+    observed_setting: u64,
+) -> std::io::Result<Option<std::net::TcpStream>> {
+    let (stream, _) = listener.accept()?;
+    // A switch may have changed while the listener slept or while accept ran.
+    // Never grant an old queued socket the *new* setting epoch.
+    if managed
+        && REMOTE_SETTING_CHANGES.load(std::sync::atomic::Ordering::SeqCst) != observed_setting
+    {
+        return Ok(None);
+    }
+    Ok(Some(stream))
+}
+
+/// Keep local dev-page routing on loopback when remote phone ingest is off.
+/// `scrawl serve` explicitly opts into a remote listener independently of Settings.
+fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
+    let remote_enabled = || {
+        !managed
+            || crate::handoff::load_config_from(&crate::handoff::default_config_path())
+                .remote_phone_ingest
+                .unwrap_or(false)
+    };
+    let mut observed_setting = REMOTE_SETTING_CHANGES.load(std::sync::atomic::Ordering::SeqCst);
+    let initial = remote_enabled();
+    let mut bound = None;
+    let mut listener = None;
+    let mut last_wanted = None;
+    let initial_bind = refresh_ingest_listener_with(
+        port, &mut listener, &mut bound, initial, &mut last_wanted, bind_ingest_listener,
+    );
+    if let Err(err) = initial_bind {
+        if listener.is_none() {
+            return Err(err);
+        }
+        scrawl_log(format!("ingest server: {err:#}; using loopback"));
+    }
     crate::web::set_serving();
     // Only the process that owns the port retries deliveries, so two never race over a bundle.
     if config.route_opencode {
         crate::delivery::spawn_retries(config.captures_dir(), config.hooks.forward, mark_sent);
     }
     let connections = crate::ingest_http::Connections::default();
-    for stream in listener.incoming().flatten() {
+    let clients = Arc::new(RemoteClients::default());
+    loop {
+        if managed {
+            revoke_on_setting_change(
+                &clients, &mut observed_setting, &mut listener, &mut bound, &mut last_wanted,
+            );
+        }
+        let wanted = remote_enabled();
+        if managed && !wanted && bound == Some(true) {
+            // Also cover direct config edits that did not go through Settings.
+            clients.revoke();
+        }
+        // If an all-interface bind failed, leave the fallback loopback socket
+        // undisturbed. A fresh off/on switch retries the remote bind.
+        if let Err(err) = refresh_ingest_listener_with(
+            port, &mut listener, &mut bound, wanted, &mut last_wanted, bind_ingest_listener,
+        ) {
+            scrawl_log(format!("ingest server: {err:#}; retry after setting changes"));
+        }
+        let Some(current) = listener.as_ref() else {
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        };
+        let setting_epoch = observed_setting;
+        let stream = match accept_ingest_connection(current, managed, setting_epoch) {
+            Ok(Some(stream)) => stream,
+            Ok(None) => continue,
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Err(err) => {
+                scrawl_log(format!("ingest accept: {err}"));
+                continue;
+            }
+        };
+        if managed && !remote_enabled() && !stream.peer_addr()?.ip().is_loopback() {
+            continue;
+        }
         let Some(permit) = connections.acquire() else {
             drop(stream);
             continue;
         };
+        let remote_client = if managed && !stream.peer_addr()?.ip().is_loopback() {
+            Some(clients.register(&stream)?)
+        } else {
+            None
+        };
         let cfg = config.clone();
+        let clients = Arc::clone(&clients);
         let _ = std::thread::Builder::new()
             .name("scrawl-ingest-client".into())
             .spawn(move || {
                 let _permit = permit;
-                if let Err(err) = handle_ingest_connection(stream, &cfg) {
+                let epoch = remote_client.as_ref().map(|(_, epoch)| *epoch);
+                if let Err(err) = handle_ingest_connection(stream, &cfg, managed, &clients, epoch, setting_epoch) {
                     scrawl_log(format!("ingest http: {err:#}"));
                 }
+                drop(remote_client);
             });
     }
-    Ok(())
 }
 
 fn spawn_usb_poller(config: IngestConfig) {
@@ -1560,17 +1840,34 @@ fn http_unauthorized(stream: &mut std::net::TcpStream) {
 fn handle_ingest_connection(
     stream: std::net::TcpStream,
     config: &IngestConfig,
+    managed: bool,
+    clients: &RemoteClients,
+    epoch: Option<u64>,
+    setting_epoch: u64,
 ) -> Result<()> {
     let expected_token = crate::handoff::ensure_ingest_token()?;
-    handle_ingest_connection_with_token(stream, &expected_token, config)
+    handle_ingest_connection_with_policy(
+        stream, &expected_token, config, ListenerPolicy { managed, clients, epoch, setting_epoch },
+    )
 }
 
+#[cfg(test)]
 fn handle_ingest_connection_with_token(
-    mut stream: std::net::TcpStream,
+    stream: std::net::TcpStream,
     expected_token: &str,
     config: &IngestConfig,
 ) -> Result<()> {
+    handle_ingest_connection_with_policy(stream, expected_token, config, || true)
+}
+
+fn handle_ingest_connection_with_policy(
+    mut stream: std::net::TcpStream,
+    expected_token: &str,
+    config: &IngestConfig,
+    policy: impl IngestPolicy,
+) -> Result<()> {
     use std::io::Read;
+    ensure!(policy.allowed(), "Remote phone ingest is off");
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
 
@@ -1579,8 +1876,9 @@ fn handle_ingest_connection_with_token(
     else {
         return Ok(());
     };
+    ensure!(policy.allowed(), "Remote phone ingest is off");
     // The dev-page SDK's routes check their own access (loopback pages, or the token).
-    if crate::web::handle(&mut stream, &header, expected_token)? {
+    if crate::web::handle_with_policy(&mut stream, &header, expected_token, &policy)? {
         return Ok(());
     }
     let authorized = bearer_token(&header)
@@ -1615,15 +1913,19 @@ fn handle_ingest_connection_with_token(
     );
     let mut payload = vec![0_u8; content_len];
     stream.read_exact(&mut payload)?;
+    // A client accepted before the switch changed must not start an upload after it was disabled.
+    ensure!(policy.allowed(), "Remote phone ingest is off");
 
     let json_len = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
     ensure!(4 + json_len < payload.len(), "Invalid framed payload");
     let json_bytes = &payload[4..4 + json_len];
     let timeline: Timeline = serde_json::from_slice(json_bytes).unwrap_or_default();
     let staging = std::env::temp_dir().join(format!("scrawl-ingest-{}", crate::make_bundle_id()));
-    std::fs::create_dir_all(&staging)?;
     let timeline_path = staging.join("timeline.json");
     let movie_path = staging.join("recording.mp4");
+    // Creating the staging directory admits this upload. Its file writes and
+    // bundle build may finish after Settings switches remote access off.
+    policy.effect(|| std::fs::create_dir_all(&staging))??;
     std::fs::write(&timeline_path, json_bytes)?;
     std::fs::write(&movie_path, &payload[4 + json_len..])?;
     drop(payload);
@@ -2051,6 +2353,300 @@ mod tests {
             token
         ));
         assert!(!constant_time_eq(&format!("{token}extra"), token));
+    }
+
+    #[test]
+    fn remote_phone_ingest_is_off_by_default_and_binding_follows_setting() {
+        let mut config = crate::handoff::Config::default();
+        let mut bound = None;
+        let mut listener = None;
+        rebind_ingest_listener(
+            0,
+            &mut listener,
+            &mut bound,
+            config.remote_phone_ingest.unwrap_or(false),
+        )
+        .unwrap();
+        assert!(listener
+            .as_ref()
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .ip()
+            .is_loopback());
+        let port = listener.as_ref().unwrap().local_addr().unwrap().port();
+        config.remote_phone_ingest = Some(true);
+        rebind_ingest_listener(
+            port,
+            &mut listener,
+            &mut bound,
+            config.remote_phone_ingest.unwrap_or(false),
+        )
+        .unwrap();
+        assert_eq!(
+            listener.as_ref().unwrap().local_addr().unwrap().ip(),
+            std::net::Ipv4Addr::UNSPECIFIED
+        );
+        config.remote_phone_ingest = Some(false);
+        rebind_ingest_listener(
+            port,
+            &mut listener,
+            &mut bound,
+            config.remote_phone_ingest.unwrap_or(false),
+        )
+        .unwrap();
+        assert!(listener
+            .as_ref()
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .ip()
+            .is_loopback());
+    }
+
+    #[test]
+    fn failed_remote_bind_keeps_local_routes_available() {
+        let mut bound = Some(false);
+        let mut listener = Some(bind_ingest_listener(0, false).unwrap());
+        let port = listener.as_ref().unwrap().local_addr().unwrap().port();
+        let err = rebind_ingest_listener_with(
+            port,
+            &mut listener,
+            &mut bound,
+            true,
+            |port, remote| {
+                if remote {
+                    bail!("remote interface unavailable");
+                }
+                bind_ingest_listener(port, false)
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("remote interface unavailable"));
+        assert_eq!(bound, Some(false));
+        let local = listener.unwrap();
+        assert!(local.local_addr().unwrap().ip().is_loopback());
+        assert_eq!(local.local_addr().unwrap().port(), port);
+        std::net::TcpStream::connect(local.local_addr().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn failed_startup_enable_keeps_one_stable_loopback_socket_until_setting_changes() {
+        let mut listener = None;
+        let mut bound = None;
+        let mut last_wanted = None;
+        let attempts = std::cell::Cell::new(0);
+        let mut bind = |port, remote| {
+            attempts.set(attempts.get() + 1);
+            if remote {
+                bail!("remote interface unavailable");
+            }
+            bind_ingest_listener(port, false)
+        };
+        assert!(refresh_ingest_listener_with(0, &mut listener, &mut bound, true, &mut last_wanted, &mut bind).is_err());
+        let address = listener.as_ref().unwrap().local_addr().unwrap();
+        assert!(address.ip().is_loopback());
+        assert_eq!(bound, Some(false));
+        for _ in 0..5 {
+            refresh_ingest_listener_with(0, &mut listener, &mut bound, true, &mut last_wanted, &mut bind).unwrap();
+            assert_eq!(listener.as_ref().unwrap().local_addr().unwrap(), address);
+            std::net::TcpStream::connect(address).unwrap();
+        }
+        assert_eq!(attempts.get(), 2); // one failed remote bind, one fallback
+        refresh_ingest_listener_with(0, &mut listener, &mut bound, false, &mut last_wanted, &mut bind).unwrap();
+        assert_eq!(attempts.get(), 2); // already loopback
+        assert!(refresh_ingest_listener_with(0, &mut listener, &mut bound, true, &mut last_wanted, &mut bind).is_err());
+        assert_eq!(attempts.get(), 4); // a fresh off/on transition retries
+    }
+
+    #[test]
+    fn disabling_remote_ingest_rejects_an_already_connected_client() {
+        use std::io::Read as _;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let enabled = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&enabled);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            handle_ingest_connection_with_policy(stream, "test-token", &IngestConfig::default(), || {
+                let _ = ready_tx.send(());
+                flag.load(Ordering::SeqCst)
+            })
+        });
+        // The socket was accepted while remote access was on. Disabling it
+        // before the request arrives must close the connection without a reply.
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        enabled.store(false, Ordering::SeqCst);
+        client
+            .write_all(b"GET /health HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n")
+            .unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut reply = String::new();
+        client.read_to_string(&mut reply).unwrap();
+        assert!(reply.is_empty());
+        assert!(server.join().unwrap().is_err());
+    }
+
+    #[test]
+    fn switch_off_revokes_remote_registration_after_header_and_during_body() {
+        use std::io::Write as _;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        for (index, gate) in [2, 3].into_iter().enumerate() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (stream, _) = listener.accept().unwrap();
+            let clients = Arc::new(RemoteClients::default());
+            let (_guard, epoch) = clients.register(&stream).unwrap();
+            let check = Arc::clone(&clients);
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let calls = std::cell::Cell::new(0);
+                handle_ingest_connection_with_policy(stream, "test-token", &IngestConfig::default(), || {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == gate {
+                        ready_tx.send(()).unwrap();
+                        resume_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                    }
+                    check.generation.load(SeqCst) == epoch
+                })
+            });
+            let url = format!("http://localhost:613{index}/");
+            let body = format!(r#"{{"url":"{url}","session":"revoked","tab":"revoked"}}"#);
+            let header = format!("POST /web/register HTTP/1.1\r\nOrigin: https://example.com\r\nAuthorization: Bearer test-token\r\nContent-Length: {}\r\n\r\n", body.len());
+            client.write_all(header.as_bytes()).unwrap();
+            ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if gate == 3 {
+                client.write_all(&body.as_bytes()[..body.len() / 2]).unwrap();
+            }
+            clients.revoke();
+            assert_ne!(clients.generation.load(SeqCst), epoch);
+            resume_tx.send(()).unwrap();
+            assert!(server.join().unwrap().is_err());
+            assert!(crate::web::lookup(&url).is_none());
+        }
+    }
+
+    #[test]
+    fn switch_off_waits_for_an_admitted_mutation_and_refuses_later_ones() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        let clients = Arc::new(RemoteClients::default());
+        let changed = Arc::new(AtomicBool::new(false));
+        let worker_clients = Arc::clone(&clients);
+        let worker_changed = Arc::clone(&changed);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_clients.effect(0, || true, || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                worker_changed.store(true, SeqCst);
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let setting_epoch = REMOTE_SETTING_CHANGES.load(SeqCst);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let setter = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            change_remote_phone_setting(|| Ok(())).unwrap();
+            done_tx.send(()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        resume_tx.send(()).unwrap();
+        worker.join().unwrap().unwrap();
+        done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        setter.join().unwrap();
+        assert!(changed.load(SeqCst)); // mutation finished before off completed
+        assert!(
+            clients
+                .effect(
+                    0,
+                    || REMOTE_SETTING_CHANGES.load(SeqCst) == setting_epoch,
+                    || changed.store(false, SeqCst),
+                )
+                .is_err()
+        );
+        assert!(changed.load(SeqCst)); // no mutation can start after off
+    }
+
+    #[test]
+    fn rapid_off_on_invalidates_a_remote_client_before_the_listener_polls() {
+        use std::io::Read as _;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let clients = Arc::new(RemoteClients::default());
+        let (_guard, epoch) = clients.register(&stream).unwrap();
+        let mut observed = REMOTE_SETTING_CHANGES.load(SeqCst);
+        let mut bound = Some(true);
+        let mut active_listener = None;
+        let mut last_wanted = Some(true);
+        let policy = ListenerPolicy {
+            managed: true,
+            clients: &clients,
+            epoch: Some(epoch),
+            setting_epoch: observed,
+        };
+        // Both Settings changes occur before the listener's next poll.
+        remote_phone_setting_changed(); // off
+        remote_phone_setting_changed(); // on
+        assert!(!policy.allowed());
+        assert!(policy.effect(|| panic!("old request must not mutate")).is_err());
+        revoke_on_setting_change(
+            &clients, &mut observed, &mut active_listener, &mut bound, &mut last_wanted,
+        );
+        assert_ne!(clients.generation.load(SeqCst), epoch);
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        assert!(matches!(client.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
+    }
+
+    #[test]
+    fn rapid_off_on_drops_the_old_accept_queue_before_rebinding() {
+        use std::io::Read as _;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let clients = RemoteClients::default();
+        let mut listener = Some(bind_ingest_listener(0, true).unwrap());
+        let port = listener.as_ref().unwrap().local_addr().unwrap().port();
+        // Connected in the kernel, but not yet accepted by Scrawl.
+        let mut queued = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut still_queued = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut bound = Some(true);
+        let mut last_wanted = Some(true);
+        let mut observed = REMOTE_SETTING_CHANGES.load(SeqCst);
+        remote_phone_setting_changed(); // off
+        remote_phone_setting_changed(); // on, before the listener polls
+        // The real accept path rejects a connection queued before the switch,
+        // even if the loop's first change check already ran.
+        assert!(accept_ingest_connection(listener.as_ref().unwrap(), true, observed)
+            .unwrap()
+            .is_none());
+        revoke_on_setting_change(
+            &clients, &mut observed, &mut listener, &mut bound, &mut last_wanted,
+        );
+        assert!(listener.is_none());
+        assert_eq!(bound, None);
+        assert_eq!(last_wanted, None);
+        refresh_ingest_listener_with(
+            port, &mut listener, &mut bound, true, &mut last_wanted, bind_ingest_listener,
+        ).unwrap();
+        assert_eq!(bound, Some(true));
+        queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        assert!(matches!(queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
+        still_queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        assert!(matches!(still_queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
+        let fresh = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (accepted, _) = listener.as_ref().unwrap().accept().unwrap();
+        assert_eq!(accepted.peer_addr().unwrap(), fresh.local_addr().unwrap());
     }
 
     #[test]

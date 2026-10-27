@@ -612,6 +612,18 @@
       "docs": ["README.md#scrawlkit-ios"]
     },
     {
+      "id": "remote-phone-ingest",
+      "group": "iphone",
+      "name": "Remote phone uploads",
+      "says": "A Settings switch lets other devices reach the GUI ingest listener; off keeps local dev-page routing on loopback.",
+      "status": "main",
+      "platforms": ["mac", "linux", "windows"],
+      "config": [
+        { "key": "remotePhoneIngest", "value": "false", "does": "Allow the GUI ingest listener on other IPv4 interfaces; off binds loopback only" }
+      ],
+      "docs": ["README.md#scrawlkit-ios"]
+    },
+    {
       "id": "import",
       "group": "iphone",
       "name": "Import a recording",

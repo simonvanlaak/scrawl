@@ -490,6 +490,11 @@ scrawl link --scheme updown [--session ses_…]
 
 `scrawl link` reads (or generates with mode `0600`) `ingestToken` in
 `~/.config/scrawl/config.json` and defaults to this Mac's Tailscale and LAN IPs on port `47777`.
+In Settings › General, enable **Allow phone uploads from other devices** before using the LAN or
+Tailscale URLs. It is off by default: the GUI keeps port 47777 on loopback for dev-page routing,
+and switching it off again closes the all-interfaces listener without a restart. The cabled
+iPhone mirror and USB fallback still work. `scrawl serve` is an explicit remote listener and does
+not follow this GUI setting.
 Opening `<scheme>://scrawl?reset=1` on the phone clears its Keychain config (`dev.kitlangton.scrawl`).
 For cabled USB fallback via `devicectl` (`Documents/Scrawl`), list the app bundle IDs in
 `~/.config/scrawl/config.json` under `"usbApps": ["com.kitlangton.UpDown"]`.

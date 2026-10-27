@@ -295,7 +295,18 @@ fn respond_json(
 
 /// Answers the SDK's routes; `false` when the request is for something else (the ScrawlKit
 /// routes, which need the token).
+#[cfg(test)]
 pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Result<bool> {
+    handle_with_policy(stream, header, expected_token, &(|| true))
+}
+
+pub fn handle_with_policy(
+    stream: &mut TcpStream,
+    header: &str,
+    expected_token: &str,
+    policy: &impl crate::phone::IngestPolicy,
+) -> Result<bool> {
+    anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
     let first = header.lines().next().unwrap_or("");
     let mut parts = first.split_whitespace();
     let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
@@ -325,6 +336,7 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
         }
         ("OPTIONS", _) => respond(stream, "204 No Content", "text/plain", b"", origin),
         ("GET", "/web/registrations") => {
+            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
             if token_ok {
                 let live = registry().live(crate::now_epoch_ms());
                 respond_json(
@@ -349,6 +361,7 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
             anyhow::ensure!(len <= 64 * 1024, "Page context too large");
             let mut bytes = vec![0_u8; len];
             stream.read_exact(&mut bytes)?;
+            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
             // Loopback pages only, token or not.
             let Some(page_origin) = origin
                 .filter(|o| peer_loopback && is_loopback_origin(o))
@@ -365,7 +378,7 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
             };
             let wanted = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
             if wanted && let Ok(post) = serde_json::from_slice::<crate::page::Post>(&bytes) {
-                crate::page::record(&page_origin, post);
+                policy.effect(|| crate::page::record(&page_origin, post))?;
             }
             respond_json(
                 stream,
@@ -382,6 +395,7 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
             // Read the body even when refusing, so the answer isn't lost to a reset.
             let mut bytes = vec![0_u8; len];
             stream.read_exact(&mut bytes)?;
+            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
             if !may_register(origin, peer_loopback, token_ok) {
                 respond_json(
                     stream,
@@ -394,20 +408,22 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
             let body: Body = serde_json::from_slice(&bytes).unwrap_or_default();
             match registration_from(body, origin, token_ok) {
                 Ok(reg) if path == "/web/unregister" => {
-                    registry().unregister(&reg.origin, &reg.tab);
+                    policy.effect(|| registry().unregister(&reg.origin, &reg.tab))?;
                     respond_json(stream, "200 OK", &serde_json::json!({"ok": true}), origin);
                 }
                 Ok(reg) => {
-                    crate::capture::scrawl_log(format!(
-                        "web: {} registered (session {}, directory {})",
-                        reg.url,
-                        reg.session.as_deref().unwrap_or("-"),
-                        reg.directory.as_deref().unwrap_or("-")
-                    ));
                     // `context`: the page may send what it sees (`crate::page`); loopback only.
                     let context = origin.is_some_and(is_loopback_origin)
                         && crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
-                    registry().register(reg, crate::now_epoch_ms());
+                    policy.effect(|| {
+                        crate::capture::scrawl_log(format!(
+                            "web: {} registered (session {}, directory {})",
+                            reg.url,
+                            reg.session.as_deref().unwrap_or("-"),
+                            reg.directory.as_deref().unwrap_or("-")
+                        ));
+                        registry().register(reg, crate::now_epoch_ms());
+                    })?;
                     respond_json(
                         stream,
                         "200 OK",

@@ -165,6 +165,7 @@ struct ViewState {
     version: String,
     login: Login,
     auto_send: bool,
+    remote_phone_ingest: bool,
     shortcuts: Vec<Shortcut>,
     transcriber: Transcriber,
     video_export: bool,
@@ -895,6 +896,7 @@ impl SettingsWindow {
     fn general(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
         let login_on = state.login.on;
         let auto_send = state.auto_send;
+        let remote_phone_ingest = state.remote_phone_ingest;
         let mut column = div().flex().flex_col().child(group(
             theme,
             vec![
@@ -919,6 +921,16 @@ impl SettingsWindow {
                     switch(theme, "settings-auto-send", auto_send, true).on_click(cx.listener(
                         move |view, _, _, _| view.set("autoSend", (!auto_send).into()),
                     )),
+                )
+                .into_any_element(),
+                row(
+                    theme,
+                    "Allow phone uploads from other devices",
+                    true,
+                    switch(theme, "settings-remote-phone-ingest", remote_phone_ingest, true)
+                        .on_click(cx.listener(move |view, _, _, _| {
+                            view.set("remotePhoneIngest", (!remote_phone_ingest).into());
+                        })),
                 )
                 .into_any_element(),
             ],

@@ -155,6 +155,15 @@ pub fn resolve_bundle_dir(path_or_id: &Path) -> Result<PathBuf> {
 }
 
 fn newest_bundle(captures: &Path) -> Result<PathBuf> {
+    capture_history(captures)?
+        .into_iter()
+        .next()
+        .context("No .scrawl captures found")
+}
+
+/// Completed captures in reverse creation order. Do not use directory mtime: reprocessing and
+/// zooming an old capture can change it without making that capture the newest one.
+pub fn capture_history(captures: &Path) -> Result<Vec<PathBuf>> {
     let mut candidates = Vec::new();
     for entry in
         fs::read_dir(captures).with_context(|| format!("Could not read {}", captures.display()))?
@@ -174,14 +183,13 @@ fn newest_bundle(captures: &Path) -> Result<PathBuf> {
             candidates.push((bundle.created_at_ms, path));
         }
     }
-    candidates.sort_unstable();
-    candidates
-        .pop()
-        .context("No .scrawl captures found")?
-        .1
-        .canonicalize()
-        .map(plain_path)
-        .map_err(Into::into)
+    candidates.sort_unstable_by(|a, b| b.cmp(a));
+    Ok(
+        candidates
+            .into_iter()
+            .filter_map(|(_, path)| path.canonicalize().ok().map(plain_path))
+            .collect(),
+    )
 }
 
 /// `canonicalize` on Windows returns `\\?\C:\…`; agents and terminals want `C:\…`.
@@ -2196,6 +2204,41 @@ mod tests {
         assert_eq!(
             newest_bundle(&fixture.0).unwrap(),
             plain_path(completed.canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn capture_history_is_newest_first_and_skips_incomplete_bundles() {
+        let fixture = Fixture::new();
+        let older = fixture.bundle("older", 100);
+        let newer = fixture.bundle("newer", 300);
+        let same_time = fixture.bundle("same-time", 300);
+        let cancelled = fixture.0.join("cancelled.scrawl");
+        fs::create_dir(&cancelled).unwrap();
+        let broken = fixture.bundle("broken", 400);
+        fs::write(broken.join("scrawl.json"), b"invalid").unwrap();
+        let history = capture_history(&fixture.0).unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0], plain_path(same_time.canonicalize().unwrap()));
+        assert_eq!(history[1], plain_path(newer.canonicalize().unwrap()));
+        assert_eq!(history[2], plain_path(older.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn capture_history_reflects_new_and_removed_bundles() {
+        let fixture = Fixture::new();
+        let older = fixture.bundle("older", 100);
+        assert_eq!(capture_history(&fixture.0).unwrap().len(), 1);
+
+        let newer = fixture.bundle("newer", 200);
+        let history = capture_history(&fixture.0).unwrap();
+        assert_eq!(history[0], plain_path(newer.canonicalize().unwrap()));
+        assert_eq!(history.len(), 2);
+
+        fs::remove_dir_all(&newer).unwrap();
+        assert_eq!(
+            capture_history(&fixture.0).unwrap(),
+            vec![plain_path(older.canonicalize().unwrap())]
         );
     }
 

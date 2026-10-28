@@ -716,6 +716,7 @@ pub const SKILL_COMMAND: &str = "bunx skills add kitlangton/scrawl";
 pub struct View {
     pub version: String,
     pub login: LoginView,
+    pub agent_demo_video: bool,
     pub remote_phone_ingest: bool,
     pub shortcuts: Vec<ShortcutView>,
     pub microphone: MicrophoneView,
@@ -1287,6 +1288,11 @@ impl Panel {
             }
         };
         match (key, value) {
+            ("agentDemoVideo", serde_json::Value::Bool(on)) => {
+                if let Err(error) = crate::handoff::set_experiment_in(&path, "agentDemoVideo", *on) {
+                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                }
+            }
             ("launchAtLogin", serde_json::Value::Bool(on)) => {
                 let previous = std::fs::read(&path)
                     .ok()
@@ -1460,6 +1466,7 @@ impl Panel {
                 available: login != LoginItem::Unavailable,
                 needs_approval: login == LoginItem::NeedsApproval,
             },
+            agent_demo_video: crate::handoff::experiment_enabled_in(&config, "agentDemoVideo"),
             remote_phone_ingest: config.remote_phone_ingest.unwrap_or(false),
             shortcuts: ShortcutKind::ALL
                 .into_iter()
@@ -2004,6 +2011,23 @@ mod tests {
         host.refuse_login = true;
         panel.on(Action::Set { key: "launchAtLogin".into(), value: false.into() }, &mut host);
         assert_eq!(read_json(&host.path)["launchAtLogin"], true, "a failed OS change must not claim success in the file");
+    }
+
+    #[test]
+    fn agent_demo_video_switch_round_trips_without_losing_config() {
+        let dir = TempDir::new("agent-demo-video");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        assert!(panel.view(&host).agent_demo_video, "missing config defaults on");
+        std::fs::write(&host.path, r#"{"ingestToken":"private","experiments":{"other":true}}"#).unwrap();
+        assert!(panel.view(&host).agent_demo_video, "missing flag defaults on");
+        panel.on(Action::Set { key: "agentDemoVideo".into(), value: true.into() }, &mut host);
+        assert!(panel.view(&host).agent_demo_video);
+        assert_eq!(read_json(&host.path)["experiments"]["other"], true);
+        assert_eq!(read_json(&host.path)["ingestToken"], "private");
+        panel.on(Action::Set { key: "agentDemoVideo".into(), value: false.into() }, &mut host);
+        assert!(!panel.view(&host).agent_demo_video);
+        assert_eq!(read_json(&host.path)["experiments"]["agentDemoVideo"], false);
     }
 
     #[test]

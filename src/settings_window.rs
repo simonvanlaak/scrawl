@@ -164,6 +164,7 @@ struct PermissionRow {
 struct ViewState {
     version: String,
     login: Login,
+    agent_demo_video: bool,
     remote_phone_ingest: bool,
     shortcuts: Vec<Shortcut>,
     transcriber: Transcriber,
@@ -1472,6 +1473,7 @@ impl SettingsWindow {
     /// CLI needs no install step on Windows (macOS links it onto PATH here).
     fn agents(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
         let command = state.skill_command.clone();
+        let demo_video = state.agent_demo_video;
         let line = div()
             .h(px(ROW))
             .px(px(12.0))
@@ -1514,6 +1516,17 @@ impl SettingsWindow {
         div()
             .flex()
             .flex_col()
+            .child(group(theme, vec![row(
+                theme,
+                "Ask for a Scrawl video on complex changes",
+                true,
+                switch(theme, "settings-agent-demo-video", demo_video, true).on_click(
+                    cx.listener(move |view, _, _, _| {
+                        view.set("agentDemoVideo", (!demo_video).into());
+                    }),
+                ),
+            ).into_any_element()]))
+            .child(caption(theme, "Adds a video request to copied and pasted captures when the agent can record the result. On by default.", false))
             .child(header(theme, "Agent skill"))
             .child(group(theme, vec![line]))
             .child(caption(

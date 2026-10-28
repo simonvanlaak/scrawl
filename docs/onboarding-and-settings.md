@@ -38,6 +38,8 @@ Recording › Language shows under Transcription while it's Apple Speech: Automa
 
 The sidebar is the helper's alone: a row selects on mouse-down and its pane replaces the last on the next frame, with no transition (keep it that way; a fade read as lag; the level meter starts after the Recording pane has drawn). Rust's `state` never carries the pane (only `show` does, when Settings is opened again), so a reply can't move the selection.
 
+About has a Star on GitHub button below the update control. Its heading, action and caption share one box in the Mac helper and Linux GPUI Settings. It opens `https://github.com/tryapparent/apparent` in the browser; starring remains the user's choice on GitHub.
+
 Linux GPUI Settings currently renders its light palette. Hovered buttons and menu items pair black text with light lilac (`#c4a9e6`, 10.09:1); the selected sidebar keeps dark lilac (`#302442`) with cream text. Black on that dark lilac gives only 1.45:1. The dark palette's cream-on-dark hover pair (12.71:1) is covered by a contrast test but is not yet used by Settings.
 
 

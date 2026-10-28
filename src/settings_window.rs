@@ -1710,6 +1710,32 @@ impl SettingsWindow {
                 .into_any_element()]))
                 .child(caption(theme, "Stable follows reviewed Linux releases. Main follows checked builds from every main commit. Updates install on the next launch.", false));
         }
+        column = column.child(div().h(px(14.0))).child(group(theme, vec![div()
+            .py(px(11.0))
+            .flex()
+            .flex_col()
+            .child(div()
+                .px(px(12.0))
+                .text_size(px(13.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.secondary())
+                .child("Enjoying Apparent?"))
+            .child(row(
+                theme,
+                "Support the project",
+                true,
+                button(theme, "settings-star-github", "Star on GitHub", true)
+                    .on_click(|_, _, _| {
+                        let _ = crate::handoff::open_path(std::path::Path::new("https://github.com/tryapparent/apparent"));
+                    }),
+            ))
+            .child(div()
+                .px(px(12.0))
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .text_color(theme.secondary())
+                .child("A GitHub star won’t fix your bugs, but it will make our day."))
+            .into_any_element()]));
         column
             .child(header(theme, "Links"))
             .child(group(

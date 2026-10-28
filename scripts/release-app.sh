@@ -28,9 +28,7 @@ cp -f "${REPO_DIR}/target/release/apparent" "${APP_BUNDLE}/Contents/MacOS/appare
 cp -f "${REPO_DIR}/target/release/apparent-helper" "${APP_BUNDLE}/Contents/MacOS/apparent-helper"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/apparent" "${APP_BUNDLE}/Contents/MacOS/apparent-helper"
 
-if [[ -f "${REPO_DIR}/assets/Apparent.icns" ]]; then
-  cp -f "${REPO_DIR}/assets/Apparent.icns" "${APP_BUNDLE}/Contents/Resources/Apparent.icns"
-fi
+cp -f "${REPO_DIR}/assets/Apparent.icns" "${APP_BUNDLE}/Contents/Resources/Apparent.icns"
 cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${APP_BUNDLE}/Contents/Resources/HostGrotesk-Variable.ttf"
 cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${APP_BUNDLE}/Contents/Resources/apparent-wordmark.png"
 

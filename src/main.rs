@@ -861,10 +861,16 @@ pub fn finalize_capture_bundle(
         duration_ms,
         video_offset_ms,
     } = recording;
-    anyhow::ensure!(
-        !frames.is_empty(),
-        "No screen frames were captured. Choose a screen in the sharing dialog and try again."
-    );
+    if frames.is_empty() {
+        // The MP4 stream can succeed even when every screenshot fails. Do not turn
+        // it into keyframes here: the sampler drops screenshots while a system
+        // permission prompt is visible, but the movie may still contain it.
+        let message = "No screen frames were captured. Choose a screen in the sharing dialog and try again.";
+        if let Some(ref video) = video_path {
+            anyhow::bail!("{message} The raw video was kept at {}.", video.display());
+        }
+        anyhow::bail!("{message}");
+    }
     if let Some(ref audio) = recorded_audio {
         let wav_path = bundle_dir.join("audio.wav");
         let _ = std::fs::create_dir_all(bundle_dir);
@@ -2415,6 +2421,44 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn movie_without_safe_screenshots_is_not_a_bundle() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let movie = dir.join("recording.mp4");
+        std::fs::write(&movie, b"untrusted movie bytes").unwrap();
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let error = finalize_capture_bundle(
+            &dir,
+            target,
+            capture::ScreenRecording {
+                frames: Vec::new(),
+                video: Some(movie.clone()),
+                duration_ms: 1_000,
+                video_offset_ms: 0,
+            },
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            windows::ActivityLog::default(),
+        )
+        .err()
+        .expect("a movie alone is not a safe screenshot candidate");
+        assert!(error.to_string().contains(&movie.display().to_string()));
+        assert!(movie.exists());
+        assert!(!dir.join("apparent.json").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn cli_identifies_as_apparent() {

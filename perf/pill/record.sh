@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Plays `scrawl lab pill` scenes with one binary and records each: a motion-lint trace of every
+# Plays `apparent lab pill` scenes with one binary and records each: a motion-lint trace of every
 # capsule frame and a 60 fps screen recording of the capsule's region, then runs motion-lint.
 #
-#   perf/pill/record.sh <scrawl-binary> <out-dir> [--time-scale 0.25] [scene ...]
+#   perf/pill/record.sh <apparent-binary> <out-dir> [--time-scale 0.25] [scene ...]
 #
 # Writes <out-dir>/runs/<scene>/trace/<scene>.jsonl (one motion-lint test per scene),
 # <out-dir>/<scene>.mov and motion-lint's candidates.json.
 # Scenes default to all of them. Each takes a few seconds; the capsule shows under the menu bar
-# on the main display over a plain backdrop. Nothing is captured, recorded or sent by Scrawl.
+# on the main display over a plain backdrop. Nothing is captured, recorded or sent by Apparent.
 set -euo pipefail
 
 bin=$1

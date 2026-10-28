@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   preview:
-    if: github.repository == 'simonvanlaak/scrawl' && github.ref == 'refs/heads/main'
+    if: github.repository == 'tryapparent/apparent' && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -27,13 +27,13 @@ jobs:
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Build and verify the DMG
         env:
-          SCRAWL_PREVIEW_VERSION: 0.${{ github.run_number }}.${{ github.run_attempt }}
-          SCRAWL_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+          APPARENT_PREVIEW_VERSION: 0.${{ github.run_number }}.${{ github.run_attempt }}
+          APPARENT_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
         run: |
           python3 -m unittest discover -s scripts/tests -p test_preview_release.py
           bash scripts/build-mac-preview.sh
-          scripts/check-ca-roots.sh target/release/scrawl
-          target/release/scrawl --help
+          scripts/check-ca-roots.sh target/release/apparent
+          target/release/apparent --help
       - name: Publish a uniquely versioned prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           version="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           tag="preview-mac-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
-          dmg="dist/Scrawl-Preview-${version}-arm64.dmg"
+          dmg="dist/Apparent-Preview-${version}-arm64.dmg"
           # Never replace an existing tag or release, including on a re-run.
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
             echo "Tag already exists: ${tag}" >&2
@@ -49,6 +49,6 @@ jobs:
           fi
           gh release create "$tag" "$dmg" "$dmg.sha256" \
             --target "$GITHUB_SHA" \
-            --title "Scrawl Mac preview ${version}" \
-            --notes "Ad-hoc-signed Apple silicon prototype. Not notarized: macOS may require Privacy & Security → Open Anyway. No automatic updates; install newer previews manually. This is not Kit's production Scrawl release." \
+            --title "Apparent Mac preview ${version}" \
+            --notes "Ad-hoc-signed Apple silicon prototype. Not notarized: macOS may require Privacy & Security → Open Anyway. No automatic updates; install newer previews manually. This is not Kit's production Apparent release." \
             --prerelease --latest=false

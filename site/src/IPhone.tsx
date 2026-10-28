@@ -64,7 +64,7 @@ function MirrorVisual() {
   )
 }
 
-function ScrawlKitVisual() {
+function ApparentKitVisual() {
   return (
     <div className="ip-visual" aria-hidden>
       <div className="ip-stack">
@@ -103,10 +103,10 @@ export function IPhoneSection() {
           </div>
         </article>
         <article className="feature-card">
-          <ScrawlKitVisual />
+          <ApparentKitVisual />
           <div className="feature-copy">
             <h3>Record inside your own app</h3>
-            <p>Add ScrawlKit to your iOS app to record on the phone itself, with every tap and swipe drawn on the frames.</p>
+            <p>Add ApparentKit to your iOS app to record on the phone itself, with every tap and swipe drawn on the frames.</p>
           </div>
         </article>
       </div>

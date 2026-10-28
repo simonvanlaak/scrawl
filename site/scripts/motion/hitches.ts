@@ -26,7 +26,7 @@ for (let r = 0; r < runs; r++) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: size === "iphone" ? 3 : 2, isMobile: size === "iphone", hasTouch: size === "iphone" })
   const page = await ctx.newPage()
   await page.goto(`${url}${url.includes("?") ? "&" : "?"}${query}`, { waitUntil: "networkidle" })
-  await page.waitForFunction(() => window.__scrawlDemo?.ready?.() === true, null, { timeout: 20000 })
+  await page.waitForFunction(() => window.__apparentDemo?.ready?.() === true, null, { timeout: 20000 })
   await page.evaluate(() => (document.querySelector(".stage-wrap") as HTMLElement).scrollIntoView({ block: "center" }))
   await page.waitForTimeout(1500)
   const res = await page.evaluate(
@@ -39,13 +39,13 @@ for (let r = 0; r < runs; r++) {
         } catch {
           // WebKit has no long task entries.
         }
-        window.__scrawlDemo!.seek(0)
-        window.__scrawlDemo!.play()
+        window.__apparentDemo!.seek(0)
+        window.__apparentDemo!.play()
         let last = performance.now()
         const tick = (now: number) => {
           dts.push(now - last)
           last = now
-          if (window.__scrawlDemo!.t() >= 22990) resolve({ dts: dts.slice(2), long })
+          if (window.__apparentDemo!.t() >= 22990) resolve({ dts: dts.slice(2), long })
           else requestAnimationFrame(tick)
         }
         requestAnimationFrame(tick)

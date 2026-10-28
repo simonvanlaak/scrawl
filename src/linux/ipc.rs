@@ -1,5 +1,5 @@
-//! A Unix socket the running app listens on (`$XDG_RUNTIME_DIR/scrawl.sock`), so another
-//! `scrawl` process can reach it: `scrawl shortcut record|paste`, which GNOME's custom
+//! A Unix socket the running app listens on (`$XDG_RUNTIME_DIR/apparent.sock`), so another
+//! `apparent` process can reach it: `apparent shortcut record|paste`, which GNOME's custom
 //! keybindings run where there's no GlobalShortcuts portal, and a second launch from the app
 //! grid, which opens Settings (GNOME without the AppIndicator extension shows no tray icon).
 
@@ -14,13 +14,13 @@ fn socket_path() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
-        .join("scrawl.sock")
+        .join("apparent.sock")
 }
 
 /// Sends one line to the running app. `Err` when none is running.
 pub fn send(line: &str) -> Result<()> {
     let mut stream =
-        UnixStream::connect(socket_path()).context("Scrawl isn't running (start it first)")?;
+        UnixStream::connect(socket_path()).context("Apparent isn't running (start it first)")?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     stream.write_all(format!("{line}\n").as_bytes())?;
     Ok(())
@@ -47,18 +47,18 @@ pub fn open_requests() -> flume::Receiver<()> {
     open_channel().1.clone()
 }
 
-/// Listens for lines from other `scrawl` processes and hands each to `handle`.
+/// Listens for lines from other `apparent` processes and hands each to `handle`.
 pub fn listen(handle: impl Fn(&str) + Send + 'static) {
     let path = socket_path();
     if running() {
-        crate::capture::scrawl_log("ipc: another Scrawl is listening already");
+        crate::capture::apparent_log("ipc: another Apparent is listening already");
         return;
     }
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(listener) => listener,
         Err(error) => {
-            crate::capture::scrawl_log(format!("ipc: could not listen on {}: {error}", path.display()));
+            crate::capture::apparent_log(format!("ipc: could not listen on {}: {error}", path.display()));
             return;
         }
     };
@@ -67,7 +67,7 @@ pub fn listen(handle: impl Fn(&str) + Send + 'static) {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     let _ = std::thread::Builder::new()
-        .name("scrawl-ipc".into())
+        .name("apparent-ipc".into())
         .spawn(move || {
             for stream in listener.incoming().flatten() {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));

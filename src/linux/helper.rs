@@ -1,4 +1,4 @@
-//! The Linux side of `scrawl-helper`: the same calls as `src/helper.rs`, answered in process.
+//! The Linux side of `apparent-helper`: the same calls as `src/helper.rs`, answered in process.
 //! Movies go through GStreamer (`linux::media`), transcription through `transcribe.cpp` with a
 //! Parakeet model (`speech`), and permissions through what the session allows
 //! (`linux::privacy`). There is no cabled-iPhone mirror on Linux.
@@ -12,7 +12,7 @@ use crate::model::{RgbaFrame, TranscriptData};
 
 /// There is no helper executable on Linux; its work happens in process.
 pub fn path() -> Result<PathBuf> {
-    bail!("scrawl-helper is macOS-only")
+    bail!("apparent-helper is macOS-only")
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -24,7 +24,7 @@ pub struct PhoneDevice {
     pub height: u32,
 }
 
-/// What the session lets Scrawl use: the microphone, the screen and the input devices.
+/// What the session lets Apparent use: the microphone, the screen and the input devices.
 pub fn permissions()
 -> Result<std::collections::BTreeMap<crate::onboarding::Permission, crate::onboarding::Status>> {
     Ok(crate::linux::privacy::permissions())
@@ -35,7 +35,7 @@ pub fn devices() -> Result<Vec<PhoneDevice>> {
     Ok(Vec::new())
 }
 
-/// One line of macOS's `scrawl-helper speech-model [--install]`.
+/// One line of macOS's `apparent-helper speech-model [--install]`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct SpeechModelLine {
     pub status: String,
@@ -51,7 +51,7 @@ pub struct SpeechModelLine {
     pub error: Option<String>,
 }
 
-/// Linux transcribes with Parakeet (`speech`): Hex's installed model, else Scrawl's own copy,
+/// Linux transcribes with Parakeet (`speech`): Hex's installed model, else Apparent's own copy,
 /// downloaded and checked here.
 pub fn install_speech_model(
     _stop: &dyn Fn() -> bool,

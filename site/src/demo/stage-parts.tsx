@@ -48,8 +48,8 @@ const MenuBarInner = memo(function MenuBarInner({ active }: { active: boolean })
         <span>Help</span>
       </div>
       <div className="menubar-right">
-        <span className="menubar-extra menubar-scrawl">
-          <img src="/menubar-icon@2x.png" width={16} height={16} decoding="async" alt="" />
+        <span className="menubar-extra menubar-apparent" aria-label="Apparent">
+          <strong style={{ color: "#b7a5d8", fontSize: 17, lineHeight: 1 }}>a</strong>
         </span>
         <span className="menubar-extra">
           <span className="battery">

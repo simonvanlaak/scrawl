@@ -5,7 +5,7 @@
 //! Neither X11 nor Wayland lets an app leave its windows out of a screen recording, so the ink
 //! shows in `recording.mp4` too; the keyframes draw the same strokes over it at the same place.
 //!
-//! On Wayland Scrawl can't see where the pointer is over other apps' windows, so while ⇧ is held
+//! On Wayland Apparent can't see where the pointer is over other apps' windows, so while ⇧ is held
 //! (read from the input devices, `super::input`) the overlay takes the pointer itself
 //! (`take_pointer`): the ink follows it, and clicks land on the overlay rather than the app.
 
@@ -70,7 +70,7 @@ impl InkOverlay {
                     is_resizable: false,
                     is_minimizable: false,
                     window_background: WindowBackgroundAppearance::Transparent,
-                    app_id: Some("dev.kitlangton.scrawl".into()),
+                    app_id: Some("dev.kitlangton.apparent".into()),
                     ..Default::default()
                 },
                 move |_, cx| cx.new(|_| OverlayView::new(telemetry, view_placement)),

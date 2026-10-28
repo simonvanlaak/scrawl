@@ -1,6 +1,6 @@
 //! The macOS shell around the shared UI: the menu bar item and its menu, AppKit window levels
 //! and styles for the pill and picker, the pill's CALayer shell (sharp border, shadow, GPU
-//! scale and blur), Sparkle updates, and window screenshots for `scrawl preview`.
+//! scale and blur), Sparkle updates, and window screenshots for `apparent preview`.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -95,7 +95,7 @@ pub(super) fn hud_pill_origin(display: gpui::Bounds<gpui::Pixels>) -> gpui::Poin
     )
 }
 
-/// The GPUI pill (`SCRAWL_NATIVE_PILL=0`) stays where it opened on macOS.
+/// The GPUI pill (`APPARENT_NATIVE_PILL=0`) stays where it opened on macOS.
 pub(super) fn place_hud_pill(_point: [f64; 2]) {}
 
 /// Dragging a region moves its window.
@@ -122,7 +122,7 @@ pub(super) fn caption_buttons() -> Option<AnyElement> {
 /// Window levels keep the pill above the picker above the overlay.
 pub(super) fn raise_window(_window: &mut Window) {}
 
-/// `scrawl lab`'s backdrop (`w` × `h` points): borderless, under the capsule, letting clicks through.
+/// `apparent lab`'s backdrop (`w` × `h` points): borderless, under the capsule, letting clicks through.
 pub(super) fn configure_lab_backdrop(w: f32, h: f32) {
     if let Some(mtm) = MainThreadMarker::new() {
         for win in NSApplication::sharedApplication(mtm).windows() {
@@ -136,13 +136,13 @@ pub(super) fn configure_lab_backdrop(w: f32, h: f32) {
 }
 
 /// AppKit keeps an accessory app running without windows. Info.plist's `LSUIElement` starts
-/// Scrawl as one with no Dock icon, but gpui 0.2.2 sets the regular activation policy once
+/// Apparent as one with no Dock icon, but gpui 0.2.2 sets the regular activation policy once
 /// launched, so this puts it back (`stay_out_of_dock`).
 pub(super) fn keep_alive(_cx: &mut App) {
     stay_out_of_dock();
 }
 
-/// Keeps Scrawl a menu bar app with no Dock icon.
+/// Keeps Apparent a menu bar app with no Dock icon.
 fn stay_out_of_dock() {
     use objc2_app_kit::NSApplicationActivationPolicy;
     if let Some(mtm) = MainThreadMarker::new() {
@@ -154,11 +154,11 @@ fn stay_out_of_dock() {
 /// AppKit gives every window the app's icon.
 pub(super) fn decorate_app_window(_window: &mut Window) {}
 
-/// The app that was in front when Scrawl activated itself for the picker or the review window
+/// The app that was in front when Apparent activated itself for the picker or the review window
 /// (0: none).
 static PREVIOUS_FRONT_APP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-/// Called just before Scrawl activates itself to take the keys. Scrawl in front already (one
+/// Called just before Apparent activates itself to take the keys. Apparent in front already (one
 /// key window opening over another) keeps the app remembered first.
 fn remember_front_app() {
     use objc2_app_kit::NSWorkspace;
@@ -217,13 +217,13 @@ pub(super) fn check_for_updates() {
 pub(super) fn open_overlay(
     telemetry: Arc<SharedCaptureTelemetry>,
     on: Option<[f64; 4]>,
-    _cx: &mut gpui::Context<super::ScrawlCoordinator>,
+    _cx: &mut gpui::Context<super::ApparentCoordinator>,
 ) -> Result<LaserOverlay, String> {
     LaserOverlay::open(telemetry, on)
 }
 
 /// The picker: borderless at status level + 1 over the whole screen at `frame` (global points,
-/// menu bar included), taking clicks (`scrawl lab` replays let them through). Returns its window
+/// menu bar included), taking clicks (`apparent lab` replays let them through). Returns its window
 /// number, to leave out of the recording.
 pub(super) fn configure_picker_window(
     _window: &mut Window,
@@ -236,7 +236,7 @@ pub(super) fn configure_picker_window(
     configure_floating_window(&ns_win, lab, 1);
     move_window_to_screen(&ns_win, frame);
     // gpui made it key before the style change above; make it key again so it takes the keys
-    // once Scrawl is active (`take_keys`).
+    // once Apparent is active (`take_keys`).
     if !lab {
         ns_win.makeKeyAndOrderFront(None);
     }
@@ -302,7 +302,7 @@ impl PillChrome {
         }
     }
 
-    /// One motion-trace frame for the capsule (`SCRAWL_MOTION_TRACE`), mapping its children.
+    /// One motion-trace frame for the capsule (`APPARENT_MOTION_TRACE`), mapping its children.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn trace(
         &self,
@@ -359,7 +359,7 @@ impl PillChrome {
     }
 }
 
-/// The largest of Scrawl's windows, brought to the front (for `scrawl preview --capture-screenshot`).
+/// The largest of Apparent's windows, brought to the front (for `apparent preview --capture-screenshot`).
 pub(super) fn front_own_window() -> Option<isize> {
     let mtm = MainThreadMarker::new()?;
     let app = NSApplication::sharedApplication(mtm);
@@ -398,11 +398,11 @@ objc2::define_class!(
     #[unsafe(super = NSObject)]
     #[thread_kind = MainThreadOnly]
     #[ivars = MenuTargetIvars]
-    struct ScrawlMenuTarget;
+    struct ApparentMenuTarget;
 
-    unsafe impl NSObjectProtocol for ScrawlMenuTarget {}
+    unsafe impl NSObjectProtocol for ApparentMenuTarget {}
 
-    impl ScrawlMenuTarget {
+    impl ApparentMenuTarget {
         #[unsafe(method(toggleCapture:))]
         fn toggle_capture(&self, _sender: &AnyObject) {
             let _ = self.ivars().sender.try_send(MenuAction::ToggleCapture);
@@ -450,7 +450,7 @@ objc2::define_class!(
         }
     }
 
-    unsafe impl NSMenuDelegate for ScrawlMenuTarget {
+    unsafe impl NSMenuDelegate for ApparentMenuTarget {
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
             rebuild_inbox_menu_items(menu, self);
@@ -481,7 +481,7 @@ fn record_menu_title() -> String {
 
 /// Lists unhandled iPhone captures at the top of the status menu, read fresh from disk so the
 /// ages are current.
-fn rebuild_inbox_menu_items(menu: &NSMenu, target: &ScrawlMenuTarget) {
+fn rebuild_inbox_menu_items(menu: &NSMenu, target: &ApparentMenuTarget) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -581,7 +581,7 @@ pub(super) fn set_status_inbox_count(count: usize) {
     });
 }
 
-impl ScrawlMenuTarget {
+impl ApparentMenuTarget {
     fn new(sender: flume::Sender<MenuAction>, mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(MenuTargetIvars { sender });
         unsafe { msg_send![super(this), init] }
@@ -591,7 +591,7 @@ impl ScrawlMenuTarget {
 struct StatusBarController {
     _item: Retained<NSStatusItem>,
     _menu: Retained<NSMenu>,
-    _target: Retained<ScrawlMenuTarget>,
+    _target: Retained<ApparentMenuTarget>,
 }
 
 thread_local! {
@@ -601,8 +601,8 @@ thread_local! {
 pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
     let mtm = MainThreadMarker::new()?;
     let (sender, receiver) = flume::bounded(16);
-    let target = ScrawlMenuTarget::new(sender, mtm);
-    let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Scrawl"));
+    let target = ApparentMenuTarget::new(sender, mtm);
+    let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Apparent"));
 
     let add = |title: &str, action: objc2::runtime::Sel| {
         let item = unsafe {
@@ -635,7 +635,7 @@ pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
         item.setKeyEquivalent(&NSString::from_str(","));
     }
     add("Check for Updates…", sel!(checkForUpdates:));
-    add("Quit Scrawl", sel!(quitApp:));
+    add("Quit Apparent", sel!(quitApp:));
     if let Some(item) = menu.itemAtIndex(menu.numberOfItems() - 1) {
         item.setKeyEquivalent(&NSString::from_str("q"));
     }
@@ -987,7 +987,7 @@ fn top_left_frame(ns_window: &NSWindow) -> [f32; 4] {
     ]
 }
 
-/// One trace frame for the capsule (`SCRAWL_MOTION_TRACE`): its window, the shell as drawn, the
+/// One trace frame for the capsule (`APPARENT_MOTION_TRACE`): its window, the shell as drawn, the
 /// content's blur and opacity. Returns the mapping for the content's children.
 #[allow(clippy::too_many_arguments)]
 fn trace_capsule(
@@ -1060,7 +1060,7 @@ pub(super) fn capture_own_window_screenshot(
                     .is_some_and(|a| a.process_id() == pid)
         })
         .max_by_key(|w| (w.frame().size.width as u64) * (w.frame().size.height as u64))
-        .ok_or_else(|| anyhow::anyhow!("Could not find Scrawl window"))?;
+        .ok_or_else(|| anyhow::anyhow!("Could not find Apparent window"))?;
     let frame = window.frame();
     let filter = SCContentFilter::create()
         .with_window(&window)

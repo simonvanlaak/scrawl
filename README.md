@@ -1,41 +1,29 @@
-# Scrawl
+# Apparent
 
 Show an agent a problem instead of describing it.
 
-Press a shortcut (`⌥⇧S`) and Scrawl starts recording the screen. Talk, click around, draw on it, and press `⌥⇧S` again to finish. Scrawl records the screen, your voice, and your marks, then packs them into a compact bundle: a contact sheet of annotated keyframes (`contact-sheet.png`), individual full-resolution keyframes (`frames/frame-XX.png`), a time-aligned transcript and interaction timeline (`summary.md`), and a structured manifest (`scrawl.json`).
+Press a shortcut (`⌥⇧S`) and Apparent starts recording the screen. Talk, click around, draw on it, and press `⌥⇧S` again to finish. Apparent records the screen, your voice, and your marks, then packs them into a compact bundle: a contact sheet of annotated keyframes (`contact-sheet.png`), individual full-resolution keyframes (`frames/frame-XX.png`), a time-aligned transcript and interaction timeline (`summary.md`), and a structured manifest (`apparent.json`).
 
 ## Install
 
-Scrawl needs an Apple silicon Mac on macOS 15 or later (live transcription and Liquid Glass need
-macOS 26). Download the DMG from [scrawl.kitlangton.com](https://scrawl.kitlangton.com), or use
-Homebrew:
+No branded installers, Homebrew cask, or signed update have been published yet. Build from source
+in this checkout; see [macOS packaging](docs/release.md), [Windows](docs/windows.md), or
+[Linux](docs/linux.md). The Mac build needs an Apple silicon Mac on macOS 15 or later (live
+transcription and Liquid Glass need macOS 26). The Windows preview targets Windows 10 (2004)
+or later on x64. Linux builds target Ubuntu 24.04+ on x86_64 or ARM64.
+
+When a Linux AppImage is published, make it executable and launch it with:
 
 ```sh
-brew install --cask kitlangton/tap/scrawl
-```
-
-The app updates itself (Sparkle), so Homebrew leaves updates to it.
-
-On Windows 10 (2004) or later (x64), download the zip from the same page or the
-[latest GitHub release](https://github.com/kitlangton/scrawl/releases/latest), unzip it and run
-`scrawl.exe`. The Windows build is a preview and isn't signed yet, so Windows may say "Windows
-protected your PC": click **More info**, then **Run anyway**. It doesn't update itself yet; see
-[Windows](#windows).
-
-On Linux (preview), download `Scrawl-<version>-linux-x86_64.AppImage` (or `aarch64` for ARM64)
-from the [GitHub release](https://github.com/kitlangton/scrawl/releases/latest). Ubuntu 24.04+
-is the build baseline; X11 and GNOME/KDE Wayland are supported.
-
-```sh
-chmod +x Scrawl-*-linux-*.AppImage
-./Scrawl-<version>-linux-x86_64.AppImage app
+chmod +x Apparent-*-linux-*.AppImage
+./Apparent-<version>-linux-x86_64.AppImage app
 ```
 
 Press **Alt+Shift+S** to record. On Wayland, clicks and Shift ink need access to input devices:
-run `sudo usermod -aG input "$USER"`, then **log out and back in**. Scrawl checks access in the
+run `sudo usermod -aG input "$USER"`, then **log out and back in**. Apparent checks access in the
 welcome tour and Settings › Permissions. If the AppImage reports a missing `libfuse.so.2`,
 install `libfuse2t64` on Ubuntu 24.04 (`libfuse2` on older distributions), or use
-`./Scrawl-<version>-linux-x86_64.AppImage --appimage-extract-and-run app`.
+`./Apparent-<version>-linux-x86_64.AppImage --appimage-extract-and-run app`.
 The first launch downloads the speech model (731 MB); captures get their transcript when it
 finishes. See [Linux](docs/linux.md) for desktop-specific limits.
 
@@ -44,20 +32,20 @@ finishes. See [Linux](docs/linux.md) for desktop-specific limits.
 Install the agent skill for Claude Code, OpenCode, Codex and other agents:
 
 ```sh
-bunx skills add kitlangton/scrawl
+bunx skills add tryapparent/apparent
 ```
 
-The `scrawl` command is the binary inside Scrawl.app. The Homebrew cask links it onto your PATH, or click
+The `apparent` command is the binary inside Apparent.app. Click
 **Install** beside Command-line tool in Settings › Agents, which links it into `/opt/homebrew/bin`
 or `/usr/local/bin` when you can write there, else `~/.local/bin`. The link always runs the app's
 current copy, so it updates with the app.
 
-With the skill, an agent that gets a Scrawl paste reads the contact sheet and transcript, opens the
-keyframes the narration points at, and uses the command to look closer: `scrawl zoom <bundle> --at
-0:12` (or `--at "a phrase you said"`, or `--mark 2` for the mark the text shows as ✎②; `scrawl
-inspect --marks` lists them) makes a dense sheet of frames around a moment, `scrawl
-frames` pulls a range, `scrawl send` queues a capture into an OpenCode session, and `scrawl export`
-makes a shareable `.mp4`. `scrawl skill` prints the skill without installing anything.
+With the skill, an agent that gets an Apparent paste reads the contact sheet and transcript, opens the
+keyframes the narration points at, and uses the command to look closer: `apparent zoom <bundle> --at
+0:12` (or `--at "a phrase you said"`, or `--mark 2` for the mark the text shows as ✎②; `apparent
+inspect --marks` lists them) makes a dense sheet of frames around a moment, `apparent
+frames` pulls a range, `apparent send` queues a capture into an OpenCode session, and `apparent export`
+makes a shareable `.mp4`. `apparent skill` prints the skill without installing anything.
 
 ## Usage
 
@@ -66,21 +54,21 @@ makes a shareable `.mp4`. `scrawl skill` prints the skill without installing any
 cargo run -- app
 
 # Generate a realistic multi-frame demo bundle and print its agent summary
-cargo run -- demo --out /tmp/demo.scrawl
+cargo run -- demo --out /tmp/demo.apparent
 
 # Open a bundle (or `latest`) in the native GPUI review window
-cargo run -- preview /tmp/demo.scrawl
+cargo run -- preview /tmp/demo.apparent
 
 # Print the agent summary or JSON manifest for a bundle
-cargo run -- inspect /tmp/demo.scrawl
-cargo run -- inspect /tmp/demo.scrawl --json
+cargo run -- inspect /tmp/demo.apparent
+cargo run -- inspect /tmp/demo.apparent --json
 
 # Extract frames in a time window for an agent to look closer
-cargo run -- frames /tmp/demo.scrawl --from 0:02 --to 0:07
+cargo run -- frames /tmp/demo.apparent --from 0:02 --to 0:07
 
 # Copy contact-sheet.png + summary.md to the clipboard or send to OpenCode V2
-cargo run -- send /tmp/demo.scrawl --clipboard
-cargo run -- send /tmp/demo.scrawl --session ses_...
+cargo run -- send /tmp/demo.apparent --clipboard
+cargo run -- send /tmp/demo.apparent --session ses_...
 
 # Which session a capture of a dev site would go to (without sending)
 cargo run -- route --url http://localhost:5173/
@@ -89,15 +77,15 @@ cargo run -- route --url http://localhost:5173/
 cargo run -- record --iphone --duration 8
 cargo run -- devices
 
-# Build a bundle from a ScrawlKit in-app recording (newest pair in ~/Downloads by default)
+# Build a bundle from a ApparentKit in-app recording (newest pair in ~/Downloads by default)
 cargo run -- import
 cargo run -- import ~/Downloads/20261013T164000.mp4 --timeline ~/Downloads/20261013T164000.json
 
 # Rebuild an existing bundle with the current transcriber and keyframe rules
-cargo run -- reprocess latest --out /tmp/again.scrawl
+cargo run -- reprocess latest --out /tmp/again.apparent
 
 # Build a capture whose build never ran (the app died first), in place; the app does this at launch
-cargo run -- recover ~/Library/Application\ Support/scrawl/captures/scrawl-….scrawl
+cargo run -- recover ~/Library/Application\ Support/apparent/captures/apparent-….apparent
 
 # Tune auto-crop on a Screen capture, live
 cargo run -- autocrop latest --serve --open
@@ -112,8 +100,8 @@ cargo run -- pin latest
 
 ## Welcome and permissions
 
-On first launch Scrawl opens a welcome window with four screens: a welcome, how ⌥⇧S works, one
-screen with every permission Scrawl needs, and a first capture. Each permission is a row with a
+On first launch Apparent opens a welcome window with four screens: a welcome, how ⌥⇧S works, one
+screen with every permission Apparent needs, and a first capture. Each permission is a row with a
 button that shows the macOS prompt (or, once asked, opens System Settings) and a check that appears
 by itself when macOS grants it (the window re-reads the grants every 0.5 s). Screen Recording is
 first and its button is filled in; after that the next row's button is. Grant them in any order;
@@ -126,19 +114,19 @@ Continue unlocks once all three are on, and the screen is skipped when they alre
 | Accessibility ("Device Control and Data Access" on macOS 27) | The key event tap (⌘Z, Esc, ⌘-shortcuts in the window log), and `⌥⇧V` and the Paste chip, which post ⌘V into the app in front | onboarding, required |
 | Camera | The cabled iPhone mirror (macOS treats it as a camera) | the first time you pick iPhone |
 
-Scrawl never asks for Input Monitoring. Clicks, drags and scrolls in other apps come from an AppKit
+Apparent never asks for Input Monitoring. Clicks, drags and scrolls in other apps come from an AppKit
 global mouse monitor (`NSEvent.addGlobalMonitorForEvents`), which needs no permission; ⇧ for ink
 and whether ⌥⇧ is still held after ⌥⇧S come from polled modifier flags, which need none either; key presses
 come from an active event tap, which Accessibility allows. macOS applies an Accessibility grant to
-a running app at once (System Settings shows no "Quit & Reopen" for it), and Scrawl makes the tap
+a running app at once (System Settings shows no "Quit & Reopen" for it), and Apparent makes the tap
 within half a second of it.
 
 Screen Recording and Accessibility are lists you drag an app into, so their button skips Apple's
 prompt: it opens the pane in System Settings, and a card flies from the button to just below the
 Settings window (or, with no room on screen there, over the window's empty lower area), with its
-Scrawl row lined up under the list. Drag that row into the list. The card follows the window,
-steps aside when another app is in front, and shows "Scrawl is allowed" once a fresh process sees
-the grant (a drop alone proves nothing). The row drags the `Scrawl.app` that contains the helper,
+Apparent row lined up under the list. Drag that row into the list. The card follows the window,
+steps aside when another app is in front, and shows "Apparent is allowed" once a fresh process sees
+the grant (a drop alone proves nothing). The row drags the `Apparent.app` that contains the helper,
 the bundle macOS grants. With Reduce Motion on, the card fades in place. Microphone and Camera
 can't be dragged in, so they use the macOS prompt.
 
@@ -151,32 +139,32 @@ could sit over a macOS prompt): once the keys are released it brings the permiss
 forward.
 
 A Screen Recording grant may not reach a running app, and macOS offers **Quit & Reopen** or
-**Later** as soon as it's granted. Either way nobody reopens Scrawl by hand. If you pick **Quit &
-Reopen**, macOS restarts Scrawl and the tour opens on the permissions screen again, Screen
-Recording checked. If you pick **Later** (or nothing), Scrawl checks whether it can capture anyway
+**Later** as soon as it's granted. Either way nobody reopens Apparent by hand. If you pick **Quit &
+Reopen**, macOS restarts Apparent and the tour opens on the permissions screen again, Screen
+Recording checked. If you pick **Later** (or nothing), Apparent checks whether it can capture anyway
 (a one-frame ScreenCaptureKit screenshot, tried only once a fresh helper reports the grant), and if
-it can't, the row shows "Reopening Scrawl" for a second and Scrawl relaunches itself into the same
+it can't, the row shows "Reopening Apparent" for a second and Apparent relaunches itself into the same
 screen. It only does that once in two minutes (`relaunchedAt` in the config); if a fresh copy
-still can't capture, the row's button becomes **Reopen Scrawl**. The relaunch waits for this copy
+still can't capture, the row's button becomes **Reopen Apparent**. The relaunch waits for this copy
 to exit and opens the app without `-n`, so if macOS's Quit & Reopen got there first there's still
-one Scrawl. `scrawl sck-probe [--watch SECONDS]` and `scrawl-helper sck-probe` try the same
+one Apparent. `apparent sck-probe [--watch SECONDS]` and `apparent-helper sck-probe` try the same
 capture from the command line.
 
-Progress is `"onboarding"` in `~/.config/scrawl/config.json`, including the screen the tour is on,
-so it picks up there whatever quits Scrawl. Once seen, the tour only comes back from **Welcome
+Progress is `"onboarding"` in `~/.config/apparent/config.json`, including the screen the tour is on,
+so it picks up there whatever quits Apparent. Once seen, the tour only comes back from **Welcome
 tour** in Settings › About, but a required permission that was granted and is gone again reopens the
-permissions screen at launch. `SCRAWL_NO_ONBOARDING=1` skips it.
+permissions screen at launch. `APPARENT_NO_ONBOARDING=1` skips it.
 
 To replay it from scratch:
 
 ```sh
-tccutil reset All dev.kitlangton.scrawl
-jq 'del(.onboarding)' ~/.config/scrawl/config.json > /tmp/c.json && mv /tmp/c.json ~/.config/scrawl/config.json
-# then quit and reopen Scrawl
+tccutil reset All dev.kitlangton.apparent
+jq 'del(.onboarding)' ~/.config/apparent/config.json > /tmp/c.json && mv /tmp/c.json ~/.config/apparent/config.json
+# then quit and reopen Apparent
 ```
 
 Preview every screen without the app, including the permissions screen with none, some and all
-granted and each on-demand sheet: `target/debug/scrawl-helper onboarding --render /tmp/onboarding
+granted and each on-demand sheet: `target/debug/apparent-helper onboarding --render /tmp/onboarding
 --icon assets/app-icon.png`.
 
 ## Settings
@@ -189,31 +177,31 @@ granted and each on-demand sheet: `target/debug/scrawl-helper onboarding --rende
   language, Hex while it runs, with its model and language, or Command when it's configured) and,
   under Experimental, Video export.
 - **Storage**: how long recordings are kept, where new captures go (Change…/Reset on macOS, `"capturesDir"` in
-  `~/.config/scrawl/config.json` everywhere; captures already made stay put, and an unusable folder falls back to the built-in one), how much space they take, and Show in Finder.
+  `~/.config/apparent/config.json` everywhere; captures already made stay put, and an unusable folder falls back to the built-in one), how much space they take, and Show in Finder.
 - **Permissions**: the onboarding checklist, so a permission can be turned on later.
-- **Agents**: Install or Uninstall the `scrawl` command (see [Agents](#agents)), and the skill's
-  install command with Copy. A `scrawl` that belongs to another program is left alone.
+- **Agents**: Install or Uninstall the `apparent` command (see [Agents](#agents)), and the skill's
+  install command with Copy. A `apparent` that belongs to another program is left alone.
 - **About**: the version, Check for Updates…, links, and the welcome tour.
 
 To change a shortcut, click its keys and press the new combination; `Esc` cancels. It needs ⌘, ⌥
-or ⌃ (a function key can stand alone), and Scrawl turns down ⌘ with one key, combinations macOS
-uses, the other Scrawl shortcut, and anything another app has already taken. The arrow beside the
-heading puts the default back. While the recorder listens, Scrawl's own shortcuts are paused. They
-are saved as `"shortcuts"` in `~/.config/scrawl/config.json`. The menu keeps Record Screen, Choose
+or ⌃ (a function key can stand alone), and Apparent turns down ⌘ with one key, combinations macOS
+uses, the other Apparent shortcut, and anything another app has already taken. The arrow beside the
+heading puts the default back. While the recorder listens, Apparent's own shortcuts are paused. They
+are saved as `"shortcuts"` in `~/.config/apparent/config.json`. The menu keeps Record Screen, Choose
 What to Record…, Open Latest Capture, Export Last Capture as Video… (when on), Settings…, Check
 for Updates… and Quit.
 
 **Microphone** lists the connected inputs, with System default first, which follows whatever macOS
 uses as it changes. The list updates as devices are plugged in or out. A chosen device is saved by
-its CoreAudio UID as `"microphone": {"id", "name"}`; if it isn't connected when you record, Scrawl
+its CoreAudio UID as `"microphone": {"id", "name"}`; if it isn't connected when you record, Apparent
 records from the default instead and says so under the popup (and once in the log). The level
 meter runs only while the Recording pane is on screen and Microphone is allowed. Cabled-iPhone
-narration uses the same microphone. From the terminal, `scrawl mic list` shows the inputs and the
-one recordings will use, `scrawl mic set <id|default>` chooses, and `scrawl mic watch` prints the
+narration uses the same microphone. From the terminal, `apparent mic list` shows the inputs and the
+one recordings will use, `apparent mic set <id|default>` chooses, and `apparent mic watch` prints the
 list again on every change.
 
 Preview every pane, dark and light, with the recorder listening and a combination turned down:
-`target/debug/scrawl-helper settings --render /tmp/settings --icon assets/app-icon.png`.
+`target/debug/apparent-helper settings --render /tmp/settings --icon assets/app-icon.png`.
 
 ## Capture Controls
 
@@ -246,13 +234,13 @@ While picking a target, the island shows the modes **Area**, **Window**, **Scree
 
 A capture that ends with a browser in front showing a project's dev site goes straight to that
 project's OpenCode session, the same way iPhone recordings do. It is still copied to the clipboard.
-The island says "Sending to SCRAWL…", then "Sent to SCRAWL", or "Copied · couldn't reach SCRAWL"
+The island says "Sending to APPARENT…", then "Sent to APPARENT", or "Copied · couldn't reach APPARENT"
 when OpenCode didn't take it (the app retries it, as for iPhone recordings). Window captures use the
 captured window's app instead of the one in front. Brave, Chrome, Arc, Edge, Vivaldi, Chromium, and
-Safari work; macOS asks once whether Scrawl may control the browser, so it can read the tab's
+Safari work; macOS asks once whether Apparent may control the browser, so it can read the tab's
 address. If you decline, captures stay on the clipboard.
 
-Scrawl picks the session in this order:
+Apparent picks the session in this order:
 
 1. **The page registered itself.** Add one dev-only line to the page:
 
@@ -261,14 +249,14 @@ Scrawl picks the session in this order:
    ```
 
    or `data-directory="/abs/path/to/project"` to use that project's most recently active session.
-   The script comes from Scrawl itself. It registers the tab, sends a heartbeat every 30 s while the
+   The script comes from Apparent itself. It registers the tab, sends a heartbeat every 30 s while the
    tab is visible, and unregisters when the tab closes (a registration lasts 2 minutes after its
    last heartbeat). With Vite, inject it only in dev:
 
    ```ts
    // vite.config.ts
    plugins: [{
-     name: "scrawl",
+     name: "apparent",
      apply: "serve",
      transformIndexHtml: () => [{
        tag: "script",
@@ -279,42 +267,42 @@ Scrawl picks the session in this order:
    ```
 
    The script does nothing unless the page is on `localhost`, `*.localhost`, `127.x`, or `[::1]`.
-   Scrawl accepts a registration without a token only from a loopback origin calling from this Mac,
+   Apparent accepts a registration without a token only from a loopback origin calling from this Mac,
    and only for that origin. A page anywhere else (a `*.ts.net` dev host, say) must also set
-   `data-token` to the ingest token (`ingestToken` in `~/.config/scrawl/config.json`).
-2. **Zero setup for localhost.** If the tab is on a loopback host and no page registered, Scrawl
+   `data-token` to the ingest token (`ingestToken` in `~/.config/apparent/config.json`).
+2. **Zero setup for localhost.** If the tab is on a loopback host and no page registered, Apparent
    finds the process listening on that port (`lsof`), its working directory and that directory's
    git root, and sends to the most recently active open root session in the repository (any folder
    in it). Outside a git repository only a session in that exact folder counts.
 3. Otherwise the capture is copied to the clipboard only, as before.
 
-The destination is recorded in `scrawl.json` (`destination: {session, title, via: "sdk" |
+The destination is recorded in `apparent.json` (`destination: {session, title, via: "sdk" |
 "localhost", url, directory}`) and on the second line of `summary.md`
-(`For session: SCRAWL (ses_…) · page http://localhost:5173/`). `scrawl send` without `--session`
+(`For session: APPARENT (ses_…) · page http://localhost:5173/`). `apparent send` without `--session`
 sends to it again, and refuses a different `--session` unless you pass `--reroute`.
 
 To see where a capture of a URL would go, without sending anything:
 
 ```sh
-scrawl route --url http://localhost:5173/
-scrawl route --browser com.brave.Browser   # the browser's front tab
+apparent route --url http://localhost:5173/
+apparent route --browser com.brave.Browser   # the browser's front tab
 ```
 
 Turn it off with **Send dev-site captures to OpenCode** in Settings › General, or `"autoSend": false` in
-`~/.config/scrawl/config.json`. `SCRAWL_NO_OPENCODE=1` also turns it off.
+`~/.config/apparent/config.json`. `APPARENT_NO_OPENCODE=1` also turns it off.
 
 ## Auto-crop (Screen captures)
 
 Instead of picking an area up front, record the whole screen: tap `⌥⇧S`, or choose **Screen**.
 Area and Window captures aren't cropped.
-Scrawl works out where you were gesturing and crops each keyframe to it. While a Screen capture
-records, Scrawl logs:
+Apparent works out where you were gesturing and crops each keyframe to it. While a Screen capture
+records, Apparent logs:
 
-- **`windows`** in `scrawl.json`: the on-screen windows, front to back (id, app, bundle ID, title,
+- **`windows`** in `apparent.json`: the on-screen windows, front to back (id, app, bundle ID, title,
   bounds in capture points, layer, frontmost), including the menu bar and the Dock's strip. A
   snapshot is taken at the start, when a click, ink stroke or shortcut starts, when the frontmost
   app changes, at most every 500 ms while the cursor moves and every 2 s otherwise, and stored only
-  when the list changed. Each snapshot costs about 0.5 ms. Titles stay in `scrawl.json`; they never
+  when the list changed. Each snapshot costs about 0.5 ms. Titles stay in `apparent.json`; they never
   go into `summary.md` or the clipboard.
 - **`cursor`**: the cursor at up to 15 Hz while it moves, as `[t, x, y]` (normalized), so dwell
   counts.
@@ -340,12 +328,12 @@ The bundle then has:
   keyframes are decoded from the 2560 px wide recording), with the ink and keyframe numbers redrawn at the crop's scale;
 - `frames-full/frame-XX.png` and `contact-sheet-full.png`: the uncropped versions;
 - one line in `summary.md`, e.g. `Cropped to: Ghostty + Safari (full frames in frames-full/)`;
-- `autocrop` in `scrawl.json`: each keyframe's crop in points, its kind and reason, and the
+- `autocrop` in `apparent.json`: each keyframe's crop in points, its kind and reason, and the
   changed regions that fed it.
 
-`scrawl zoom` crops its cells like the nearest keyframe (`--full` for the whole screen).
-`scrawl reprocess <bundle> --out <dir>` re-runs it on an existing Screen capture from its video.
-To turn it off, or change a setting, use `~/.config/scrawl/config.json`:
+`apparent zoom` crops its cells like the nearest keyframe (`--full` for the whole screen).
+`apparent reprocess <bundle> --out <dir>` re-runs it on an existing Screen capture from its video.
+To turn it off, or change a setting, use `~/.config/apparent/config.json`:
 
 ```json
 { "autocrop": false }
@@ -354,7 +342,7 @@ To turn it off, or change a setting, use `~/.config/scrawl/config.json`:
 
 ### Tuning
 
-`scrawl autocrop <bundle|latest> --serve --open` opens a playground that runs the same Rust crop as
+`apparent autocrop <bundle|latest> --serve --open` opens a playground that runs the same Rust crop as
 you move its sliders: each keyframe with its windows, activity, cursor heat, outliers and crop, the
 cropped frame, and the cropped contact sheet. **Copy settings** gives the JSON for the config.
 Without `--serve` it writes `autocrop/index.html` with the presets only.
@@ -363,8 +351,8 @@ The settings were tuned on simulated captures with hand-labelled ideal crops: on
 terminal, two windows side by side, an arrow from one window to another, a tiny badge in a huge
 window, a menu-bar menu, talk-only keyframes, a dragged window, overlapping windows, thirty seconds
 hopping between three windows, a stray cursor, a full-screen app, and a scrolling page.
-`scripts/autocrop-corpus.mjs` renders them with Playwright (from `site/node_modules`), `scrawl
-fixture` builds each into a real bundle through the capture pipeline, `scrawl autocrop-eval` scores
+`scripts/autocrop-corpus.mjs` renders them with Playwright (from `site/node_modules`), `apparent
+fixture` builds each into a real bundle through the capture pipeline, `apparent autocrop-eval` scores
 the crops (coverage of the ink and clicks, overlap with the ideal, context, legibility in the sheet,
 stability; `--sweep` searches the settings), and `scripts/autocrop-gallery.mjs` renders a gallery to
 judge them by eye:
@@ -372,9 +360,9 @@ judge them by eye:
 ```sh
 bun scripts/autocrop-corpus.mjs /tmp/corpus
 for s in /tmp/corpus/*/scenario.json; do
-  scrawl fixture "$s" --out "/tmp/bundles/$(basename "$(dirname "$s")").scrawl"
+  apparent fixture "$s" --out "/tmp/bundles/$(basename "$(dirname "$s")").apparent"
 done
-scrawl autocrop-eval /tmp/bundles --json /tmp/scores.json   # add --sweep to search
+apparent autocrop-eval /tmp/bundles --json /tmp/scores.json   # add --sweep to search
 bun scripts/autocrop-gallery.mjs /tmp/gallery /tmp/bundles --scores /tmp/scores.json
 ```
 
@@ -398,38 +386,38 @@ phone on the right of the screen and starts recording:
   and show as `⚑` in the summary.
 - Finish from the island as usual. Unplugging the phone finishes the capture with what was recorded.
 
-Phone bundles are ordinary bundles: `scrawl.json` adds `"source": "iphone"` and a `device` object
-(name, capture `mirror` or `scrawlkit`, id, native size, screen points and scale, app and version
+Phone bundles are ordinary bundles: `apparent.json` adds `"source": "iphone"` and a `device` object
+(name, capture `mirror` or `apparentkit`, id, native size, screen points and scale, app and version
 for SDK recordings), and the target's `mode` is `device`. Keyframes fit a 1600 px long edge
-(736×1600 for a 1320×2868 phone); `scrawl frames` and `scrawl zoom` extract more frames from the
+(736×1600 for a 1320×2868 phone); `apparent frames` and `apparent zoom` extract more frames from the
 video when you need them.
 
-### ScrawlKit (iOS)
+### ApparentKit (iOS)
 
-`ScrawlKit` (`Sources/ScrawlKit`) is a Swift package (iOS 18+) for recording inside your own iOS app:
+`ApparentKit` (`Sources/ApparentKit`) is a Swift package (iOS 18+) for recording inside your own iOS app:
 video of the app with narration, touches and freehand red strokes, markers, and app events on the
-same clock, sent straight to Scrawl on your Mac.
+same clock, sent straight to Apparent on your Mac.
 
-Add this repo as a Swift package dependency (product `ScrawlKit`) and attach `.scrawl()` to your root
+Add this repo as a Swift package dependency (product `ApparentKit`) and attach `.apparent()` to your root
 view:
 
 ```swift
-import ScrawlKit
+import ApparentKit
 
-WindowGroup { ContentView().scrawl() }   // three-finger long press starts and stops
-Scrawl.event("Done tapped")              // optional: what the app did, on the timeline
+WindowGroup { ContentView().apparent() }   // three-finger long press starts and stops
+Apparent.event("Done tapped")              // optional: what the app did, on the timeline
 ```
 
 The host app needs `NSMicrophoneUsageDescription` in its Info.plist for narration (both capture
-methods use the microphone). Set `Scrawl.shared.narration = false` to record without it.
+methods use the microphone). Set `Apparent.shared.narration = false` to record without it.
 
-`Scrawl.shared.captureMethod` picks how the video is made:
+`Apparent.shared.captureMethod` picks how the video is made:
 
-- **`.appFrames`** (default): ScrawlKit draws the app's own windows into an H.264 `.mp4` at 30 fps
+- **`.appFrames`** (default): ApparentKit draws the app's own windows into an H.264 `.mp4` at 30 fps
   and 2× (880×1912 on a 440×956-point phone), with the microphone recorded alongside. There is no
   screen-recording prompt; the microphone asks once and iOS remembers the answer. If it's denied, the
   recording is video only and the timeline says `"audio": false`. The strip and ink are left out of
-  the video (Scrawl on the Mac draws touches and strokes from the timeline), but so is
+  the video (Apparent on the Mac draws touches and strokes from the timeline), but so is
   anything the app doesn't draw itself: system alerts and permission prompts, and some layers (video
   players, camera previews, some Metal or backdrop effects) may be blank or look different. The
   system keyboard is drawn by another process, so its keys can't be captured: a plain panel labelled
@@ -448,7 +436,7 @@ On paired devices, the three-finger trigger turns off iOS's three-finger text-ed
 the app (UIKit's `editingInteractionConfiguration` answers `.none` for the app's windows), because
 the same press would otherwise open the Undo · Cut · Copy · Redo bar when a text field is focused.
 The cost is that three-finger undo, redo, cut, copy, and paste don't work in that app on a paired
-phone. Set `Scrawl.shared.suppressesSystemEditingGestures = false` to keep them. Unpaired devices
+phone. Set `Apparent.shared.suppressesSystemEditingGestures = false` to keep them. Unpaired devices
 are unaffected.
 
 While recording, a slim strip sits on the right edge (drag its dot to move it up or down or over to
@@ -477,27 +465,27 @@ Drawn strokes are smooth and fade on their own:
   when it began until 1.2 s after it ended, or with the rest of its mark.
 
 Touches aren't drawn on screen in either capture method. Each touch goes on the timeline (position,
-phase, and the label of the element under it) and Scrawl on the Mac draws taps and swipes from it.
+phase, and the label of the element under it) and Apparent on the Mac draws taps and swipes from it.
 
-ScrawlKit stays completely inert on devices that haven't been configured (no gesture recognizers,
+ApparentKit stays completely inert on devices that haven't been configured (no gesture recognizers,
 overlay window, network calls, files, or background `URLSession`). To pair your iPhone with this Mac, print a setup link (and
 terminal QR code) and open it on the phone:
 
 ```sh
-scrawl link --scheme updown [--session ses_…]
-# updown://scrawl?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=…
+apparent link --scheme updown [--session ses_…]
+# updown://apparent?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=…
 ```
 
-`scrawl link` reads (or generates with mode `0600`) `ingestToken` in
-`~/.config/scrawl/config.json` and defaults to this Mac's Tailscale and LAN IPs on port `47777`.
+`apparent link` reads (or generates with mode `0600`) `ingestToken` in
+`~/.config/apparent/config.json` and defaults to this Mac's Tailscale and LAN IPs on port `47777`.
 In Settings › General, enable **Allow phone uploads from other devices** before using the LAN or
 Tailscale URLs. It is off by default: the GUI keeps port 47777 on loopback for dev-page routing,
 and switching it off again closes the all-interfaces listener without a restart. The cabled
-iPhone mirror and USB fallback still work. `scrawl serve` is an explicit remote listener and does
+iPhone mirror and USB fallback still work. `apparent serve` is an explicit remote listener and does
 not follow this GUI setting.
-Opening `<scheme>://scrawl?reset=1` on the phone clears its Keychain config (`dev.kitlangton.scrawl`).
-For cabled USB fallback via `devicectl` (`Documents/Scrawl`), list the app bundle IDs in
-`~/.config/scrawl/config.json` under `"usbApps": ["com.kitlangton.UpDown"]`.
+Opening `<scheme>://apparent?reset=1` on the phone clears its Keychain config (`dev.kitlangton.apparent`).
+For cabled USB fallback via `devicectl` (`Documents/Apparent`), list the app bundle IDs in
+`~/.config/apparent/config.json` under `"usbApps": ["com.kitlangton.UpDown"]`.
 
 The Mac answers an upload once it has built the bundle and queued it into the OpenCode session (or
 after up to 45 s), so the strip says what happened:
@@ -511,16 +499,16 @@ after up to 45 s), so the strip says what happened:
 | Bundle couldn't be built | HTTP 500 | Mac didn't answer · Share |
 
 A queued bundle gets `.deliver.json` and the Mac retries it every 15 s, backing off to 30 min, for
-a day (then it's renamed `.deliver-failed.json`; both are logged to `~/Library/Logs/Scrawl/scrawl.log`).
+a day (then it's renamed `.deliver-failed.json`; both are logged to `~/Library/Logs/Apparent/apparent.log`).
 The phone doesn't upload it again. Over USB the Mac writes the same reply to `<stamp>.delivery`
 before `<stamp>.sent`. Replies without `delivered` (Macs from before this) read as sent.
 
-You can also AirDrop the `.mp4` and `.json` pair to the Mac and run `scrawl import`:
+You can also AirDrop the `.mp4` and `.json` pair to the Mac and run `apparent import`:
 
 - Touches become taps and swipes, drawn on keyframes as ripples and finger trails and listed in the
   review timeline. Each tap or swipe is a keyframe candidate, like a click.
 - Markers become flags.
-- App events (`Scrawl.event("Done tapped")`) appear in `summary.md` under the keyframe that was on
+- App events (`Apparent.event("Done tapped")`) appear in `summary.md` under the keyframe that was on
   screen when they happened (`  · 0:12 app: Done tapped`).
 
 #### Destination and recovery
@@ -532,26 +520,26 @@ can still send to the paired OpenCode iOS coordinator. Automatic Mac ingest reso
 destination first; without one, it uses the app/session fallback in `resolve_opencode_session`.
 
 When recovering a failed delivery, read that original top-level field and check whether the capture
-already arrived before sending again. `scrawl send --session` explicitly overrides the recipient;
+already arrived before sending again. `apparent send --session` explicitly overrides the recipient;
 do not fill it from `context.session`. If there is no recorded destination and ownership is unclear,
 ask before forwarding. Keep private-project endpoints and recipients unchanged.
 
 #### Sending to an HTTPS endpoint
 
 A setup link can point at a hosted endpoint instead of a Mac, for phones that aren't on your LAN or
-tailnet (for example `ledger://scrawl?url=https%3A%2F%2Fproblems.example.com%2Fapi%2Fscrawl%2Fledger&token=pbcap_…`).
+tailnet (for example `ledger://apparent?url=https%3A%2F%2Fproblems.example.com%2Fapi%2Fapparent%2Fledger&token=pbcap_…`).
 It speaks the same protocol as the Mac: `GET {url}/health` and `POST {url}/ingest` with a bearer
 token, where the body is a 4-byte big-endian timeline length, the timeline JSON, then the MP4. When
 any configured URL is `https`, recordings go through a durable outbox instead of the LAN path
 (plain `http` URLs keep the direct POST plus USB fallback):
 
 - **Saved before sending.** On Send, the framed payload and a small metadata file (target,
-  `recordedAt`, attempts, last error) are written to `Application Support/ScrawlOutbox`. They're
+  `recordedAt`, attempts, last error) are written to `Application Support/ApparentOutbox`. They're
   protected until the phone's first unlock, so uploads can run while it's locked, and excluded from
-  backup. The recording never goes to `Documents/Scrawl` (it's staged in `tmp`) and isn't added to
-  `Scrawl.shared.recordings`. An entry is deleted only after a 2xx.
+  backup. The recording never goes to `Documents/Apparent` (it's staged in `tmp`) and isn't added to
+  `Apparent.shared.recordings`. An entry is deleted only after a 2xx.
 - **Background upload.** Uploads are file uploads on a background `URLSession`
-  (`dev.kitlangton.scrawl.outbox.<bundle ID>`), so they survive the app being suspended or killed
+  (`dev.kitlangton.apparent.outbox.<bundle ID>`), so they survive the app being suspended or killed
   and never load the movie into memory. The session is recreated whenever the app is configured, and
   it picks up uploads still in flight from an earlier launch.
 - **Retries.** A 401 or 403 (the link was revoked), a 413 (too large) and any other 4xx except 408
@@ -569,11 +557,11 @@ any configured URL is `https`, recordings go through a durable outbox instead of
   only for no network or a failed attempt waiting to retry; it leaves after a few seconds, and if a
   retry starts while it's up it goes back to "Sending…". If the upload lands after the strip has
   gone (a new recording took over, it was queued, or the app was in the background), the strip comes
-  back briefly with "Sent to …", as soon as the app is in front. Permanent failures say "Scrawl link
+  back briefly with "Sent to …", as soon as the app is in front. Permanent failures say "Apparent link
   expired · Ask Kit for a new one", "Too large to send" or "Couldn't send", with Share, which shares
   copies of the recording and leaves the entry queued.
 - **Revoked links.** The `/health` check at the start of a recording also goes to the HTTPS
-  endpoint. A 401 there shows "Scrawl link expired" beside the strip, but the recording carries on
+  endpoint. A 401 there shows "Apparent link expired" beside the strip, but the recording carries on
   and is kept in the outbox, marked failed, until the link is renewed.
 
 The endpoint rejects bodies over 95 MB, so HTTPS recordings are smaller and capped:
@@ -597,20 +585,20 @@ launch:
 ```swift
 func application(_: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                  completionHandler: @escaping () -> Void) {
-  Scrawl.handleBackgroundURLSessionEvents(identifier: identifier, completionHandler: completionHandler)
+  Apparent.handleBackgroundURLSessionEvents(identifier: identifier, completionHandler: completionHandler)
 }
 ```
 
 #### App context
 
 The app can say which screen it's on and add its own key/values, so the agent doesn't have to guess
-from pixels. ScrawlKit sends only what the app passes in, plus its bundle ID, name, version, and build.
+from pixels. ApparentKit sends only what the app passes in, plus its bundle ID, name, version, and build.
 
 ```swift
-SettingsView().scrawlScreen("Settings › Experimental")   // while visible; restores the previous on disappear
-SessionView().scrawlContext("session", session.id)       // follows the value; nil leaves it to enclosing views
-Scrawl.screen("Onboarding")                              // or set either one directly (nil clears)
-Scrawl.context("server", "studio")
+SettingsView().apparentScreen("Settings › Experimental")   // while visible; restores the previous on disappear
+SessionView().apparentContext("session", session.id)       // follows the value; nil leaves it to enclosing views
+Apparent.screen("Onboarding")                              // or set either one directly (nil clears)
+Apparent.context("server", "studio")
 ```
 
 The most recently appeared screen that is still visible wins, so pushed screens, sheets, and tabs
@@ -620,7 +608,7 @@ The bundle keeps them as `context`, `contextChanges`, and `screens` spans (`{t0,
 `summary.md` (and the prompt queued into OpenCode) shows them:
 
 ```
-[scrawl 0:25 · iPhone · OpenCode 1.4 (354) · /…/20261014-101500.scrawl]
+[apparent 0:25 · iPhone · OpenCode 1.4 (354) · /…/20261014-101500.apparent]
 Open contact-sheet.png and frames/ in that folder before changing anything: the marks and words only make sense on the images, which can show more than the text does.
 Screen: Sessions · server: studio · session: ses_3f…
 - #1 (0:01) “So here.”
@@ -628,37 +616,37 @@ Screen: Sessions · server: studio · session: ses_3f…
   · 0:09 server → mini
 ```
 
-### Headless ingest server (`scrawl serve`)
+### Headless ingest server (`apparent serve`)
 
-On an always-on Mac (such as a Mac Studio reachable over Tailscale), run `scrawl serve` to accept
-authenticated ScrawlKit uploads, build `.scrawl` bundles, and route them straight into local
+On an always-on Mac (such as a Mac Studio reachable over Tailscale), run `apparent serve` to accept
+authenticated ApparentKit uploads, build `.apparent` bundles, and route them straight into local
 OpenCode sessions without running the GUI app:
 
 ```sh
-scrawl serve [--port 47777] [--usb]
+apparent serve [--port 47777] [--usb]
 ```
 
-To run `scrawl serve` under `launchd`, copy `scripts/scrawl-serve.plist` into `~/Library/LaunchAgents`
+To run `apparent serve` under `launchd`, copy `scripts/apparent-serve.plist` into `~/Library/LaunchAgents`
 and load it:
 
 ```sh
-cp scripts/scrawl-serve.plist ~/Library/LaunchAgents/dev.kitlangton.scrawl.serve.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kitlangton.scrawl.serve.plist
+cp scripts/apparent-serve.plist ~/Library/LaunchAgents/dev.kitlangton.apparent.serve.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kitlangton.apparent.serve.plist
 ```
 
 ## Export as video
 
-`scrawl export` turns a bundle into one shareable `.mp4`: H.264 (`--hevc` for HEVC) with AAC audio in
+`apparent export` turns a bundle into one shareable `.mp4`: H.264 (`--hevc` for HEVC) with AAC audio in
 sync, the red ink, pins, laser and click ripples burned in at the times they happened, cropped to
-where the activity was. It runs in `scrawl-helper` on AVFoundation (hardware decode and encode, Core
+where the activity was. It runs in `apparent-helper` on AVFoundation (hardware decode and encode, Core
 Image for the crop, Core Graphics for the ink), so nothing is decoded into Rust and ffmpeg isn't
 needed.
 
 ```sh
-scrawl export latest                              # ~/Movies/Scrawl/<bundle>.mp4
-scrawl export latest --out demo.mp4 --zoom        # with Screen Studio-style auto-zoom
-scrawl export latest --crop full --size 1280      # whole capture, 1280 px long edge
-scrawl export latest --crop 0.1,0.2,0.6,0.5       # x,y,w,h as fractions, or pixels of the video
+apparent export latest                              # ~/Movies/Apparent/<bundle>.mp4
+apparent export latest --out demo.mp4 --zoom        # with Screen Studio-style auto-zoom
+apparent export latest --crop full --size 1280      # whole capture, 1280 px long edge
+apparent export latest --crop 0.1,0.2,0.6,0.5       # x,y,w,h as fractions, or pixels of the video
 ```
 
 - **Crop** (`--crop auto|full|x,y,w,h`): `auto`, the default, is auto-crop's whole-recording crop for
@@ -673,7 +661,7 @@ scrawl export latest --crop 0.1,0.2,0.6,0.5       # x,y,w,h as fractions, or pix
   uses its own audio track. `--no-ink` and `--no-clicks` leave the annotations out, `--fps` sets the
   rate (default 60 for a 60 fps recording).
 - **Menu**: with **Video export** on in Settings › Recording (`"videoExport": true` in
-  `~/.config/scrawl/config.json`, default off), the menu shows **Export Last Capture as Video…**. It saves to `~/Movies/Scrawl/<name>.mp4`, shows progress
+  `~/.config/apparent/config.json`, default off), the menu shows **Export Last Capture as Video…**. It saves to `~/Movies/Apparent/<name>.mp4`, shows progress
   beside the menu bar icon, and reveals the file in Finder. The command works without the flag.
 
 ## Keeping captures small
@@ -683,30 +671,30 @@ hourly, at low priority, and logs what it did:
 
 - **Video, audio and full-size frames** (`recording.mp4`/`.mov`, `audio.wav`, `frames-full/`),
   plus the `zoom/` sheets made from them, go to the Trash after 7 days, as one `<bundle> media`
-  folder. The prompt (`summary.md`, `scrawl.json`, `contact-sheet.png`, `frames/`) stays, so
-  pasting and reading still work; `scrawl zoom` says the video was cleaned up.
+  folder. The prompt (`summary.md`, `apparent.json`, `contact-sheet.png`, `frames/`) stays, so
+  pasting and reading still work; `apparent zoom` says the video was cleaned up.
 - **Whole bundles** go to the Trash after 30 days.
 - **Keep recordings** in Settings › Storage picks Video for 7 Days (bundles 30), Video for 30 Days
   (bundles 90), or Forever. It's stored as `"retention": {"mediaDays": 7, "bundleDays": 30}` in
-  `~/.config/scrawl/config.json`; `null` keeps forever. The same pane shows how much the captures
+  `~/.config/apparent/config.json`; `null` keeps forever. The same pane shows how much the captures
   take and opens the folder in Finder.
 - Never touched: a bundle under a day old or changed in the last day (a copy just arrived from
   another Mac, a zoom), one whose media is still copying (`.media-pending` there, `.media-sending`
   here; a marker over a day old is ignored), one being recorded or re-encoded, and one with a
-  `.pinned` file (`scrawl pin`, `scrawl pin --off`).
+  `.pinned` file (`apparent pin`, `apparent pin --off`).
 - **iPhone video** from the cable is ~18 Mbps at 1320×2868. A minute after the capture (after any
-  copy to another Mac finishes, and never during a recording) `scrawl-helper shrink` re-encodes it
+  copy to another Mac finishes, and never during a recording) `apparent-helper shrink` re-encodes it
   to HEVC at a 1600 px long edge, audio copied as is and every frame at its original time, and
   swaps it in place: a 4.5-minute capture goes from 750 MB to 72 MB in about 20 s. One pass a day
   shrinks any native iPhone video that was missed.
 
-`scrawl clean --dry-run` prints what a pass would do now.
+`apparent clean --dry-run` prints what a pass would do now.
 
 ## Transcription
 
 Narration is transcribed on device by Apple's SpeechAnalyzer (macOS 26), or on macOS 15 by the
 older on-device `SFSpeechRecognizer`. On macOS 15 onboarding asks for Speech Recognition, and
-Dictation's on-device model has to be on the Mac (System Settings › Keyboard › Dictation); Scrawl
+Dictation's on-device model has to be on the Mac (System Settings › Keyboard › Dictation); Apparent
 never falls back to Apple's servers. Both report when every word was spoken. The word timings
 drive two things:
 
@@ -722,11 +710,11 @@ drive two things:
 
 ### Apple or Hex
 
-Apple's SpeechAnalyzer is the default; Scrawl prepares its language model automatically. If you use Hex
-(2.2 or later, running), Scrawl can transcribe with it instead and with whichever model Hex has
+Apple's SpeechAnalyzer is the default; Apparent prepares its language model automatically. If you use Hex
+(2.2 or later, running), Apparent can transcribe with it instead and with whichever model Hex has
 ready: Settings › Recording › **Transcription** → **Hex**, then pick a model under **Hex model**.
 Or in
-`~/.config/scrawl/config.json`:
+`~/.config/apparent/config.json`:
 
 ```json
 { "transcriber": "hex", "hexModel": "whisper_large_v3_turbo", "hexLanguage": "nl" }
@@ -734,46 +722,46 @@ Or in
 
 `"transcriber"` is `"apple"` (default), `"hex"` or `"command"` (below); `hexModel` defaults to the
 first ready one of `parakeet_unified_en`, `parakeet_v3`, `parakeet_v2`, `whisper_large_v3_turbo`.
-Scrawl never downloads or prepares a Hex model: install it in Hex first.
+Apparent never downloads or prepares a Hex model: install it in Hex first.
 
 **Language** in Settings › Recording picks the language Apple Speech transcribes; **Automatic**
 (the default) follows the Mac's language. In config it's `"appleLocale"`, e.g. `"zh-TW"` for
-Traditional Chinese (Taiwan). Scrawl downloads that language's model in the background, and a
+Traditional Chinese (Taiwan). Apparent downloads that language's model in the background, and a
 language this Mac doesn't support falls back to Automatic (Settings names the one it uses).
 
 **Hex language** in Settings › Recording (or `"hexLanguage"` in config) sets the language
 code sent to Hex. It defaults to `en` to preserve existing behavior; use `nl` for Dutch or
 `auto` for automatic detection when the model supports it. Press Return or Apply to save;
-a blank field resets to `en`. Codes are not restricted to a list in Scrawl: Hex validates
-model/language support. If Hex rejects a language/model combination, Scrawl uses the existing
+a blank field resets to `en`. Codes are not restricted to a list in Apparent: Hex validates
+model/language support. If Hex rejects a language/model combination, Apparent uses the existing
 Apple Speech fallback. This setting does not inherit Hex's dictation language. Whisper uses the selected
 language to guide recognition; models such as Parakeet v3 determine language from audio
 and ignore the hint.
 
-- Hex is optional. When it isn't running, **Hex** is greyed out as "Hex (not running)" and Scrawl
+- Hex is optional. When it isn't running, **Hex** is greyed out as "Hex (not running)" and Apparent
   uses Apple, whatever the saved preference. If Hex fails on a recording, that recording falls back
-  to Apple Speech (see `~/Library/Logs/Scrawl`).
-- Hex returns text without word times, so Scrawl sends each stretch of speech separately and
+  to Apple Speech (see `~/Library/Logs/Apparent`).
+- Hex returns text without word times, so Apparent sends each stretch of speech separately and
   spreads its words across it by length. The transcript says `"source": "hex:<model>"` and
   `"estimated": true`; because those times are approximate, spoken cues ("now", "here") don't cut
   keyframes from a Hex transcript. Marks, clicks, laser and scene changes still do.
-- `scrawl hex status` shows whether Hex is connected, its ready models and what the next recording
-  will use. `scrawl reprocess <bundle> --out … --transcriber hex|apple|command` (also
-  `scrawl import`) picks an engine for one run.
+- `apparent hex status` shows whether Hex is connected, its ready models and what the next recording
+  will use. `apparent reprocess <bundle> --out … --transcriber hex|apple|command` (also
+  `apparent import`) picks an engine for one run.
 
 ### Your own model (command)
 
 Any other local model (whisper.cpp, MLX Whisper, faster-whisper, Parakeet, a Core ML model…) can
-transcribe through a small wrapper program. Scrawl runs it on the recording's audio and reads a
+transcribe through a small wrapper program. Apparent runs it on the recording's audio and reads a
 JSON transcript from its stdout; it knows nothing about the model, adds no network requests and
 doesn't sandbox the program. It runs on macOS only for now; on Windows recordings keep the local
-engine. In `~/.config/scrawl/config.json` (Settings shows **Command** once it is set; editing it
+engine. In `~/.config/apparent/config.json` (Settings shows **Command** once it is set; editing it
 stays in the file):
 
 ```json
 {
   "transcriber": "command",
-  "transcribeCommand": ["/Users/me/bin/whisper-scrawl", "--model", "large-v3-turbo", "{audio}"],
+  "transcribeCommand": ["/Users/me/bin/whisper-apparent", "--model", "large-v3-turbo", "{audio}"],
   "transcribeTimeoutSeconds": 600
 }
 ```
@@ -785,10 +773,10 @@ stays in the file):
   them never resets the rest of the config.
 - `transcribeTimeoutSeconds` is optional, a positive number of seconds: by default the limit is
   `max(300, 60 + 10 × audio seconds)`, wall clock from the start, model loading included.
-- The program gets the whole recording as one 16 kHz mono 16-bit WAV, `SCRAWL_TRANSCRIBE_VERSION=1`
-  and `SCRAWL_AUDIO=<path>`, stdin `/dev/null`, and its own process group. Its stderr is discarded.
+- The program gets the whole recording as one 16 kHz mono 16-bit WAV, `APPARENT_TRANSCRIBE_VERSION=1`
+  and `APPARENT_AUDIO=<path>`, stdin `/dev/null`, and its own process group. Its stderr is discarded.
   It must not change the audio, daemonize or leave processes behind, and must cope with two runs at
-  once. On timeout or more than 8 MiB of output Scrawl kills the group.
+  once. On timeout or more than 8 MiB of output Apparent kills the group.
 - It exits 0 and prints exactly one JSON object:
 
   ```json
@@ -806,15 +794,15 @@ stays in the file):
   omitted or `null`, and unknown fields (or a `model` or `estimated` of another type) are ignored. Times are integer milliseconds from the first
   sample. `segments` and `words`, when given, cover the whole text. `estimated` is `false` only if
   the word times were measured (by the recognizer or an aligner); it defaults to `true`, and spoken
-  cues only cut keyframes from measured words. Without `words`, Scrawl spreads the text over the
+  cues only cut keyframes from measured words. Without `words`, Apparent spreads the text over the
   segments (or the whole recording) and marks those times estimated, as it does for Hex.
-- Spans may overlap or be zero-length; Scrawl sorts them by `t0`. Ends up to 500 ms past the audio
-  are clamped. A negative, fractional or reversed span, or one further past the end, makes Scrawl
+- Spans may overlap or be zero-length; Apparent sorts them by `t0`. Ends up to 500 ms past the audio
+  are clamped. A negative, fractional or reversed span, or one further past the end, makes Apparent
   drop that array and keep the text, spreading it as above when `words` are dropped.
 - The transcript says `"source": "command:<file name of argv[0]>"`. Anything else going wrong (a
   malformed `transcribeCommand` or timeout, the program missing, a non-zero exit, a timeout, invalid
   JSON, another version) means Apple Speech transcribes that recording. Each problem is one line in
-  `~/Library/Logs/Scrawl` (a malformed config only once), never with the program's output,
+  `~/Library/Logs/Apparent` (a malformed config only once), never with the program's output,
   arguments or what was said.
 
 ### Transcribing while recording (experiment)
@@ -823,31 +811,31 @@ stays in the file):
 { "experiments": { "liveTranscribe": true } }
 ```
 
-With this in `~/.config/scrawl/config.json`, a Mac recording transcribed by Apple Speech streams the
-microphone to `scrawl-helper transcribe-stream` as it records, so finishing only waits for the last
+With this in `~/.config/apparent/config.json`, a Mac recording transcribed by Apple Speech streams the
+microphone to `apparent-helper transcribe-stream` as it records, so finishing only waits for the last
 words (tens of milliseconds) instead of transcribing the whole recording. The streamed samples are
 exactly the ones `audio.wav` holds, so word times are on the same clock. If the stream fails, the
 speech model isn't installed yet, or it takes too long, the recording is transcribed afterwards as
 usual; the log says which (`Live transcription: …`). Hex and iPhone recordings are unaffected.
-`scrawl reprocess <bundle> --out … --bench 1 --live-speed 1` replays a bundle's audio through it.
+`apparent reprocess <bundle> --out … --bench 1 --live-speed 1` replays a bundle's audio through it.
 
 ## Helper
 
-`scrawl-helper` is a small Swift executable built by `build.rs` from `helper/` and shipped inside
-`Scrawl.app` next to `scrawl`. It owns the Swift-only or unbound Apple frameworks: SpeechAnalyzer,
+`apparent-helper` is a small Swift executable built by `build.rs` from `helper/` and shipped inside
+`Apparent.app` next to `apparent`. It owns the Swift-only or unbound Apple frameworks: SpeechAnalyzer,
 CoreMediaIO/AVFoundation iPhone capture with the mirror window, AVFoundation movie decoding, and the
 SwiftUI welcome window (`onboarding`).
-Scrawl runs it as a subprocess (JSON on stdout; `stop`/`cancel` on stdin for the mirror). Run it
+Apparent runs it as a subprocess (JSON on stdout; `stop`/`cancel` on stdin for the mirror). Run it
 directly to test a piece in isolation:
 
 ```sh
-target/debug/scrawl-helper devices
-target/debug/scrawl-helper permissions
-target/debug/scrawl-helper transcribe audio.wav
-target/debug/scrawl-helper frames recording.mov --out-dir /tmp/f --at 1000,2000 --max-edge 1600
-target/debug/scrawl-helper shrink recording.mov --out /tmp/small.mov --max-edge 1600
-target/debug/scrawl-helper export plan.json   # the plan `scrawl export` writes (src/export)
-target/debug/scrawl-helper permission-panel --permission screen-recording --preview   # the drag card, no grant polling
+target/debug/apparent-helper devices
+target/debug/apparent-helper permissions
+target/debug/apparent-helper transcribe audio.wav
+target/debug/apparent-helper frames recording.mov --out-dir /tmp/f --at 1000,2000 --max-edge 1600
+target/debug/apparent-helper shrink recording.mov --out /tmp/small.mov --max-edge 1600
+target/debug/apparent-helper export plan.json   # the plan `apparent export` writes (src/export)
+target/debug/apparent-helper permission-panel --permission screen-recording --preview   # the drag card, no grant polling
 ```
 
 `permission-panel --permission screen-recording|accessibility [--from X,Y,W,H]`
@@ -860,7 +848,7 @@ X,Y,W,H --visible X,Y,W,H` prints where the card would dock (`below`, `inside`, 
 
 ## Windows
 
-Scrawl runs on Windows 10 (2004) and later as the same app: the same capsule, picker, overlay,
+Apparent runs on Windows 10 (2004) and later as the same app: the same capsule, picker, overlay,
 review window, welcome tour and Settings, from the same GPUI code. Only the parts the operating
 system owns differ:
 
@@ -871,37 +859,37 @@ system owns differ:
 | Screen and window capture | ScreenCaptureKit | Windows.Graphics.Capture, H.264 through Media Foundation |
 | Clicks, keys, Shift ink | Mouse monitor, Accessibility key tap, modifier state | Low-level hooks and key state |
 | Ink overlay | Metal panel | Click-through GPUI window, left out of recordings |
-| Transcription | SpeechAnalyzer, or Hex | Parakeet on device (`transcribe.cpp`), Hex's model or Scrawl's own copy |
-| Movie decoding | `scrawl-helper` (AVFoundation) | Media Foundation, in process |
+| Transcription | SpeechAnalyzer, or Hex | Parakeet on device (`transcribe.cpp`), Hex's model or Apparent's own copy |
+| Movie decoding | `apparent-helper` (AVFoundation) | Media Foundation, in process |
 | Paste | `⌘V` | `Ctrl+V` |
-| Settings and welcome tour | SwiftUI (`scrawl-helper`) | GPUI windows in process, same panes and protocol |
+| Settings and welcome tour | SwiftUI (`apparent-helper`) | GPUI windows in process, same panes and protocol |
 | Recording capsule | Native AppKit + Metal pill (or GPUI) | GPUI capsule |
 | Launch at login | `SMAppService` | The user's `Run` key (Settings › Apps › Startup) |
-| Captures | `~/Library/Application Support/scrawl/captures` | `%LOCALAPPDATA%\scrawl\captures` |
-| Log | `~/Library/Logs/Scrawl/scrawl.log` | `%LOCALAPPDATA%\Scrawl\Logs\scrawl.log` |
+| Captures | `~/Library/Application Support/apparent/captures` | `%LOCALAPPDATA%\apparent\captures` |
+| Log | `~/Library/Logs/Apparent/apparent.log` | `%LOCALAPPDATA%\Apparent\Logs\apparent.log` |
 
 - **Permissions:** none, apart from the microphone switch in Settings › Privacy & security, which
-  the welcome tour and Scrawl's Settings › Permissions check. Screen capture, input hooks and
+  the welcome tour and Apparent's Settings › Permissions check. Screen capture, input hooks and
   pasting need no grant on Windows.
 - **Shortcuts:** both are recorded in Settings › General like on macOS, as `Ctrl`, `Alt`, `Win` and
-  `Shift` combinations. Scrawl turns down `Ctrl` with one key (apps use those), `Win` with a key
+  `Shift` combinations. Apparent turns down `Ctrl` with one key (apps use those), `Win` with a key
   (Windows uses those), and `Alt+Tab`, `Alt+F4` and `Alt+Space`.
 - **Transcription:** Parakeet runs on device with measured word timings, so spoken cues ("look
   here") cut keyframes as on macOS. If [Hex](https://github.com/anomalyco/hex) has installed a
-  model (`%APPDATA%\voice-control\models`), Scrawl uses it. Otherwise the first launch downloads
+  model (`%APPDATA%\voice-control\models`), Apparent uses it. Otherwise the first launch downloads
   Hex's Parakeet Unified English (730 MB, checked against its SHA-256) into
-  `%LOCALAPPDATA%\Scrawl\models` in the background; Settings › Recording shows the progress, and
+  `%LOCALAPPDATA%\Apparent\models` in the background; Settings › Recording shows the progress, and
   captures made before it finishes get their transcript once it lands.
-- **Command-line tool:** **Install** in Settings › Agents writes a `scrawl.cmd` shim into
+- **Command-line tool:** **Install** in Settings › Agents writes a `apparent.cmd` shim into
   `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on every user's PATH, so agents and terminals
-  can run `scrawl`.
+  can run `apparent`.
 - **agentContext:** what clicks and marks land on comes from UI Automation, as it does from the
   Accessibility tree on macOS.
 - **Not on Windows:** the cabled iPhone (it needs AVFoundation's screen capture devices), video
   export, Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL
   (`/sdk.js` registrations still route).
 - **Releases:** manually dispatch `.github/workflows/release-windows.yml` on `main` with
-  `tag=v<version>` to build `Scrawl-<version>-windows-x64.zip` and attach it to the release.
+  `tag=v<version>` to build `Apparent-<version>-windows-x64.zip` and attach it to the release.
   It isn't code-signed yet; signing and automatic updates are planned.
 
 Build with the MSVC toolchain, CMake and the Windows SDK (Visual Studio Build Tools with the C++
@@ -910,12 +898,12 @@ workload). Release builds also need GPUI's shader compiler: set `GPUI_FXC_PATH` 
 
 ```powershell
 cargo build --release
-.\target\release\scrawl.exe app
+.\target\release\apparent.exe app
 ```
 
 ## Linux
 
-Scrawl runs on Linux desktops (GNOME and KDE Plasma, on Wayland or X11) as the same app, from
+Apparent runs on Linux desktops (GNOME and KDE Plasma, on Wayland or X11) as the same app, from
 the same GPUI code. It ships as an AppImage (`scripts/linux/appimage.sh`; every pull request's CI
 run has one) with GStreamer inside, so movies record without extra packages. On Wayland its
 windows run through XWayland.
@@ -928,11 +916,11 @@ windows run through XWayland.
 | Clicks, keys, Shift ink | The X server | The input devices (join the `input` group) |
 | Paste | `Ctrl+V` (`Ctrl+Shift+V` in terminals) through XTEST | The same, through the RemoteDesktop portal (asks once) |
 | Transcription | Parakeet on device (`transcribe.cpp`): downloads at launch (731 MB); progress in Settings › Recording | The same |
-| Captures | `~/.local/share/scrawl/captures` | The same |
+| Captures | `~/.local/share/apparent/captures` | The same |
 
 - **Wayland:** reading clicks, keys and Shift ink needs `sudo usermod -aG input $USER` and a new
   login (Settings › Permissions shows it). Click positions are exact over X11 apps and with
-  tablets, touchscreens and VMs; with a mouse over a Wayland app they can be stale. Scrawl's pill
+  tablets, touchscreens and VMs; with a mouse over a Wayland app they can be stale. Apparent's pill
   and ink show in the recording (no Linux desktop lets an app leave its windows out).
 - **Window picker:** lists X11/XWayland windows. Use Screen or Area for native Wayland apps.
   On KDE Wayland, desktop ink hides when Shift is released so clicks reach the app; the bundle keeps it.
@@ -947,21 +935,21 @@ taskpolicy -c utility cargo test -j 3 --offline -- --test-threads=2
 ./scripts/install-app.sh
 ```
 
-On Windows, `cargo test`; then run `scrawl.exe app` and record with `Alt+Shift+S`. On Linux,
-`cargo test`; then run `scrawl app` in a desktop session and record with `Alt+Shift+S`.
-`SCRAWL_SHOW_OWN_WINDOWS=1` keeps Scrawl's own windows (capsule, overlay, picker) in screenshots,
+On Windows, `cargo test`; then run `apparent.exe app` and record with `Alt+Shift+S`. On Linux,
+`cargo test`; then run `apparent app` in a desktop session and record with `Alt+Shift+S`.
+`APPARENT_SHOW_OWN_WINDOWS=1` keeps Apparent's own windows (capsule, overlay, picker) in screenshots,
 which normally leave them out.
 
 - **iPhone:** connect a phone, press `⌥⇧S`, click the iPhone chip, talk, draw over the mirror, press M,
-  Finish. Inspect the bundle's `summary.md`, `scrawl.json` (`source`, `device`), contact sheet, and
+  Finish. Inspect the bundle's `summary.md`, `apparent.json` (`source`, `device`), contact sheet, and
   frames.
-- **ScrawlKit:** `scrawl import` on a recording and its timeline (or hand-write a timeline for any
+- **ApparentKit:** `apparent import` on a recording and its timeline (or hand-write a timeline for any
   phone video), then check the ripples and trails on frames and the app-event lines in the summary.
   `swift test` runs the outbox tests on the Mac against a `URLProtocol` stub of the ingest endpoint
   (persisting, retry classification, resends, deletion only on 2xx, and what the strip says through
   slow uploads, no network, and retries).
-- **Transcription:** `scrawl-helper transcribe <wav or movie>` prints words with timings;
-  `scrawl reprocess <bundle> --out …` reruns transcription and keyframe selection on a real bundle.
+- **Transcription:** `apparent-helper transcribe <wav or movie>` prints words with timings;
+  `apparent reprocess <bundle> --out …` reruns transcription and keyframe selection on a real bundle.
 
 ## License
 

@@ -1,6 +1,6 @@
 //! Transcribing while recording (`"experiments": {"liveTranscribe": true}`, Apple Speech only).
 //!
-//! A long-lived `scrawl-helper transcribe-stream` gets the microphone's 16 kHz samples, quantized
+//! A long-lived `apparent-helper transcribe-stream` gets the microphone's 16 kHz samples, quantized
 //! exactly as `audio.wav` will store them, about every 160 ms, and keeps SpeechAnalyzer's
 //! finalized results. At finish the samples it hasn't had are sent from the finished WAV and only
 //! that tail is left to transcribe, so the words and times are the WAV's own. Anything wrong (the
@@ -26,7 +26,7 @@ const FEED_EVERY: Duration = Duration::from_millis(160);
 /// when a short recording ends takes longer, as it would after the recording too.
 const TAIL_TIMEOUT: Duration = Duration::from_secs(6);
 
-/// Whether recordings should start a live transcription now. It streams to `scrawl-helper`'s
+/// Whether recordings should start a live transcription now. It streams to `apparent-helper`'s
 /// SpeechAnalyzer, so only on macOS (Windows transcribes after the recording).
 pub fn wanted() -> bool {
     cfg!(target_os = "macos")
@@ -106,7 +106,7 @@ impl Live {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let feeder = std::thread::Builder::new()
-            .name("scrawl-live-transcribe".into())
+            .name("apparent-live-transcribe".into())
             .spawn(move || feed(command, &samples, &feeder_stop))
             .context("Could not spawn the live transcription thread")?;
         Ok(Self {
@@ -163,7 +163,7 @@ impl Live {
                 }
                 Ok(Line::Closed(stderr)) => bail!(
                     "the live transcriber stopped: {}",
-                    stderr.trim().trim_start_matches("scrawl-helper: ")
+                    stderr.trim().trim_start_matches("apparent-helper: ")
                 ),
                 Err(RecvTimeoutError::Timeout) => {
                     bail!(
@@ -226,13 +226,13 @@ fn transcript(
 fn feed(mut command: Command, samples: &Mutex<Vec<f32>>, stop: &AtomicBool) -> Result<Feeding> {
     let mut child = command
         .spawn()
-        .context("Could not start scrawl-helper transcribe-stream")?;
+        .context("Could not start apparent-helper transcribe-stream")?;
     let stdin = child.stdin.take().context("No helper stdin")?;
     let stdout = child.stdout.take().context("No helper stdout")?;
     let mut stderr = child.stderr.take().context("No helper stderr")?;
     let (sender, lines) = std::sync::mpsc::channel();
     std::thread::Builder::new()
-        .name("scrawl-live-transcribe-out".into())
+        .name("apparent-live-transcribe-out".into())
         .spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
@@ -240,7 +240,7 @@ fn feed(mut command: Command, samples: &Mutex<Vec<f32>>, stop: &AtomicBool) -> R
                     Ok(event) => {
                         let _ = sender.send(Line::Event(event));
                     }
-                    Err(error) => crate::capture::scrawl_log(format!(
+                    Err(error) => crate::capture::apparent_log(format!(
                         "Live transcription: unreadable line ({error})"
                     )),
                 }
@@ -289,7 +289,7 @@ fn le_bytes(samples: &[i16]) -> Vec<u8> {
 }
 
 /// Plays `wav_bytes` into a live transcription as a microphone would, `speed` times real time in
-/// 10 ms callbacks, and returns it ready to finish (`scrawl reprocess --bench N --live-speed S`).
+/// 10 ms callbacks, and returns it ready to finish (`apparent reprocess --bench N --live-speed S`).
 pub fn simulate(wav_bytes: &[u8], speed: f64) -> Result<Live> {
     let samples = crate::audio::decode_wav_16k(wav_bytes)?;
     let buffer = Arc::new(Mutex::new(Vec::with_capacity(samples.len())));
@@ -388,7 +388,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn streams_exactly_the_samples_the_wav_holds() {
-        let out = std::env::temp_dir().join(format!("scrawl-live-pcm-{}", std::process::id()));
+        let out = std::env::temp_dir().join(format!("apparent-live-pcm-{}", std::process::id()));
         let script = format!(
             r#"{READY}; cat > '{}'; echo '{{"done":true,"samples":3}}'"#,
             out.display()
@@ -411,7 +411,7 @@ mod tests {
     fn a_failing_helper_or_lost_samples_is_an_error() {
         let buffer = || Arc::new(Mutex::new(vec![0.1_f32; 320]));
         let failed = Live::start_with(
-            fake("echo 'scrawl-helper: the speech model isnt installed' >&2; exit 1"),
+            fake("echo 'apparent-helper: the speech model isnt installed' >&2; exit 1"),
             buffer(),
         )
         .unwrap()

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scrawl autocrop</title>
+<title>Apparent autocrop</title>
 <style>
   :root {
     --bg: #0e0e10; --panel: #161618; --panel2: #1c1c1f; --line: #2a2a2e; --text: #e8e8ea;
@@ -89,7 +89,7 @@
 </head>
 <body>
 <header>
-  <div class="brand">Scrawl <b>autocrop</b><span id="meta"></span></div>
+  <div class="brand">Apparent <b>autocrop</b><span id="meta"></span></div>
   <div class="presets" id="presets"></div>
   <div class="actions">
     <button id="copy" title="Copy the current settings as JSON"><kbd>C</kbd> Copy settings</button>
@@ -128,17 +128,17 @@
     <tr><td><kbd>R</kbd></td><td>Reset to the recommended preset</td></tr>
   </table>
   <p style="color:var(--dim)">The crop is computed here, in JS, from the bundle's activity
-    (ink, clicks, drags, laser, scrolls, cursor dwell, scene changes) and the window log Scrawl
+    (ink, clicks, drags, laser, scrolls, cursor dwell, scene changes) and the window log Apparent
     keeps in Screen mode. Settings persist in this browser. When you like a setup, copy the
-    settings: they get baked into Scrawl's Rust side.</p>
+    settings: they get baked into Apparent's Rust side.</p>
   <form method="dialog"><button style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px">Close</button></form>
 </dialog>
 <dialog id="copied"><h3 style="margin-top:0">Settings</h3><pre id="copiedText"></pre>
   <form method="dialog"><button style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px">Close</button></form></dialog>
 <script>
-const DATA = /*SCRAWL_AUTOCROP_DATA*/null;
+const DATA = /*APPARENT_AUTOCROP_DATA*/null;
 
-// The crop itself is Scrawl's (src/autocrop.rs): this page only draws it. With `scrawl autocrop
+// The crop itself is Apparent's (src/autocrop.rs): this page only draws it. With `apparent autocrop
 // --serve` every settings change is sent to POST /crop; without it only the presets, computed
 // when the page was written, are available.
 
@@ -201,7 +201,7 @@ const CONTROLS = [
   { key: 'ovCrop', label: 'Crop', type: 'toggle', kbd: 'X' },
   { key: 'ovChanges', label: 'Scene changes', type: 'toggle', kbd: 'D' },
 ];
-const STORE = 'scrawl-autocrop-settings-v2';
+const STORE = 'apparent-autocrop-settings-v2';
 let settings = { ...DEFAULTS, ...OVERLAYS, ...loadStored() };
 function loadStored() { try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch { return {}; } }
 function save() { try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {} }
@@ -254,7 +254,7 @@ function frameSize(k) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Results: from the presets, or from Scrawl when served
+// Results: from the presets, or from Apparent when served
 // ---------------------------------------------------------------------------------------------
 const algoKeys = () => Object.keys(DEFAULTS);
 const algo = (s) => Object.fromEntries(algoKeys().map(k => [k, s[k]]));
@@ -452,7 +452,7 @@ function renderInfo() {
     `<div class="decision"><span class="pill">${esc(res.kind)}</span> ${esc(res.reason || '')}${res.merged ? ` <span class="pill">merged ×${res.merged}</span>` : ''}${res.grown ? ' <span class="pill">grown to limit the zoom change</span>' : ''}</div>`
     + `<div style="margin-bottom:6px">${chips || '<span class="pill">no activity</span>'}${outl ? `<span class="pill">${outl} cursor outliers</span>` : ''}</div>`
     + `<div class="shares">${rows}</div>`
-    + (stale ? `<div class="warn" style="margin-top:8px">These settings aren't a preset. Run <code>scrawl autocrop --serve</code> to tune live; showing the last crop.</div>` : '');
+    + (stale ? `<div class="warn" style="margin-top:8px">These settings aren't a preset. Run <code>apparent autocrop --serve</code> to tune live; showing the last crop.</div>` : '');
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -519,7 +519,7 @@ function renderStrip() {
   });
 }
 
-// Scrawl's contact sheet layout (render_contact_sheet): 16 px padding, 14 px gaps, 640 px cells
+// Apparent's contact sheet layout (render_contact_sheet): 16 px padding, 14 px gaps, 640 px cells
 // two to a row (440 px, three to a row, when every frame is portrait), cards at most 960 px tall.
 // Past six frames: three landscape to a row, or portrait in two rows.
 function sheetCell() { return sheetRects().every(r => r[3] > r[2]) ? 440 : 640; }
@@ -639,7 +639,7 @@ function toast(text) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 1400);
 }
 async function copySettings() {
-  // Pasteable into ~/.config/scrawl/config.json as "autocrop": {...}.
+  // Pasteable into ~/.config/apparent/config.json as "autocrop": {...}.
   const text = JSON.stringify(Object.fromEntries(algoKeys().filter(k => JSON.stringify(settings[k]) !== JSON.stringify(DEFAULTS[k])).map(k => [k, settings[k]])), null, 2);
   try { await navigator.clipboard.writeText(text); toast('Settings copied'); }
   catch {

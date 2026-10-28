@@ -1,4 +1,4 @@
-# Checks a Windows build directory (scrawl.exe and transcribe.cpp's DLLs) for #58: no AVX-512
+# Checks a Windows build directory (apparent.exe and transcribe.cpp's DLLs) for #58: no AVX-512
 # outside the ggml CPU backends that are only loaded on a CPU that has it.
 #
 #   pwsh scripts/check-windows-cpu-tiers.ps1 target\x86_64-pc-windows-msvc\release
@@ -32,9 +32,9 @@ function Guarded($hit) {
   $false
 }
 
-$imports = & $dumpbin /nologo /dependents (Join-Path $Dir "scrawl.exe")
+$imports = & $dumpbin /nologo /dependents (Join-Path $Dir "apparent.exe")
 if (-not ($imports -match '^\s+transcribe\.dll\s*$')) {
-  throw "scrawl.exe doesn't load transcribe.dll: ggml is linked in, compiled for the build machine's CPU"
+  throw "apparent.exe doesn't load transcribe.dll: ggml is linked in, compiled for the build machine's CPU"
 }
 
 # Loaded on every CPU, or on CPUs without AVX-512 (ggml scores each tier against CPUID).

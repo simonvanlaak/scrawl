@@ -57,7 +57,7 @@ pub fn parse_clock_ms(input: &str) -> Option<u64> {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScrawlBundle {
+pub struct ApparentBundle {
     pub version: u32,
     pub id: String,
     pub created_at_ms: u64,
@@ -86,13 +86,13 @@ pub struct ScrawlBundle {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceInfo>,
-    /// App-defined values when the recording started (ScrawlKit `Scrawl.context`).
+    /// App-defined values when the recording started (ApparentKit `Apparent.context`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub context: BTreeMap<String, String>,
     /// Changes to `context` during the recording.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_changes: Vec<ContextChange>,
-    /// Which screen the app said it was on, and when (ScrawlKit `Scrawl.screen`).
+    /// Which screen the app said it was on, and when (ApparentKit `Apparent.screen`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub screens: Vec<ScreenSpan>,
     /// Screen mode: the on-screen windows over time, front to back, stored only when they
@@ -106,13 +106,13 @@ pub struct ScrawlBundle {
     /// the full frames are kept beside them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocrop: Option<AutocropInfo>,
-    /// The OpenCode session a Mac capture of a dev site was sent to (`routing`), so `scrawl send`
+    /// The OpenCode session a Mac capture of a dev site was sent to (`routing`), so `apparent send`
     /// recovers to the same place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Destination>,
 }
 
-impl ScrawlBundle {
+impl ApparentBundle {
     /// A recorded click, not a spoken reference or a keyframe selected for another reason.
     pub fn has_screen_click(&self) -> bool {
         self.events.iter().any(|event| matches!(event, InteractionEvent::Click { .. }))
@@ -184,7 +184,7 @@ impl KeyframeCrop {
     }
 }
 
-impl ScrawlBundle {
+impl ApparentBundle {
     /// The screen the app was on at `t_ms`, if it said.
     pub fn screen_at(&self, t_ms: u64) -> Option<&str> {
         self.screens
@@ -252,7 +252,7 @@ pub struct ContextChange {
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub name: String,
-    /// `"mirror"` for a cabled capture through Scrawl, `"scrawlkit"` for an in-app SDK recording.
+    /// `"mirror"` for a cabled capture through Apparent, `"apparentkit"` for an in-app SDK recording.
     pub capture: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -335,7 +335,7 @@ pub struct TranscriptData {
 pub struct MissingTranscript {
     /// One plain sentence for the summary.
     pub reason: String,
-    /// Scrawl transcribes the bundle again once the speech model is installed.
+    /// Apparent transcribes the bundle again once the speech model is installed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retry: bool,
 }
@@ -431,7 +431,7 @@ pub enum Shape {
     Tap,
     Pin,
     Mark,
-    /// A time-only "look here" marker (M in the mirror, or a ScrawlKit marker).
+    /// A time-only "look here" marker (M in the mirror, or a ApparentKit marker).
     Flag,
 }
 
@@ -514,7 +514,7 @@ pub enum InteractionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_title: Option<String>,
     },
-    /// Something the recorded app reported about itself (ScrawlKit `events[]`).
+    /// Something the recorded app reported about itself (ApparentKit `events[]`).
     AppEvent {
         t: u64,
         label: String,
@@ -659,10 +659,10 @@ mod tests {
             "transcript": {"source": "test", "text": "", "segments": []},
             "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png",
             "source": "iphone",
-            "device": {"name": "iPhone", "capture": "scrawlkit", "width": 10, "height": 20,
+            "device": {"name": "iPhone", "capture": "apparentkit", "width": 10, "height": 20,
                 "app": "OpenCode", "appVersion": "354"}
         });
-        let mut bundle: ScrawlBundle = serde_json::from_value(old).unwrap();
+        let mut bundle: ApparentBundle = serde_json::from_value(old).unwrap();
         assert!(bundle.context.is_empty() && bundle.screens.is_empty());
         assert_eq!(bundle.device.as_ref().unwrap().app_short_version, None);
         let json = serde_json::to_value(&bundle).unwrap();
@@ -681,7 +681,7 @@ mod tests {
         let json = serde_json::to_value(&bundle).unwrap();
         assert_eq!(json["screens"][1]["name"], "Settings");
         assert_eq!(json["contextChanges"][0]["value"], serde_json::Value::Null);
-        let back: ScrawlBundle = serde_json::from_value(json).unwrap();
+        let back: ApparentBundle = serde_json::from_value(json).unwrap();
         assert_eq!(back, bundle);
     }
 

@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
-  PROTOTYPE, throwaway. Three motion variants of ScrawlKit's recording strip
-  (Sources/ScrawlKit/ScrawlStrip.swift), switchable with ?variant=A|B|C, on a fake
+  PROTOTYPE, throwaway. Three motion variants of ApparentKit's recording strip
+  (Sources/ApparentKit/ApparentStrip.swift), switchable with ?variant=A|B|C, on a fake
   UpDown-style workout screen. Plain HTML/CSS/JS, no build step, no network.
   Springs use SwiftUI's mapping: .spring(duration: d, bounce: b) -> k = (2π/d)², c = 4π(1-b)/d.
 -->
@@ -11,7 +11,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#000000">
-<title>PROTOTYPE · ScrawlKit strip motion</title>
+<title>PROTOTYPE · ApparentKit strip motion</title>
 <style>
 :root { --red: #FF3B30; --green: #30D158; --yellow: #FFD60A; --speed: 1; color-scheme: dark; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -408,7 +408,7 @@ function commit(patch) {
   renderReadout()
 }
 
-// ---------- flows (timings from Scrawl.swift) ----------
+// ---------- flows (timings from Apparent.swift) ----------
 function start() {
   if (st.phase === 'recording') return
   clearTimers('flow')

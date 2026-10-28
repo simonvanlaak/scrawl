@@ -1,6 +1,6 @@
-//! Windows platform helpers: displays, top-level windows, processes, Scrawl's own window styles,
+//! Windows platform helpers: displays, top-level windows, processes, Apparent's own window styles,
 //! the clipboard, the shell, and the media pipeline. Global coordinates are physical pixels on
-//! the virtual screen (Scrawl is per-monitor DPI aware), with the primary display's top-left at
+//! the virtual screen (Apparent is per-monitor DPI aware), with the primary display's top-left at
 //! the origin, like CoreGraphics' points on macOS.
 
 pub mod clipboard;
@@ -300,9 +300,9 @@ pub fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// `%LOCALAPPDATA%\Scrawl`: logs and machine-local state.
+/// `%LOCALAPPDATA%\Apparent`: logs and machine-local state.
 pub fn local_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Scrawl")
+        .join("Apparent")
 }

@@ -1,7 +1,7 @@
-//! First-run onboarding: a welcome, one screen on how Scrawl works, one screen with every
-//! permission it needs, and a first capture. The window is SwiftUI in `scrawl-helper onboarding`;
+//! First-run onboarding: a welcome, one screen on how Apparent works, one screen with every
+//! permission it needs, and a first capture. The window is SwiftUI in `apparent-helper onboarding`;
 //! this module decides what it shows (`Flow`) and remembers progress in
-//! `~/.config/scrawl/config.json` (`"onboarding"`, see `Progress`).
+//! `~/.config/apparent/config.json` (`"onboarding"`, see `Progress`).
 //!
 //! Screen Recording, Microphone and Accessibility are required and asked for together on the
 //! permissions screen, Screen Recording first. Camera (the cabled iPhone) is asked for the first
@@ -10,10 +10,10 @@
 //! its prompt comes up here rather than after the first capture. Until the required ones
 //! are on, ⌥⇧S starts nothing: it brings this window forward once the keys are up (`Gate`).
 //!
-//! A Screen Recording grant may only reach a running copy of Scrawl after it relaunches, and
+//! A Screen Recording grant may only reach a running copy of Apparent after it relaunches, and
 //! macOS offers "Quit & Reopen" the moment it's granted. Whatever the user picks there, nobody
-//! reopens Scrawl by hand: when a fresh helper says it's granted but this process still can't
-//! capture, the window relaunches Scrawl by itself (once, see `Progress::relaunched_at`) and the
+//! reopens Apparent by hand: when a fresh helper says it's granted but this process still can't
+//! capture, the window relaunches Apparent by itself (once, see `Progress::relaunched_at`) and the
 //! tour comes back on the same screen. Input Monitoring is never asked for: clicks come from an
 //! AppKit mouse monitor that needs no permission, keys from an Accessibility event tap.
 
@@ -39,7 +39,7 @@ pub enum Permission {
 
 impl Permission {
     /// What a capture needs, in the order the checklist shows them. Screen Recording comes first
-    /// because it's the one that may relaunch Scrawl. Accessibility drives the key event tap
+    /// because it's the one that may relaunch Apparent. Accessibility drives the key event tap
     /// (⌘Z, Esc) and ⌥⇧V's paste. Camera is asked for when first used.
     pub const REQUIRED: [Permission; 3] = [
         Permission::ScreenRecording,
@@ -67,7 +67,7 @@ impl Permission {
     }
 
     /// Privacy lists the app can be dragged into: Grant flies the drag panel to System
-    /// Settings (`scrawl-helper permission-panel`) instead of raising Apple's prompt.
+    /// Settings (`apparent-helper permission-panel`) instead of raising Apple's prompt.
     pub fn draggable(self) -> bool {
         matches!(
             self,
@@ -139,11 +139,11 @@ pub enum Status {
     Granted,
 }
 
-/// What macOS has granted Scrawl, from a fresh `scrawl-helper permissions`.
+/// What macOS has granted Apparent, from a fresh `apparent-helper permissions`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Grants {
     pub statuses: BTreeMap<Permission, Status>,
-    /// Screen recording is granted, but this running copy of Scrawl can't use it until it
+    /// Screen recording is granted, but this running copy of Apparent can't use it until it
     /// relaunches.
     pub screen_needs_relaunch: bool,
 }
@@ -167,16 +167,16 @@ impl Grants {
 /// Once everything a fix asks for is on, its window shows the checks this long, then closes.
 pub const AUTO_ADVANCE_MS: u64 = 800;
 
-/// Screen Recording's check shows this long before Scrawl relaunches to use it.
+/// Screen Recording's check shows this long before Apparent relaunches to use it.
 pub const RELAUNCH_AFTER_MS: u64 = 1_000;
 
-/// After relaunching itself, Scrawl doesn't do it again by itself for this long; the row offers
+/// After relaunching itself, Apparent doesn't do it again by itself for this long; the row offers
 /// Reopen instead. Stops a loop if a fresh copy still can't capture.
 pub const RELAUNCH_GUARD_MS: u64 = 120_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// The whole tour, first launch or "Welcome to Scrawl…".
+    /// The whole tour, first launch or "Welcome to Apparent…".
     Tour,
     /// Just the permissions screen, for permissions that are missing now: required ones that
     /// went away or that ⌥⇧S found off, or Accessibility or Camera on first use. Closes once
@@ -222,7 +222,7 @@ pub enum Effect {
     Request(Permission),
     /// Already asked or denied: open its System Settings pane.
     OpenSettings(Permission),
-    /// Relaunch Scrawl so Screen Recording works. The tour comes back at `resume`; a fix (no
+    /// Relaunch Apparent so Screen Recording works. The tour comes back at `resume`; a fix (no
     /// `resume`) opens again.
     Relaunch {
         resume: Option<Step>,
@@ -247,10 +247,10 @@ pub struct Row {
     /// The button was pressed once already: it now opens System Settings.
     pub requested: bool,
     pub required: bool,
-    /// Granted, and Scrawl is about to relaunch by itself to use it.
+    /// Granted, and Apparent is about to relaunch by itself to use it.
     pub reopening: bool,
     /// Granted, but this copy can't use it and won't relaunch by itself again: the row's
-    /// button reopens Scrawl.
+    /// button reopens Apparent.
     pub relaunch: bool,
 }
 
@@ -334,7 +334,7 @@ impl Flow {
         }
     }
 
-    /// Whether this window may relaunch Scrawl by itself (`relaunch_allowed`).
+    /// Whether this window may relaunch Apparent by itself (`relaunch_allowed`).
     pub fn with_auto_relaunch(mut self, allowed: bool) -> Self {
         self.auto_relaunch = allowed;
         self
@@ -363,7 +363,7 @@ impl Flow {
         self.mode
     }
 
-    /// Where a tour picks up if Scrawl quits now (macOS's own "Quit & Reopen" included).
+    /// Where a tour picks up if Apparent quits now (macOS's own "Quit & Reopen" included).
     pub fn resume_point(&self) -> Option<Step> {
         (self.mode == Mode::Tour && self.step != Step::Done).then_some(self.step)
     }
@@ -483,7 +483,7 @@ impl Flow {
             .filter(|p| self.mode == Mode::Fix || p.required())
     }
 
-    /// Screen Recording is on the screen and granted, but this copy of Scrawl can't capture yet.
+    /// Screen Recording is on the screen and granted, but this copy of Apparent can't capture yet.
     fn screen_relaunch(&self) -> bool {
         self.asks.contains(&Permission::ScreenRecording)
             && self.granted(Permission::ScreenRecording)
@@ -579,7 +579,7 @@ impl Flow {
         Effect::Relaunch { resume }
     }
 
-    /// A Screen Recording grant this copy can't use relaunches Scrawl a moment after its check
+    /// A Screen Recording grant this copy can't use relaunches Apparent a moment after its check
     /// shows, whatever was picked in macOS's "Quit & Reopen" sheet. Otherwise a fix closes by
     /// itself once everything it asked for works; the tour waits for Continue.
     fn tick(&mut self, now_ms: u64) -> Effect {
@@ -675,7 +675,7 @@ impl Gate {
     }
 }
 
-/// Onboarding progress, under `"onboarding"` in `~/.config/scrawl/config.json`.
+/// Onboarding progress, under `"onboarding"` in `~/.config/apparent/config.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
@@ -688,11 +688,11 @@ pub struct Progress {
     /// Every permission seen granted, so a later loss reopens the permissions screen.
     #[serde(default)]
     pub granted: BTreeSet<Permission>,
-    /// When Scrawl last relaunched itself for Screen Recording (Unix ms), so it never does it
+    /// When Apparent last relaunched itself for Screen Recording (Unix ms), so it never does it
     /// twice in a row (`relaunch_allowed`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relaunched_at: Option<u64>,
-    /// A permissions fix was open when Scrawl relaunched itself; it opens again at launch.
+    /// A permissions fix was open when Apparent relaunched itself; it opens again at launch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reopen_fix: bool,
     /// The how-it-works demo was skipped, watched or drawn on.
@@ -736,7 +736,7 @@ impl Progress {
         self.granted.len() != before
     }
 
-    /// Notes a relaunch Scrawl is about to do by itself, so the next launch comes back to the
+    /// Notes a relaunch Apparent is about to do by itself, so the next launch comes back to the
     /// same window: the tour at `resume`, or the fix.
     pub fn relaunching(&mut self, resume: Option<Step>, now_ms: u64) {
         self.relaunched_at = Some(now_ms);
@@ -750,7 +750,7 @@ impl Progress {
     }
 }
 
-/// Whether Scrawl may relaunch itself now: not within `RELAUNCH_GUARD_MS` of the last time.
+/// Whether Apparent may relaunch itself now: not within `RELAUNCH_GUARD_MS` of the last time.
 pub fn relaunch_allowed(progress: &Progress, now_ms: u64) -> bool {
     progress
         .relaunched_at
@@ -765,7 +765,7 @@ pub fn unix_ms() -> u64 {
 }
 
 /// What opens at launch: the tour until it's been seen (resuming where it was left), else a fix
-/// that was open when Scrawl relaunched itself, else the permissions screen when a required
+/// that was open when Apparent relaunched itself, else the permissions screen when a required
 /// permission that was granted once is gone, else nothing.
 pub fn launch_plan(progress: &Progress, grants: &Grants) -> Option<Flow> {
     if !progress.seen {
@@ -795,7 +795,7 @@ pub enum Event {
 /// ScreenCaptureKit capture (`capture::screen_capture_usable`), so no prompt can come of it.
 pub fn read_grants() -> Option<Grants> {
     let statuses = crate::helper::permissions()
-        .inspect_err(|error| crate::capture::scrawl_log(format!("permissions: {error:#}")))
+        .inspect_err(|error| crate::capture::apparent_log(format!("permissions: {error:#}")))
         .ok()?;
     let screen = statuses.get(&Permission::ScreenRecording) == Some(&Status::Granted);
     let grants = Grants {
@@ -806,7 +806,7 @@ pub fn read_grants() -> Option<Grants> {
     Some(grants)
 }
 
-/// What draws the welcome window: the SwiftUI `scrawl-helper onboarding` process on macOS, an
+/// What draws the welcome window: the SwiftUI `apparent-helper onboarding` process on macOS, an
 /// in-process GPUI window (`crate::onboarding_window`) on Windows. Both take the same JSON
 /// messages and report the same button actions.
 enum Transport {
@@ -939,12 +939,12 @@ impl Session {
         let line = format!("onboarding: {:?} -> {effect:?}", self.flow.step());
         let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if *last != line {
-            crate::capture::scrawl_log(&line);
+            crate::capture::apparent_log(&line);
             *last = line;
         }
         drop(last);
         let result = match effect {
-            // Attributed to whichever process asks, so Scrawl itself asks.
+            // Attributed to whichever process asks, so Apparent itself asks.
             Effect::Request(Permission::ScreenRecording) => {
                 crate::capture::request_screen_capture();
                 Effect::None
@@ -982,7 +982,7 @@ impl Session {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1_200));
                     let result = crate::capture::screen_capture_probe();
-                    crate::capture::scrawl_log(format!(
+                    crate::capture::apparent_log(format!(
                         "onboarding: listed the screen once for macOS's window picker question: {result:?}"
                     ));
                 });
@@ -1034,7 +1034,7 @@ impl Session {
             self.send(&view);
             self.last_view = text;
         }
-        // Remember the step, so whatever quits Scrawl, the tour comes back here.
+        // Remember the step, so whatever quits Apparent, the tour comes back here.
         let resume = self.flow.resume_point();
         let tutorial = self.flow.tutorial();
         let new_resume = resume.is_some() && resume != self.saved_resume;
@@ -1089,12 +1089,12 @@ impl Drop for Session {
     }
 }
 
-/// Starts Scrawl again once this copy has quit: the new copy waits for this one
+/// Starts Apparent again once this copy has quit: the new copy waits for this one
 /// (`win::shell::wait_for_relauncher`) before it starts the app.
 #[cfg(windows)]
 pub fn relaunch() {
     use std::os::windows::process::CommandExt;
-    /// No console window flashes up for the new copy (`scrawl.exe` is a console program).
+    /// No console window flashes up for the new copy (`apparent.exe` is a console program).
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -1114,7 +1114,7 @@ pub fn relaunch() {
 const AFTER_EXIT: &str = "pid=$1; shift; i=0; \
     while kill -0 \"$pid\" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; ";
 
-/// Starts Scrawl again once this copy has quit (after a Screen Recording grant). The app is
+/// Starts Apparent again once this copy has quit (after a Screen Recording grant). The app is
 /// opened without `-n`: if macOS's own "Quit & Reopen" already started a new copy, `open` only
 /// brings that one forward, so there are never two.
 #[cfg(not(windows))]
@@ -1131,12 +1131,12 @@ pub fn relaunch() {
         Some(app) => command
             .arg("-c")
             .arg(format!("{AFTER_EXIT}exec /usr/bin/open \"$1\""))
-            .args(["scrawl-relaunch", &pid])
+            .args(["apparent-relaunch", &pid])
             .arg(app),
         None => command
             .arg("-c")
             .arg(format!("{AFTER_EXIT}exec \"$@\""))
-            .args(["scrawl-relaunch", &pid])
+            .args(["apparent-relaunch", &pid])
             .arg(&exe)
             .args(std::env::args_os().skip(1)),
     };
@@ -1324,7 +1324,7 @@ mod tests {
         assert!(!rows(&flow).contains(&InputMonitoring));
         assert_eq!(flow.on(Input::Grant(InputMonitoring)), Effect::None);
         assert!(missing_to_record(Some(&grants(&ALL)), true, true).is_empty());
-        // Nothing in Scrawl or its helper asks macOS for it.
+        // Nothing in Apparent or its helper asks macOS for it.
         let sources = [
             include_str!("capture.rs"),
             include_str!("capture/macos.rs"),
@@ -1427,7 +1427,7 @@ mod tests {
     #[test]
     fn a_screen_recording_grant_this_copy_cant_use_relaunches_by_itself_once() {
         let mut flow = Flow::tour(Step::Permissions, Some(grants(&[])));
-        // The user drags Scrawl into Screen Recording; macOS offers Quit & Reopen and the user
+        // The user drags Apparent into Screen Recording; macOS offers Quit & Reopen and the user
         // picks Later (or nothing): the helper says granted, this process still can't capture.
         let granted = stale(&[ScreenRecording]);
         assert_eq!(tick(&mut flow, &granted, 1_000), Effect::None);
@@ -1436,7 +1436,7 @@ mod tests {
         assert!(row.reopening && !row.relaunch);
         // Not ready: Continue can't skip past a grant that doesn't work yet.
         assert_eq!(flow.on(Input::Continue), Effect::None);
-        // The check shows a moment, then Scrawl relaunches, back on this screen, even though
+        // The check shows a moment, then Apparent relaunches, back on this screen, even though
         // the other two rows are still off.
         assert_eq!(tick(&mut flow, &granted, 1_500), Effect::None);
         let relaunch = Effect::Relaunch {
@@ -1549,7 +1549,7 @@ mod tests {
 
     #[test]
     fn after_either_kind_of_relaunch_the_tour_resumes_on_the_permissions_screen() {
-        // Scrawl's own relaunch (the user picked Later, or nothing).
+        // Apparent's own relaunch (the user picked Later, or nothing).
         let mut progress = Progress::default();
         progress.relaunching(Some(Step::Permissions), 7);
         assert_eq!(progress.resume, Some(Step::Permissions));
@@ -1565,7 +1565,7 @@ mod tests {
             view.rows.iter().find(|r| r.status != Status::Granted).map(|r| r.permission),
             Some(Microphone)
         );
-        // macOS's Quit & Reopen: Scrawl never noted a relaunch, but the step it saved while
+        // macOS's Quit & Reopen: Apparent never noted a relaunch, but the step it saved while
         // the window was open brings it back to the same place.
         let progress = Progress {
             resume: Flow::tour(Step::Permissions, Some(grants(&[]))).resume_point(),
@@ -1718,7 +1718,7 @@ mod tests {
 
     #[test]
     fn progress_is_kept_beside_the_rest_of_the_config() {
-        let dir = std::env::temp_dir().join(format!("scrawl-onboarding-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("apparent-onboarding-{}", std::process::id()));
         let path = dir.join("config.json");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&path, r#"{"agentHost":"studio","autocrop":false}"#).unwrap();

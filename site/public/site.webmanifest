@@ -1,6 +1,6 @@
 {
-  "name": "Scrawl",
-  "short_name": "Scrawl",
+  "name": "Apparent",
+  "short_name": "Apparent",
   "description": "Show an agent a problem instead of describing it.",
   "start_url": "/",
   "display": "browser",

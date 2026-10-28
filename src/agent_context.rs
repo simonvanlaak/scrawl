@@ -1,8 +1,8 @@
 //! The `agentContext` experiment's text: each keyframe's speech broken up by what happened while
 //! it was said (marks, clicks, drags, shortcuts, windows opening and closing, app events), so the
 //! agent reads "this part" next to the mark drawn as it was said. Marks sharing a keyframe are
-//! numbered ①②③ in drawing order (the images show only the ink; `scrawl zoom --mark` and
-//! `scrawl inspect --marks` look marks up by these numbers).
+//! numbered ①②③ in drawing order (the images show only the ink; `apparent zoom --mark` and
+//! `apparent inspect --marks` look marks up by these numbers).
 //! Nothing here gives raw coordinates: the images show where, so a place is only written when
 //! something names it (an Accessibility label, the dev page's element).
 
@@ -70,7 +70,7 @@ pub fn circled(n: usize) -> String {
         .map_or_else(|| format!("({n})"), char::to_string)
 }
 
-pub fn keyframe_texts(bundle: &ScrawlBundle) -> Vec<FrameText> {
+pub fn keyframe_texts(bundle: &ApparentBundle) -> Vec<FrameText> {
     let frames = &bundle.keyframes;
     if frames.is_empty() {
         return Vec::new();
@@ -167,7 +167,7 @@ impl MarkEntry<'_> {
 }
 
 /// Every mark, in time order, numbered the way the summary numbers them.
-pub fn mark_entries(bundle: &ScrawlBundle) -> Vec<MarkEntry<'_>> {
+pub fn mark_entries(bundle: &ApparentBundle) -> Vec<MarkEntry<'_>> {
     let mut entries: Vec<MarkEntry> = bundle
         .marks
         .iter()
@@ -191,7 +191,7 @@ pub fn mark_entries(bundle: &ScrawlBundle) -> Vec<MarkEntry<'_>> {
 /// keyframe `keyframe` when given. A number on several keyframes needs the keyframe; numbers
 /// shown as ①②③ win over single, unnumbered marks.
 pub fn find_mark<'a>(
-    bundle: &'a ScrawlBundle,
+    bundle: &'a ApparentBundle,
     query: &str,
     keyframe: Option<usize>,
 ) -> Result<MarkEntry<'a>, String> {
@@ -235,7 +235,7 @@ fn normalized(text: &str) -> String {
 /// Recovers which timed words each keyframe's `said` was built from (`keyframes::align_transcript`
 /// gives every frame a run of the time-sorted words). `None` when the transcript has no word
 /// times or the text doesn't line up, and the speech is then shown whole.
-fn frame_words(bundle: &ScrawlBundle) -> Option<Vec<Vec<&WordTiming>>> {
+fn frame_words(bundle: &ApparentBundle) -> Option<Vec<Vec<&WordTiming>>> {
     let mut words: Vec<&WordTiming> = bundle
         .transcript
         .words
@@ -267,7 +267,7 @@ fn frame_words(bundle: &ScrawlBundle) -> Option<Vec<Vec<&WordTiming>>> {
 
 /// When each keyframe's stretch of the recording starts: its first word, first mark or own moment,
 /// whichever is earliest, and never before the previous one. The first frame owns the lead-in.
-fn frame_starts(bundle: &ScrawlBundle, words: Option<&[Vec<&WordTiming>]>) -> Vec<u64> {
+fn frame_starts(bundle: &ApparentBundle, words: Option<&[Vec<&WordTiming>]>) -> Vec<u64> {
     let mut starts: Vec<u64> = Vec::with_capacity(bundle.keyframes.len());
     for (i, frame) in bundle.keyframes.iter().enumerate() {
         let first_word = words.and_then(|w| w[i].first().map(|w| w.t0));
@@ -302,7 +302,7 @@ fn frame_starts(bundle: &ScrawlBundle, words: Option<&[Vec<&WordTiming>]>) -> Ve
 
 /// Everything besides marks that the summary shows inline, in time order, with repeats of one
 /// thing (a shortcut, a click on one control) folded into `×N` and a run of drags into one line.
-fn events(bundle: &ScrawlBundle) -> Vec<(u64, String)> {
+fn events(bundle: &ApparentBundle) -> Vec<(u64, String)> {
     let settled = settled_events(&bundle.events);
     // On a Mac capture these come from the dev page (`crate::page`), not an app.
     let page_scrubs: Vec<u64> = settled
@@ -338,7 +338,7 @@ fn events(bundle: &ScrawlBundle) -> Vec<(u64, String)> {
             InteractionEvent::AppEvent { t, label } if bundle.device.is_none() => {
                 Some((*t, label.clone()))
             }
-            // Window titles stay in scrawl.json; the summary names apps only.
+            // Window titles stay in apparent.json; the summary names apps only.
             InteractionEvent::AppChange { t, app, .. } => Some((*t, format!("switched to {app}"))),
             other => event_text(other).map(|text| (other.timestamp_ms(), text)),
         };
@@ -582,7 +582,7 @@ fn window_changes(snapshots: &[WindowSnapshot]) -> Vec<(u64, String)> {
         snapshot
             .windows
             .iter()
-            .filter(|w| w.layer == 0 && w.regular && w.app != "Scrawl")
+            .filter(|w| w.layer == 0 && w.regular && w.app != "Apparent")
             .map(|w| (w.id, w.app.clone()))
             .collect()
     };
@@ -766,7 +766,7 @@ fn interleave_unsplit(said: Option<&str>, items: &[Timed]) -> FrameText {
 /// What changed on a scene-change keyframe, when it can be named: for now only a change of the
 /// whole screen (autocrop's change boxes). Smaller regions have no names yet and the image shows
 /// them.
-fn changed_regions(bundle: &ScrawlBundle, index: usize) -> Option<String> {
+fn changed_regions(bundle: &ApparentBundle, index: usize) -> Option<String> {
     let frame = bundle.keyframes.get(index)?;
     if frame.reason != KeyframeReason::SceneChange {
         return None;
@@ -852,8 +852,8 @@ mod tests {
         }
     }
 
-    fn bundle(words: Vec<WordTiming>, keyframes: Vec<Keyframe>) -> ScrawlBundle {
-        ScrawlBundle {
+    fn bundle(words: Vec<WordTiming>, keyframes: Vec<Keyframe>) -> ApparentBundle {
+        ApparentBundle {
             version: 1,
             id: "t".into(),
             created_at_ms: 0,

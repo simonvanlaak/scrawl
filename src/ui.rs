@@ -33,7 +33,7 @@ use crate::audio::{AudioRecorder, InputWarning};
 use crate::capture::{
     LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, current_mouse_screen,
     discover_target, install_global_hotkeys, list_selectable_windows,
-    record_external_frontmost_app, region_target, scrawl_log, selectable_window_at,
+    record_external_frontmost_app, region_target, apparent_log, selectable_window_at,
     shortcut_from_key_and_mods, start_global_input_tap, update_global_shortcut,
 };
 use crate::helper::PhoneDevice;
@@ -41,7 +41,7 @@ use crate::helper::PhoneDevice;
 use crate::laser_overlay::MetalLaserOverlay as LaserOverlay;
 #[cfg(target_os = "linux")]
 use crate::linux::overlay::InkOverlay as LaserOverlay;
-use crate::model::{CaptureMode, ScrawlBundle, TargetFrame, TargetInfo, format_clock};
+use crate::model::{CaptureMode, ApparentBundle, TargetFrame, TargetInfo, format_clock};
 use crate::phone::PhoneSession;
 use crate::sketch::timeline;
 #[cfg(target_os = "windows")]
@@ -113,7 +113,7 @@ impl Spring {
 }
 
 // The capsule's springs and durations live in `motion::Tune` (defaults in `Tune::DEFAULT`, live
-// overrides from `~/.config/scrawl/tune.json` in debug builds; `scrawl tune`).
+// overrides from `~/.config/apparent/tune.json` in debug builds; `apparent tune`).
 //
 // Switch chips on a tap-started recording (`crate::shortcut::Reveal`). One shape: the recording
 // pill grows into the chip row and folds back. The width leads the morph palette (.42/.16 open,
@@ -250,7 +250,7 @@ fn no_words_warning(
     audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
 }
 
-fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ScrawlBundle) -> bool {
+fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ApparentBundle) -> bool {
     no_words_warning(
         &bundle.transcript,
         bundle
@@ -512,7 +512,7 @@ enum MenuAction {
 static EXPORT_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static EXPORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Exports the newest bundle to `~/Movies/Scrawl/<name>.mp4` off the main thread, reporting
+/// Exports the newest bundle to `~/Movies/Apparent/<name>.mp4` off the main thread, reporting
 /// through `EXPORT_STATUS`, then reveals the file in Finder.
 fn start_video_export() {
     use std::sync::atomic::Ordering;
@@ -526,7 +526,7 @@ fn start_video_export() {
     };
     say(Some("Exporting…".into()));
     let spawned = std::thread::Builder::new()
-        .name("scrawl-export".into())
+        .name("apparent-export".into())
         .spawn(move || {
             let result = crate::handoff::load_bundle(std::path::Path::new("latest")).and_then(
                 |(dir, bundle)| {
@@ -541,12 +541,12 @@ fn start_video_export() {
             );
             match result {
                 Ok(exported) => {
-                    scrawl_log(format!("Exported {}", crate::export::describe(&exported)));
+                    apparent_log(format!("Exported {}", crate::export::describe(&exported)));
                     say(Some("Exported".into()));
                     let _ = crate::handoff::reveal_path(&exported.path);
                 }
                 Err(error) => {
-                    scrawl_log(format!("Video export failed: {error:#}"));
+                    apparent_log(format!("Video export failed: {error:#}"));
                     say(Some("Export failed".into()));
                 }
             }
@@ -707,12 +707,12 @@ enum CaptureSource {
     Screen {
         session: ScreenCaptureSession,
         audio: Option<AudioRecorder>,
-        /// Screen mode only: which windows were where, for `scrawl autocrop`.
+        /// Screen mode only: which windows were where, for `apparent autocrop`.
         windows: Option<crate::windows::WindowLogger>,
     },
     /// The helper's mirror window records the phone's native video and the narration.
     Phone(PhoneSession),
-    /// `scrawl lab pill`: nothing is captured.
+    /// `apparent lab pill`: nothing is captured.
     Lab,
 }
 
@@ -743,7 +743,7 @@ impl ActiveRecording {
 }
 
 /// Shared coordinator owned by the GPUI app.
-pub struct ScrawlCoordinator {
+pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
     #[cfg(target_os = "linux")]
     whiteboard: Rc<RefCell<whiteboard::Board>>,
@@ -802,7 +802,7 @@ pub struct ScrawlCoordinator {
     display_rect: [f32; 4],
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
-    review_bundle: Option<(PathBuf, ScrawlBundle)>,
+    review_bundle: Option<(PathBuf, ApparentBundle)>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
@@ -842,7 +842,7 @@ pub struct ScrawlCoordinator {
     shortcut: crate::shortcut::Shortcut,
     /// The modifiers held when the shortcut went down; releasing any of them starts the recording.
     hold_mods: u64,
-    /// `scrawl lab pill`: recordings are pretend (`CaptureSource::Lab`), the picker takes no
+    /// `apparent lab pill`: recordings are pretend (`CaptureSource::Lab`), the picker takes no
     /// input and opens no overlay, and nothing looks for windows or phones.
     lab: bool,
 }
@@ -853,10 +853,10 @@ pub enum ReviewTab {
     Keyframes,
 }
 
-impl ScrawlCoordinator {
+impl ApparentCoordinator {
     fn new(
         telemetry: Arc<SharedCaptureTelemetry>,
-        initial_bundle: Option<(PathBuf, ScrawlBundle)>,
+        initial_bundle: Option<(PathBuf, ApparentBundle)>,
     ) -> Self {
         crate::playback::warm_up();
         Self {
@@ -936,7 +936,7 @@ impl ScrawlCoordinator {
     }
 
     /// Records a capture received from elsewhere; returns the unhandled count.
-    fn add_to_inbox(&mut self, dir: &std::path::Path, bundle: &ScrawlBundle) -> usize {
+    fn add_to_inbox(&mut self, dir: &std::path::Path, bundle: &ApparentBundle) -> usize {
         let source = bundle.source.as_deref().unwrap_or("iphone");
         self.inbox.add(crate::inbox::InboxEntry::new(
             dir,
@@ -977,7 +977,7 @@ impl ScrawlCoordinator {
         // Without Accessibility macOS drops the posted ⌘V (onboarding asks for it, but it can be
         // turned off later); bring the permissions window instead.
         if !crate::capture::accessibility_granted() {
-            scrawl_log("⌥⇧V without Accessibility; asking for it");
+            apparent_log("⌥⇧V without Accessibility; asking for it");
             self.gate
                 .defer(vec![crate::onboarding::Permission::Accessibility]);
             return;
@@ -989,7 +989,7 @@ impl ScrawlCoordinator {
         }
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_image_and_text(&dir) {
-                scrawl_log(format!("paste_bundle_image_and_text error: {err}"));
+                apparent_log(format!("paste_bundle_image_and_text error: {err}"));
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
@@ -1009,7 +1009,7 @@ impl ScrawlCoordinator {
                 .background_executor()
                 .spawn(async {
                     crate::helper::devices()
-                        .inspect_err(|error| scrawl_log(format!("iPhone discovery: {error:#}")))
+                        .inspect_err(|error| apparent_log(format!("iPhone discovery: {error:#}")))
                         .ok()
                         .and_then(|devices| devices.into_iter().next())
                 })
@@ -1056,7 +1056,7 @@ impl ScrawlCoordinator {
         };
         match crate::onboarding::Session::open(flow, &self.shortcut_label(), events) {
             Ok(session) => self.onboarding = Some(session),
-            Err(error) => scrawl_log(format!("onboarding could not open: {error:#}")),
+            Err(error) => apparent_log(format!("onboarding could not open: {error:#}")),
         }
     }
 
@@ -1077,7 +1077,7 @@ impl ScrawlCoordinator {
                 });
                 self.settings = Some(session);
             }
-            Err(error) => scrawl_log(format!("Settings could not open: {error:#}")),
+            Err(error) => apparent_log(format!("Settings could not open: {error:#}")),
         }
     }
 
@@ -1144,7 +1144,7 @@ impl ScrawlCoordinator {
         if missing.is_empty() {
             return true;
         }
-        scrawl_log(format!(
+        apparent_log(format!(
             "Not recording: {missing:?} off; opening onboarding"
         ));
         self.gate.defer(missing);
@@ -1164,7 +1164,7 @@ impl ScrawlCoordinator {
                 return true;
             }
         }
-        scrawl_log(format!("{permission:?} is off; asking for it"));
+        apparent_log(format!("{permission:?} is off; asking for it"));
         self.gate.defer(vec![permission]);
         false
     }
@@ -1235,7 +1235,7 @@ impl ScrawlCoordinator {
                 self.onboarding = None;
             }
             Effect::Relaunch { resume } => {
-                scrawl_log(format!(
+                apparent_log(format!(
                     "Screen Recording granted but not usable here; relaunching (resume {resume:?})"
                 ));
                 let mut progress = Progress::load();
@@ -1281,7 +1281,7 @@ impl ScrawlCoordinator {
             // macOS's permission prompts and take the clicks meant for them.
             let missing = self.missing_to_record();
             if !self.gate.press(missing) {
-                scrawl_log("Shortcut held back: a required permission is off");
+                apparent_log("Shortcut held back: a required permission is off");
                 return;
             }
             self.begin_playback();
@@ -1312,7 +1312,7 @@ impl ScrawlCoordinator {
     fn apply_shortcut(&mut self, action: crate::shortcut::Action, cx: &mut Context<Self>) {
         use crate::shortcut::Action;
         if action != Action::None {
-            scrawl_log(format!("shortcut -> {action:?}"));
+            apparent_log(format!("shortcut -> {action:?}"));
         }
         match action {
             Action::None => {}
@@ -1353,7 +1353,7 @@ impl ScrawlCoordinator {
     }
 
     /// Activity that means the user got to work: clicks, drags, scrolls and strokes. Clicks on
-    /// Scrawl's own windows (the capsule and its chips) are never recorded, so they don't count.
+    /// Apparent's own windows (the capsule and its chips) are never recorded, so they don't count.
     fn reveal_activity(&self) -> usize {
         use std::sync::PoisonError;
         let t = &self.telemetry;
@@ -1423,7 +1423,7 @@ impl ScrawlCoordinator {
             cx.notify();
             return;
         }
-        scrawl_log(format!("switch_recording -> {mode:?}"));
+        apparent_log(format!("switch_recording -> {mode:?}"));
         // The morph continues the chips, so it needs them on screen.
         let chips_shown = self.reveal.is_open();
         let Some((_, overlay)) = self.discard_recording() else {
@@ -1482,7 +1482,7 @@ impl ScrawlCoordinator {
             .clone()
     }
 
-    pub fn set_review_bundle(&mut self, bundle: (PathBuf, ScrawlBundle), status: Option<String>) {
+    pub fn set_review_bundle(&mut self, bundle: (PathBuf, ApparentBundle), status: Option<String>) {
         self.review_bundle = Some(bundle);
         self.review_status = status;
         self.selected_tab = ReviewTab::ContactSheet;
@@ -1573,7 +1573,7 @@ impl ScrawlCoordinator {
         if self.is_recording() || self.is_processing() {
             return;
         }
-        scrawl_log("preview_iphone invoked");
+        apparent_log("preview_iphone invoked");
         // The mirror would raise the camera prompt under the picker, which takes its clicks.
         if !self.ready_for(crate::onboarding::Permission::Camera) {
             self.cancel_recording(cx);
@@ -1589,7 +1589,7 @@ impl ScrawlCoordinator {
                     self.iphone_preview = Some(session);
                 }
                 Err(error) => {
-                    scrawl_log(format!("iPhone preview could not start: {error:#}"));
+                    apparent_log(format!("iPhone preview could not start: {error:#}"));
                     self.set_selection_mode(SelectionMode::Area, cx);
                     return;
                 }
@@ -1651,7 +1651,7 @@ impl ScrawlCoordinator {
 
     /// Picker keyboard map, shared by the picker window and the HUD pill. Returns whether the
     /// key was handled.
-    /// ⌘Q and ⌘, in Scrawl's own windows: a menu bar (accessory) app has no main menu to
+    /// ⌘Q and ⌘, in Apparent's own windows: a menu bar (accessory) app has no main menu to
     /// carry them (Ctrl+Q and Ctrl+, on Windows).
     pub fn handle_app_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         let mods = keystroke.modifiers;
@@ -1907,7 +1907,7 @@ impl ScrawlCoordinator {
         if (0..4).all(|k| (frame[k] - current[k]).abs() < 1.0) {
             return;
         }
-        scrawl_log(format!("picker follows the pointer to display {frame:?}"));
+        apparent_log(format!("picker follows the pointer to display {frame:?}"));
         self.display_rect = frame.map(|v| v as f32);
         if let Some(ref mut overlay) = self.picker_metal_overlay {
             overlay.move_to(frame);
@@ -1952,7 +1952,7 @@ impl ScrawlCoordinator {
                 self.native_pill = Some(pill);
             }
             Err(err) => {
-                scrawl_log(format!("NativePill::open error: {err}"));
+                apparent_log(format!("NativePill::open error: {err}"));
             }
         }
     }
@@ -2100,7 +2100,7 @@ impl ScrawlCoordinator {
         self.keep_pending_send(&dir);
         self.dismiss_island(cx);
         if !crate::capture::accessibility_granted() {
-            scrawl_log("Paste chip without Accessibility; asking for it");
+            apparent_log("Paste chip without Accessibility; asking for it");
             self.gate
                 .defer(vec![crate::onboarding::Permission::Accessibility]);
             return;
@@ -2108,7 +2108,7 @@ impl ScrawlCoordinator {
         self.mark_handled(&dir);
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_at_target(&dir, click_target) {
-                scrawl_log(format!("paste_bundle_at_target error: {err}"));
+                apparent_log(format!("paste_bundle_at_target error: {err}"));
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
@@ -2186,7 +2186,7 @@ impl ScrawlCoordinator {
         self.routing = None;
         self.pending_send = None;
         self.mark_handled(&dir);
-        scrawl_log(format!(
+        apparent_log(format!(
             "routing (smart): chose {} ({}) for {}",
             chip.dest.title,
             chip.dest.session,
@@ -2230,7 +2230,7 @@ impl ScrawlCoordinator {
         }
         if self.routing.as_deref() == Some(dir) {
             self.routing = None;
-            scrawl_log(format!(
+            apparent_log(format!(
                 "routing: kept {} on the clipboard while its route was worked out",
                 dir.display()
             ));
@@ -2238,7 +2238,7 @@ impl ScrawlCoordinator {
         if self.pending_send.as_deref() == Some(dir) {
             self.pending_send = None;
             self.completed_note = None;
-            scrawl_log(format!(
+            apparent_log(format!(
                 "routing (smart): kept {} on the clipboard",
                 dir.display()
             ));
@@ -2267,14 +2267,14 @@ impl ScrawlCoordinator {
         let (sender, receiver) = flume::bounded(1);
         let send_dir = dir.clone();
         let spawned = std::thread::Builder::new()
-            .name("scrawl-send".into())
+            .name("apparent-send".into())
             .spawn(move || {
                 if let Err(err) =
                     crate::handoff::load_bundle(&send_dir).and_then(|(_, mut bundle)| {
                         crate::routing::record_destination(&send_dir, &mut bundle, dest.clone())
                     })
                 {
-                    scrawl_log(format!("routing: couldn't record the destination: {err:#}"));
+                    apparent_log(format!("routing: couldn't record the destination: {err:#}"));
                 }
                 let _ = sender.send(crate::delivery::deliver(
                     &send_dir,
@@ -2484,7 +2484,7 @@ impl ScrawlCoordinator {
         if self.is_recording() || self.is_processing() {
             return;
         }
-        scrawl_log(format!("open_picker invoked (mode: {mode:?})"));
+        apparent_log(format!("open_picker invoked (mode: {mode:?})"));
         let started = Instant::now();
         self.recording_shortcut_key = false;
         self.selectable_windows.clear();
@@ -2586,7 +2586,7 @@ impl ScrawlCoordinator {
             let [x, y, w, h] = self.display_rect.map(f64::from);
             let overlay =
                 platform::open_overlay(Arc::clone(&self.telemetry), Some([x, y, w, h]), cx)
-                    .map_err(|error| scrawl_log(format!("Metal overlay failed: {error}")))
+                    .map_err(|error| apparent_log(format!("Metal overlay failed: {error}")))
                     .ok();
             if let Some(ref ov) = overlay {
                 self.telemetry
@@ -2642,7 +2642,7 @@ impl ScrawlCoordinator {
         self.whiteboard.borrow_mut().clear();
         self.begin_playback();
         let started = Instant::now();
-        scrawl_log(format!(
+        apparent_log(format!(
             "start_recording_with_target invoked: mode={:?} frame={:?}",
             target.mode, target.frame
         ));
@@ -2661,10 +2661,10 @@ impl ScrawlCoordinator {
         self.hovered_window = None;
         self.animated_window_rect = None;
         let id = crate::make_bundle_id();
-        let root = std::env::var_os("SCRAWL_BENCH_START")
+        let root = std::env::var_os("APPARENT_BENCH_START")
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
-        let bundle_dir = root.join(format!("{id}.scrawl"));
+        let bundle_dir = root.join(format!("{id}.apparent"));
         let _ = std::fs::create_dir_all(&bundle_dir);
         let video_path = bundle_dir.join("recording.mp4");
 
@@ -2685,7 +2685,7 @@ impl ScrawlCoordinator {
         });
         let metal_overlay = metal_overlay.or_else(|| {
             let ov = platform::open_overlay(Arc::clone(&self.telemetry), Some(target_rect), cx)
-                .map_err(|error| scrawl_log(format!("Metal overlay failed: {error}")))
+                .map_err(|error| apparent_log(format!("Metal overlay failed: {error}")))
                 .ok();
             if let Some(ref o) = ov {
                 self.telemetry
@@ -2760,7 +2760,7 @@ impl ScrawlCoordinator {
         cx.notify();
     }
 
-    /// `scrawl lab pill`: a pretend recording with no capture, microphone, files or overlay, so
+    /// `apparent lab pill`: a pretend recording with no capture, microphone, files or overlay, so
     /// the capsule goes through exactly the states a real one does.
     fn start_lab_recording(&mut self, target: TargetInfo, cx: &mut Context<Self>) {
         if let IslandPhase::Selecting { mode } = self.island_phase {
@@ -2787,7 +2787,7 @@ impl ScrawlCoordinator {
         if self.is_recording() || self.is_processing() {
             return;
         }
-        scrawl_log("start_recording_iphone invoked");
+        apparent_log("start_recording_iphone invoked");
         if self.lab {
             self.start_lab_recording(crate::phone::phone_target("iPhone", None, None, 0, 0), cx);
             return;
@@ -2803,7 +2803,7 @@ impl ScrawlCoordinator {
         self.hovered_window = None;
         self.animated_window_rect = None;
         let bundle_dir = crate::handoff::default_captures_dir()
-            .join(format!("{}.scrawl", crate::make_bundle_id()));
+            .join(format!("{}.apparent", crate::make_bundle_id()));
         let _ = std::fs::create_dir_all(&bundle_dir);
         let movie_path = bundle_dir.join("recording.mov");
         let existing_preview = self.iphone_preview.take();
@@ -2849,7 +2849,7 @@ impl ScrawlCoordinator {
             match PhoneSession::start(&movie_path, dev_id, Some(Arc::clone(&self.telemetry))) {
                 Ok(session) => session,
                 Err(error) => {
-                    scrawl_log(format!("iPhone capture could not start: {error:#}"));
+                    apparent_log(format!("iPhone capture could not start: {error:#}"));
                     self.telemetry.finish_session();
                     let _ = std::fs::remove_dir_all(&bundle_dir);
                     self.dismiss_island(cx);
@@ -2866,7 +2866,7 @@ impl ScrawlCoordinator {
         ]);
         let metal_overlay = self.picker_metal_overlay.take().or_else(|| {
             platform::open_overlay(Arc::clone(&self.telemetry), mirror, cx)
-                .map_err(|error| scrawl_log(format!("Metal overlay failed: {error}")))
+                .map_err(|error| apparent_log(format!("Metal overlay failed: {error}")))
                 .ok()
         });
         self.active_recording = Some(ActiveRecording {
@@ -2902,14 +2902,14 @@ impl ScrawlCoordinator {
 
     pub fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.playback.take();
-        scrawl_log("cancel_recording invoked");
+        apparent_log("cancel_recording invoked");
         self.discard_recording();
         self.dismiss_island(cx);
     }
 
     pub fn finish_recording(&mut self, cx: &mut Context<Self>) {
         self.playback.take();
-        scrawl_log("finish_recording invoked");
+        apparent_log("finish_recording invoked");
         let Some(rec) = self.active_recording.take() else {
             return;
         };
@@ -3002,7 +3002,7 @@ impl ScrawlCoordinator {
                                 )
                             });
                             if let Err(error) = &finalized {
-                                scrawl_log(format!("iPhone capture failed: {error:#}"));
+                                apparent_log(format!("iPhone capture failed: {error:#}"));
                             }
                             let duration_ms =
                                 finalized.as_ref().map_or(0, |(_, b, _)| b.duration_ms);
@@ -3063,7 +3063,7 @@ impl ScrawlCoordinator {
                     let (dir, bundle, _) = match finalized {
                         Ok(capture) => capture,
                         Err(error) => {
-                            scrawl_log(format!("Capture failed: {error:#}"));
+                            apparent_log(format!("Capture failed: {error:#}"));
                             #[cfg(target_os = "linux")]
                             crate::linux::shell::notify("Capture failed", &error.to_string());
                             coord.set_island_phase(IslandPhase::Dismissing);
@@ -3083,14 +3083,14 @@ impl ScrawlCoordinator {
                     }
                     // Leave the summary for manual Ctrl+V even if automatic paste fails.
                     let clipboard_ready = crate::handoff::copy_bundle_to_clipboard(&dir)
-                        .map_err(|error| scrawl_log(format!("Copy handoff failed: {error:#}")))
+                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
                         .is_ok();
                     #[cfg(target_os = "linux")]
                     if auto_active && clipboard_ready {
                         let handoff_dir = dir.clone();
                         std::thread::spawn(move || {
                             if let Err(error) = crate::linux::auto_paste::paste_bundle(&handoff_dir) {
-                                scrawl_log(format!("Automatic draft paste skipped: {error:#}"));
+                                apparent_log(format!("Automatic draft paste skipped: {error:#}"));
                                 crate::linux::shell::notify(
                                     "Draft paste skipped",
                                     &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", handoff_dir.display()),
@@ -3144,7 +3144,7 @@ impl ScrawlCoordinator {
                     RouteOutcome::None
                 })
                 .await;
-            scrawl_log(format!(
+            apparent_log(format!(
                 "finish: copied at {copied_ms}ms · routed at {}ms",
                 finish_started.elapsed().as_millis()
             ));
@@ -3158,7 +3158,7 @@ impl ScrawlCoordinator {
     fn route_arrived(&mut self, dir: PathBuf, route: RouteOutcome, cx: &mut Context<Self>) {
         if self.routing.as_deref() != Some(dir.as_path()) {
             if !matches!(route, RouteOutcome::None) {
-                scrawl_log(format!(
+                apparent_log(format!(
                     "routing: {} was kept on the clipboard before its route arrived",
                     dir.display()
                 ));
@@ -3235,7 +3235,7 @@ enum RouteOutcome {
 }
 
 pub struct HudPillWindow {
-    coordinator: Entity<ScrawlCoordinator>,
+    coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
     /// The capsule's native shell, scale and blur where the platform draws them.
     chrome: PillChrome,
@@ -3499,7 +3499,7 @@ impl Render for HudPillWindow {
             .text_size(px(HUD_TEXT))
             .whitespace_nowrap()
             .opacity(content_alpha);
-        // Traces a row's children under these names (`SCRAWL_MOTION_TRACE`).
+        // Traces a row's children under these names (`APPARENT_MOTION_TRACE`).
         let traced = |group: Div, keys: Vec<Option<(String, f32)>>| match trace_xf {
             Some(xf) => group.on_children_prepainted(motion::trace_children(keys, xf, "row")),
             None => group,
@@ -4296,7 +4296,7 @@ fn camera_cursor_badge(x: f32, y: f32) -> Div {
 }
 
 pub struct TargetPickerWindow {
-    coordinator: Entity<ScrawlCoordinator>,
+    coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
 }
 
@@ -4413,7 +4413,7 @@ impl Render for TargetPickerWindow {
         // window swap or border jump on recording start. `TargetPickerWindow` only provides the
         // hit-test surface, cursor style, camera cursor follower, and tabular dimension badge.
         let mut root = div()
-            .id("scrawl-target-picker")
+            .id("apparent-target-picker")
             .track_focus(&self.focus)
             .size_full()
             .relative()
@@ -4677,7 +4677,7 @@ fn place_badge(
 }
 
 pub struct BundleReviewWindow {
-    coordinator: Entity<ScrawlCoordinator>,
+    coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
     cached_sheet_path: Option<PathBuf>,
     cached_sheet_image: Option<Arc<Image>>,
@@ -4687,7 +4687,7 @@ pub struct BundleReviewWindow {
 }
 
 impl BundleReviewWindow {
-    fn new(coordinator: Entity<ScrawlCoordinator>, focus: FocusHandle) -> Self {
+    fn new(coordinator: Entity<ApparentCoordinator>, focus: FocusHandle) -> Self {
         Self {
             coordinator,
             focus,
@@ -4713,7 +4713,7 @@ impl BundleReviewWindow {
         }
     }
 
-    fn ensure_images(&mut self, dir: &std::path::Path, bundle: &ScrawlBundle) {
+    fn ensure_images(&mut self, dir: &std::path::Path, bundle: &ApparentBundle) {
         let sheet_path = dir.join(&bundle.contact_sheet);
         if self.cached_sheet_path.as_ref() != Some(&sheet_path) {
             self.cached_sheet_path = Some(sheet_path.clone());
@@ -4748,7 +4748,7 @@ impl Render for BundleReviewWindow {
             let c_demo = self.coordinator.clone();
             let c_keydown = self.coordinator.clone();
             return div()
-                .id("scrawl-review-empty")
+                .id("apparent-review-empty")
                 .track_focus(&self.focus)
                 .on_key_down(move |event: &KeyDownEvent, window, cx| {
                     let handled = c_keydown
@@ -4777,7 +4777,7 @@ impl Render for BundleReviewWindow {
                     div()
                         .text_size(px(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("Scrawl"),
+                        .child("Apparent"),
                 )
                 .child(
                     div()
@@ -4844,7 +4844,7 @@ impl Render for BundleReviewWindow {
         let send_dir = dir.clone();
 
         div()
-            .id("scrawl-review-root")
+            .id("apparent-review-root")
             .track_focus(&self.focus)
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
@@ -5210,7 +5210,7 @@ impl BundleReviewWindow {
 
     fn render_keyframes_stage(
         &self,
-        bundle: &ScrawlBundle,
+        bundle: &ApparentBundle,
         selected_kf: usize,
         stage_w: f32,
     ) -> AnyElement {
@@ -5450,7 +5450,7 @@ fn hint_button(
         })
 }
 
-fn open_picker_windows(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
+fn open_picker_windows(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) {
     close_picker_window(cx);
     let screen = coord_entity.read(cx).display_rect;
     let display = platform::display_at(screen, cx);
@@ -5511,7 +5511,7 @@ fn open_picker_windows(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
     ensure_hud_pill_open(coord_entity, cx);
 }
 
-/// Puts Scrawl's floating windows back in order once they've all opened: the pill above the
+/// Puts Apparent's floating windows back in order once they've all opened: the pill above the
 /// picker above the ink overlay (which places itself a turn later).
 fn restack_soon(cx: &mut App) {
     cx.spawn(async move |cx| {
@@ -5534,7 +5534,7 @@ fn restack_soon(cx: &mut App) {
     .detach();
 }
 
-fn ensure_hud_pill_open(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
+fn ensure_hud_pill_open(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) {
     if crate::handoff::native_pill() {
         let _ = coord_entity.update(cx, |coord, _| {
             coord.ensure_native_pill();
@@ -5660,7 +5660,7 @@ fn close_review_window(cx: &mut App) {
     }
 }
 
-fn open_review_capture(coord: &Entity<ScrawlCoordinator>, path: &std::path::Path, cx: &mut App) {
+fn open_review_capture(coord: &Entity<ApparentCoordinator>, path: &std::path::Path, cx: &mut App) {
     match crate::handoff::load_bundle(path) {
         Ok(bundle) => {
             coord.update(cx, |coord, cx| {
@@ -5681,7 +5681,7 @@ fn open_review_capture(coord: &Entity<ScrawlCoordinator>, path: &std::path::Path
 /// Opens the review window in front with the keys. A menu bar (accessory) app isn't active when
 /// its menu is used, and the cooperative `NSApp.activate()` may leave the window behind the app
 /// in front, so it activates ignoring other apps once the window exists.
-fn open_review_window(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
+fn open_review_window(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) {
     for handle in cx.windows() {
         if let Some(review) = handle.downcast::<BundleReviewWindow>() {
             platform::take_keys(cx);
@@ -5699,11 +5699,11 @@ fn open_review_window(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
                 // The taskbar and Alt+Tab show it on Windows and Linux; macOS draws no title here.
-                title: cfg!(not(target_os = "macos")).then(|| "Scrawl".into()),
+                title: cfg!(not(target_os = "macos")).then(|| "Apparent".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(16.0), px(16.0))),
             }),
-            app_id: Some("dev.kitlangton.scrawl".into()),
+            app_id: Some("dev.kitlangton.apparent".into()),
             focus: true,
             show: true,
             kind: WindowKind::Normal,
@@ -5745,7 +5745,7 @@ fn open_review_window(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) {
 }
 
 pub(crate) fn start_metric(name: &str, started: Instant) {
-    if std::env::var_os("SCRAWL_BENCH_START").is_some() {
+    if std::env::var_os("APPARENT_BENCH_START").is_some() {
         eprintln!(
             "START_METRIC {name}={:.6}",
             started.elapsed().as_secs_f64() * 1_000.0
@@ -5757,10 +5757,10 @@ pub(crate) fn start_metric(name: &str, started: Instant) {
 pub fn run_start_benchmark() {
     let app = Application::new().with_assets(crate::icons::Assets);
     app.run(|cx: &mut App| {
-        let quick_stop = std::env::var("SCRAWL_BENCH_QUICK_STOP").as_deref() == Ok("1");
+        let quick_stop = std::env::var("APPARENT_BENCH_QUICK_STOP").as_deref() == Ok("1");
         let (sender, _receiver) = flume::unbounded();
         let telemetry = SharedCaptureTelemetry::new(sender);
-        let coordinator = cx.new(|_| ScrawlCoordinator::new(telemetry, None));
+        let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, None));
         cx.spawn(async move |cx| {
             for run in 0..8 {
                 coordinator.update(cx, |coord, cx| coord.begin_target_selection(cx)).unwrap();
@@ -5807,20 +5807,28 @@ pub fn run_start_benchmark() {
     });
 }
 
-/// Runs the GPUI desktop app, optionally opening an initial `.scrawl` bundle in the Review window
+/// Runs the GPUI desktop app, optionally opening an initial `.apparent` bundle in the Review window
 /// or starting recording immediately.
 pub fn run_app(
-    initial_bundle: Option<(PathBuf, ScrawlBundle)>,
+    initial_bundle: Option<(PathBuf, ApparentBundle)>,
     start_recording_immediately: bool,
     start_iphone_immediately: bool,
     screenshot_out: Option<PathBuf>,
 ) {
     let app = Application::new().with_assets(crate::icons::Assets);
     app.run(move |cx: &mut App| {
-        scrawl_log(format!("run_app started pid={}", std::process::id()));
+        if let Err(error) =
+            cx.text_system()
+                .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!(
+                    "../assets/fonts/HostGrotesk-Variable.ttf"
+                ))])
+        {
+            apparent_log(format!("Host Grotesk unavailable: {error}"));
+        }
+        apparent_log(format!("run_app started pid={}", std::process::id()));
         platform::keep_alive(cx);
         crate::settings::reconcile_login_item();
-        // ⌘W, Esc, the close button or Scrawl itself: every way a window closes ends up here.
+        // ⌘W, Esc, the close button or Apparent itself: every way a window closes ends up here.
         cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys))
             .detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
@@ -5836,7 +5844,7 @@ pub fn run_app(
         let menu_rx = install_status_bar();
 
         // Onboarding opens on first launch, or for a permission that went away.
-        if screenshot_out.is_none() && std::env::var_os("SCRAWL_NO_ONBOARDING").is_none() {
+        if screenshot_out.is_none() && std::env::var_os("APPARENT_NO_ONBOARDING").is_none() {
             let sender = telemetry.ui_sender.clone();
             std::thread::spawn(move || {
                 if let Some(grants) = crate::onboarding::read_grants() {
@@ -5846,7 +5854,7 @@ pub fn run_app(
             });
         }
         let has_initial = initial_bundle.is_some();
-        let coordinator = cx.new(|_| ScrawlCoordinator::new(telemetry, initial_bundle));
+        let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, initial_bundle));
         set_status_inbox_count(coordinator.read(cx).inbox.len());
 
         if has_initial {
@@ -5873,7 +5881,7 @@ pub fn run_app(
                         })
                         .await;
                 if let Err(error) = saved {
-                    scrawl_log(format!("Window screenshot failed: {error:#}"));
+                    apparent_log(format!("Window screenshot failed: {error:#}"));
                 }
                 let _ = cx.update(|cx| cx.quit());
             })
@@ -6384,16 +6392,16 @@ mod tests {
     fn clock_template_is_width_stable() {
         assert_eq!(clock_template("12:34"), "00:00");
         assert_eq!(completed_label(0, None), "Copied");
-        assert_eq!(completed_label(0, Some("Sent to SCRAWL")), "Sent to SCRAWL");
-        assert_eq!(completed_label(1, Some("Sent to SCRAWL")), "From iPhone");
+        assert_eq!(completed_label(0, Some("Sent to APPARENT")), "Sent to APPARENT");
+        assert_eq!(completed_label(1, Some("Sent to APPARENT")), "From iPhone");
         assert_eq!(completed_label(3, None), "3 from iPhone");
         assert_eq!(completed_status_label(0, None, true), "Copied · No words");
         assert_eq!(
-            completed_status_label(0, Some("Sent to SCRAWL"), true),
-            "Sent to SCRAWL · No words"
+            completed_status_label(0, Some("Sent to APPARENT"), true),
+            "Sent to APPARENT · No words"
         );
         assert_eq!(completed_status_label(0, None, false), "Copied");
-        assert_eq!(island_title("SCRAWL"), "SCRAWL");
+        assert_eq!(island_title("APPARENT"), "APPARENT");
         assert_eq!(
             island_title("Make Mac captures route to the site session"),
             "Make Mac captures route…"
@@ -6403,16 +6411,16 @@ mod tests {
             "Make Mac captur…"
         );
         let queued = crate::delivery::Delivery::Queued {
-            title: "SCRAWL".into(),
+            title: "APPARENT".into(),
             error: "offline".into(),
         };
         assert_eq!(
-            completed_delivery_note(&queued, "SCRAWL"),
-            "Copied · couldn't reach SCRAWL"
+            completed_delivery_note(&queued, "APPARENT"),
+            "Copied · couldn't reach APPARENT"
         );
         let sent = crate::delivery::Delivery::Sent {
-            title: "SCRAWL".into(),
+            title: "APPARENT".into(),
         };
-        assert_eq!(completed_delivery_note(&sent, "SCRAWL"), "Sent to SCRAWL");
+        assert_eq!(completed_delivery_note(&sent, "APPARENT"), "Sent to APPARENT");
     }
 }

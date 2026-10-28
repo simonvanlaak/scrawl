@@ -3,7 +3,7 @@ import { Copy } from "./Copy"
 import { usePlatform, type Platform } from "./platform"
 import { BREW, LINUX_DOWNLOAD, MAC_DMG, RELEASE, WINDOWS_DOWNLOAD } from "./release"
 
-const SITE = "https://scrawl.kitlangton.com/"
+const SITE = "https://app.tryapparent.com/"
 const REQUIRES = `Apple silicon · macOS ${RELEASE.macos} or later`
 
 function Apple() {
@@ -55,7 +55,7 @@ function SendLink() {
       className="btn-primary"
       onClick={async () => {
         if (canShare) {
-          await navigator.share({ title: "Scrawl", text: "Scrawl for Mac, Windows and Linux", url: SITE }).catch(() => {})
+          await navigator.share({ title: "Apparent", text: "Apparent for Mac, Windows and Linux", url: SITE }).catch(() => {})
           return
         }
         await navigator.clipboard?.writeText(SITE)
@@ -72,12 +72,12 @@ function SendLink() {
 function Primary({ platform }: { platform: Platform }) {
   switch (platform.kind) {
     case "mac":
-      return (
+      return MAC_DMG ? (
         <a className="btn-primary" href={MAC_DMG}>
           <Apple />
           Download for Mac
         </a>
-      )
+      ) : <Unavailable icon={<Apple />} label="Mac: coming soon" />
     case "mac-intel":
       return <Unavailable icon={<Apple />} label="Download for Mac" />
     case "windows":
@@ -101,6 +101,7 @@ function Primary({ platform }: { platform: Platform }) {
 function meta(platform: Platform): string {
   switch (platform.kind) {
     case "mac":
+      if (!MAC_DMG) return "The Apparent build is not released yet."
       if (platform.macos && platform.macos < RELEASE.macos)
         return `Needs macOS ${RELEASE.macos} or later. This Mac has macOS ${platform.macos}.`
       return `Version ${RELEASE.version} · ${REQUIRES}`
@@ -109,11 +110,11 @@ function meta(platform: Platform): string {
     case "windows":
       return WINDOWS_DOWNLOAD
         ? `Preview ${RELEASE.version} · Windows 10 and 11, x64 · Not signed yet: if Windows warns, click More info, then Run anyway.`
-        : "Scrawl is Mac-only today. Windows is on the way."
+        : "Apparent is Mac-only today. Windows is on the way."
     case "linux":
       return LINUX_DOWNLOAD ? `Preview ${RELEASE.version} · x86_64 AppImage · Ubuntu 24.04+ · X11 or GNOME/KDE Wayland` : "Linux is on the way."
     case "mobile":
-      return WINDOWS_DOWNLOAD ? "Scrawl runs on your Mac or PC." : "Scrawl runs on your Mac."
+      return WINDOWS_DOWNLOAD ? "Apparent runs on your Mac or PC." : "Apparent runs on your Mac."
   }
 }
 
@@ -139,9 +140,7 @@ export function Platforms({ brew }: { brew: boolean }) {
         <div className="platform-row">
           <span className="platform-name">Mac</span>
           <span className="platform-detail">Apple silicon, macOS {RELEASE.macos}+</span>
-          <a className="platform-action" href={MAC_DMG}>
-            Download
-          </a>
+          {MAC_DMG ? <a className="platform-action" href={MAC_DMG}>Download</a> : <Soon />}
         </div>
         {brew && (
           <div className="platform-brew">
@@ -177,7 +176,7 @@ export function Platforms({ brew }: { brew: boolean }) {
   )
 }
 
-export function Download({ brew = true }: { brew?: boolean }) {
+export function Download({ brew = false }: { brew?: boolean }) {
   const platform = usePlatform()
   const [open, setOpen] = useState(false)
   const [touched, setTouched] = useState(false)
@@ -212,7 +211,7 @@ export function Download({ brew = true }: { brew?: boolean }) {
 
 export function useDownloadHref(): string {
   const platform = usePlatform()
-  if (platform.kind === "mac") return MAC_DMG
+  if (platform.kind === "mac" && MAC_DMG) return MAC_DMG
   if (platform.kind === "windows" && WINDOWS_DOWNLOAD) return WINDOWS_DOWNLOAD
   if (platform.kind === "linux" && LINUX_DOWNLOAD) return LINUX_DOWNLOAD
   return "#install"

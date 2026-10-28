@@ -1,11 +1,11 @@
-//! `scrawl zoom`: a dense contact sheet around one moment of a bundle, for looking closely at an
+//! `apparent zoom`: a dense contact sheet around one moment of a bundle, for looking closely at an
 //! animation or glitch the narration points at.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::model::{InteractionEvent, Keyframe, KeyframeReason, ScrawlBundle, parse_clock_ms};
+use crate::model::{InteractionEvent, Keyframe, KeyframeReason, ApparentBundle, parse_clock_ms};
 
 pub struct ZoomSheet {
     pub path: PathBuf,
@@ -26,7 +26,7 @@ fn normalize(text: &str) -> String {
 
 /// Where `phrase` starts in the narration: the first run of transcript words matching it, else
 /// the segment containing it.
-pub fn find_phrase_ms(bundle: &ScrawlBundle, phrase: &str) -> Option<u64> {
+pub fn find_phrase_ms(bundle: &ApparentBundle, phrase: &str) -> Option<u64> {
     let needle: Vec<String> = normalize(phrase)
         .split_whitespace()
         .map(str::to_owned)
@@ -64,7 +64,7 @@ pub fn find_phrase_ms(bundle: &ScrawlBundle, phrase: &str) -> Option<u64> {
 }
 
 /// Resolves `--at`: a time (`0:12`, `12.5`) or a phrase from the narration.
-pub fn resolve_moment(bundle: &ScrawlBundle, at: &str) -> Result<u64> {
+pub fn resolve_moment(bundle: &ApparentBundle, at: &str) -> Result<u64> {
     parse_clock_ms(at)
         .or_else(|| find_phrase_ms(bundle, at))
         .with_context(|| format!("“{at}” is neither a time nor a phrase in the narration"))
@@ -168,7 +168,7 @@ pub fn clock(ms: u64) -> String {
     format!("{}:{:02}.{:03}", ms / 60_000, ms / 1_000 % 60, ms % 1_000)
 }
 
-fn said_between(bundle: &ScrawlBundle, from: u64, to: u64) -> String {
+fn said_between(bundle: &ApparentBundle, from: u64, to: u64) -> String {
     let words: Vec<&str> = bundle
         .transcript
         .words
@@ -190,7 +190,7 @@ fn said_between(bundle: &ScrawlBundle, from: u64, to: u64) -> String {
 }
 
 /// The auto-crop of the keyframe nearest `t` (keyframe crops meet halfway between keyframes).
-fn crop_at(bundle: &ScrawlBundle, t: u64) -> Option<crate::autocrop::Rect> {
+fn crop_at(bundle: &ApparentBundle, t: u64) -> Option<crate::autocrop::Rect> {
     let (k, _) = bundle
         .keyframes
         .iter()
@@ -200,7 +200,7 @@ fn crop_at(bundle: &ScrawlBundle, t: u64) -> Option<crate::autocrop::Rect> {
 }
 
 /// The auto-crop of the `k`th keyframe (0-based).
-fn crop_of(bundle: &ScrawlBundle, k: usize) -> Option<crate::autocrop::Rect> {
+fn crop_of(bundle: &ApparentBundle, k: usize) -> Option<crate::autocrop::Rect> {
     let crop = bundle.autocrop.as_ref()?.crops.get(k)?;
     (crop.kind != crate::autocrop::CropKind::Full).then(|| crop.rect(&bundle.target.frame))
 }
@@ -209,7 +209,7 @@ fn crop_of(bundle: &ScrawlBundle, k: usize) -> Option<crate::autocrop::Rect> {
 /// like the mark's keyframe, whose crop holds its ink).
 pub fn zoom(
     dir: &Path,
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     focus: Focus,
     span_ms: u64,
     count: usize,
@@ -341,8 +341,8 @@ mod tests {
     use super::*;
     use crate::model::{TranscriptData, WordTiming};
 
-    fn bundle_with_words(words: &[(&str, u64)]) -> ScrawlBundle {
-        let mut bundle: ScrawlBundle = serde_json::from_value(serde_json::json!({
+    fn bundle_with_words(words: &[(&str, u64)]) -> ApparentBundle {
+        let mut bundle: ApparentBundle = serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 25_000,
             "target": {"mode": "device", "displayId": 0,
                 "frame": {"x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "scale": 1.0}},

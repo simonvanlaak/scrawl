@@ -5,12 +5,12 @@ use std::process::Command;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::model::ScrawlBundle;
+use crate::model::ApparentBundle;
 
-/// Where captures go: `SCRAWL_CAPTURES_DIR`, else `"capturesDir"` in `config.json` (Settings ›
+/// Where captures go: `APPARENT_CAPTURES_DIR`, else `"capturesDir"` in `config.json` (Settings ›
 /// Storage), else `builtin_captures_dir`. Tests never see the config file.
 pub fn default_captures_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("SCRAWL_CAPTURES_DIR") {
+    if let Some(dir) = std::env::var_os("APPARENT_CAPTURES_DIR") {
         return PathBuf::from(dir);
     }
     let configured = if cfg!(test) {
@@ -63,19 +63,19 @@ pub fn configured_captures_dir(value: &str) -> Option<PathBuf> {
     }
 }
 
-/// `~/Library/Application Support/scrawl/captures` on macOS, `%LOCALAPPDATA%\scrawl\captures`
-/// on Windows (local, not roaming: the movies are large), `~/.local/share/scrawl/captures` on
+/// `~/Library/Application Support/apparent/captures` on macOS, `%LOCALAPPDATA%\apparent\captures`
+/// on Windows (local, not roaming: the movies are large), `~/.local/share/apparent/captures` on
 /// Linux.
 pub fn builtin_captures_dir() -> PathBuf {
     if cfg!(not(target_os = "macos")) {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("scrawl")
+            .join("apparent")
             .join("captures")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("Library/Application Support/scrawl/captures")
+            .join("Library/Application Support/apparent/captures")
     }
 }
 
@@ -122,7 +122,7 @@ pub fn resolve_bundle_dir(path_or_id: &Path) -> Result<PathBuf> {
         return newest_bundle(&default_captures_dir());
     }
     let mut path = path_or_id.to_owned();
-    if path.file_name().is_some_and(|name| name == "scrawl.json") {
+    if path.file_name().is_some_and(|name| name == "apparent.json") {
         path = path
             .parent()
             .context("Missing bundle directory")?
@@ -134,7 +134,7 @@ pub fn resolve_bundle_dir(path_or_id: &Path) -> Result<PathBuf> {
     if !path.exists() && path.components().count() == 1 {
         path = default_captures_dir().join(&path);
         if path.extension().is_none() {
-            path.set_extension("scrawl");
+            path.set_extension("apparent");
         }
     }
     ensure!(
@@ -147,8 +147,8 @@ pub fn resolve_bundle_dir(path_or_id: &Path) -> Result<PathBuf> {
             .with_context(|| format!("Could not resolve {}", path.display()))?,
     );
     ensure!(
-        path.extension().is_some_and(|ext| ext == "scrawl"),
-        "Expected a .scrawl directory: {}",
+        path.extension().is_some_and(|ext| ext == "apparent"),
+        "Expected a .apparent directory: {}",
         path.display()
     );
     Ok(path)
@@ -158,7 +158,7 @@ fn newest_bundle(captures: &Path) -> Result<PathBuf> {
     capture_history(captures)?
         .into_iter()
         .next()
-        .context("No .scrawl captures found")
+        .context("No .apparent captures found")
 }
 
 /// Completed captures in reverse creation order. Do not use directory mtime: reprocessing and
@@ -170,12 +170,12 @@ pub fn capture_history(captures: &Path) -> Result<Vec<PathBuf>> {
     {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "scrawl") && path.is_dir() {
+        if path.extension().is_some_and(|ext| ext == "apparent") && path.is_dir() {
             // A cancelled or still-processing capture has a directory but no manifest.
             // Never let it hide the last completed capture from paste/inspect latest.
-            let Some(bundle) = fs::read(path.join("scrawl.json"))
+            let Some(bundle) = fs::read(path.join("apparent.json"))
                 .ok()
-                .and_then(|bytes| serde_json::from_slice::<ScrawlBundle>(&bytes).ok())
+                .and_then(|bytes| serde_json::from_slice::<ApparentBundle>(&bytes).ok())
             else {
                 continue;
             };
@@ -198,9 +198,9 @@ fn plain_path(path: PathBuf) -> PathBuf {
     }
 }
 
-pub fn load_bundle(bundle_dir: &Path) -> Result<(PathBuf, ScrawlBundle)> {
+pub fn load_bundle(bundle_dir: &Path) -> Result<(PathBuf, ApparentBundle)> {
     let directory = resolve_bundle_dir(bundle_dir)?;
-    let path = directory.join("scrawl.json");
+    let path = directory.join("apparent.json");
     let bundle = serde_json::from_slice(
         &fs::read(&path).with_context(|| format!("Could not read {}", path.display()))?,
     )
@@ -695,7 +695,7 @@ pub struct Config {
     pub agent_opencode: Option<String>,
     #[serde(default)]
     pub ingest_token: Option<String>,
-    /// Whether the GUI's ScrawlKit listener accepts other devices (absent: loopback only).
+    /// Whether the GUI's ApparentKit listener accepts other devices (absent: loopback only).
     #[serde(default)]
     pub remote_phone_ingest: Option<bool>,
     #[serde(default)]
@@ -823,12 +823,12 @@ fn log_config_once(message: String) {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !seen.contains(&message) {
-        crate::capture::scrawl_log(&message);
+        crate::capture::apparent_log(&message);
         seen.push(message);
     }
 }
 
-/// More of what Scrawl already knows in the summary: marks, shortcuts, drags and windows inline
+/// More of what Apparent already knows in the summary: marks, shortcuts, drags and windows inline
 /// at their time, numbered marks on shared frames, where a screen changed.
 pub const AGENT_CONTEXT: &str = "agentContext";
 
@@ -838,7 +838,7 @@ pub const LIVE_TRANSCRIBE: &str = "liveTranscribe";
 
 static EXPERIMENT_OVERRIDES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-/// Turns an experiment on for this process (`scrawl reprocess --experiment <name>`).
+/// Turns an experiment on for this process (`apparent reprocess --experiment <name>`).
 pub fn enable_experiment(name: &str) {
     EXPERIMENT_OVERRIDES
         .lock()
@@ -861,12 +861,12 @@ pub fn experiment(name: &str) -> bool {
 }
 
 pub fn default_config_path() -> PathBuf {
-    std::env::var_os("SCRAWL_CONFIG")
+    std::env::var_os("APPARENT_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".config/scrawl/config.json")
+                .join(".config/apparent/config.json")
         })
 }
 
@@ -1002,7 +1002,7 @@ pub fn auto_send() -> bool {
     config().auto_send.unwrap_or(true)
 }
 
-/// Whether the menu offers video export (`videoExport`, default off). `scrawl export` works
+/// Whether the menu offers video export (`videoExport`, default off). `apparent export` works
 /// either way.
 pub fn video_export() -> bool {
     config().video_export.unwrap_or(false)
@@ -1053,13 +1053,13 @@ pub fn transcribe_command()
     crate::command_transcriber::Program::load_from(&default_config_path())
 }
 
-/// Whether the native AppKit + Metal recording pill is enabled (`SCRAWL_NATIVE_PILL` or
+/// Whether the native AppKit + Metal recording pill is enabled (`APPARENT_NATIVE_PILL` or
 /// `nativePill` in `config.json`, default `true`). macOS only: elsewhere the GPUI capsule draws.
 pub fn native_pill() -> bool {
     if cfg!(not(target_os = "macos")) {
         return false;
     }
-    if let Ok(val) = std::env::var("SCRAWL_NATIVE_PILL") {
+    if let Ok(val) = std::env::var("APPARENT_NATIVE_PILL") {
         let s = val.trim().to_ascii_lowercase();
         if matches!(s.as_str(), "0" | "false" | "gpui" | "off" | "no") {
             return false;
@@ -1131,7 +1131,7 @@ pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> 
     result
 }
 
-/// Bundle IDs whose `Documents/Scrawl` (and legacy `Documents/Tether`) container the USB watcher
+/// Bundle IDs whose `Documents/Apparent` (and legacy `Documents/Tether`) container the USB watcher
 /// checks (`usbApps` in config, with `tetherApps` accepted as a fallback alias; default empty so
 /// USB polling is off unless configured).
 pub fn usb_apps() -> Vec<String> {
@@ -1152,9 +1152,9 @@ fn safe_word(text: &str) -> bool {
 }
 
 /// The Mac whose OpenCode server holds Kit's sessions when it isn't this one: an SSH host from
-/// `SCRAWL_AGENT_HOST` or `~/.config/scrawl/config.json` (`{"agentHost": "studio"}`).
+/// `APPARENT_AGENT_HOST` or `~/.config/apparent/config.json` (`{"agentHost": "studio"}`).
 pub fn agent_host() -> Option<String> {
-    std::env::var("SCRAWL_AGENT_HOST")
+    std::env::var("APPARENT_AGENT_HOST")
         .ok()
         .or_else(|| config().agent_host)
         .filter(|h| safe_word(h))
@@ -1202,7 +1202,7 @@ pub const MEDIA_PENDING: &str = ".media-pending";
 /// Copies a bundle to the same path on `host`, so the agent there can open its files.
 /// Syncs the contact sheet, keyframe PNGs, manifest, and summary synchronously so the session
 /// can be queued immediately, then streams heavy media (`recording.mp4`/`.mov`, `frames-full`)
-/// in the background for `scrawl zoom`, marked by [`MEDIA_PENDING`] until it lands.
+/// in the background for `apparent zoom`, marked by [`MEDIA_PENDING`] until it lands.
 pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
     use std::process::Stdio;
     let parent = bundle_dir.parent().context("Bundle has no parent")?;
@@ -1232,7 +1232,7 @@ pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
         .map(|rel| format!("{name_str}/{rel}"))
         .collect();
     let bundle_q = shell_quote(&parent.join(&name_str).to_string_lossy());
-    // The marker goes up with the light files, before the session is prompted, so `scrawl zoom`
+    // The marker goes up with the light files, before the session is prompted, so `apparent zoom`
     // there knows the video is still on its way rather than missing.
     let mark_pending = if heavy.is_empty() {
         String::new()
@@ -1643,8 +1643,8 @@ pub fn send_to_opencode(
     Ok(id)
 }
 
-/// The session a recording was addressed to: a ScrawlKit `timeline.json`'s top-level `session`,
-/// else the `destination` a Mac capture of a dev site was routed to (`scrawl.json`).
+/// The session a recording was addressed to: a ApparentKit `timeline.json`'s top-level `session`,
+/// else the `destination` a Mac capture of a dev site was routed to (`apparent.json`).
 /// `context.session` only names the session that was on screen, and never chooses a destination.
 pub fn recorded_destination(bundle_dir: &Path) -> Option<String> {
     let read = |name: &str| -> Option<serde_json::Value> {
@@ -1659,7 +1659,7 @@ pub fn recorded_destination(bundle_dir: &Path) -> Option<String> {
     };
     read("timeline.json")
         .and_then(|timeline| session(timeline.get("session")))
-        .or_else(|| read("scrawl.json").and_then(|b| session(b.pointer("/destination/session"))))
+        .or_else(|| read("apparent.json").and_then(|b| session(b.pointer("/destination/session"))))
 }
 
 fn choose_destination<'a>(
@@ -1772,7 +1772,7 @@ pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     Ok(())
 }
 
-fn session_prompt(directory: &Path, bundle: &ScrawlBundle) -> serde_json::Value {
+fn session_prompt(directory: &Path, bundle: &ApparentBundle) -> serde_json::Value {
     let summary = crate::sketch::summary_markdown(bundle, directory);
     let quoted_directory = shell_quote(&directory.to_string_lossy());
     let contact_sheet = directory.join(&bundle.contact_sheet);
@@ -1783,10 +1783,10 @@ fn session_prompt(directory: &Path, bundle: &ScrawlBundle) -> serde_json::Value 
         format!("No image is attached; the recorded visuals remain in {}. Look them up only if needed.", directory.display())
     };
     let text = format!(
-        "{}\n\n{} Read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said. This capture is {} ms long.",
+        "{}\n\n{} Read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\napparent zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said. This capture is {} ms long.",
         summary.trim_end(),
         visual_note,
-        directory.join("scrawl.json").display(),
+        directory.join("apparent.json").display(),
         quoted_directory,
         bundle.duration_ms,
     );
@@ -1796,7 +1796,7 @@ fn session_prompt(directory: &Path, bundle: &ScrawlBundle) -> serde_json::Value 
         serde_json::json!([{
                 "uri": file_uri(&contact_sheet),
                 "name": "contact-sheet.png",
-                "description": "Scrawl contact sheet: the capture's keyframes in order",
+                "description": "Apparent contact sheet: the capture's keyframes in order",
             }])
     } else {
         serde_json::json!([])
@@ -2276,7 +2276,7 @@ mod tests {
         fn new() -> Self {
             static COUNTER: AtomicU64 = AtomicU64::new(0);
             let path = std::env::temp_dir().join(format!(
-                "scrawl-handoff-{}-{}-{}",
+                "apparent-handoff-{}-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2289,7 +2289,7 @@ mod tests {
         }
 
         fn bundle(&self, name: &str, created: u64) -> PathBuf {
-            let path = self.0.join(format!("{name}.scrawl"));
+            let path = self.0.join(format!("{name}.apparent"));
             fs::create_dir_all(path.join("frames")).unwrap();
             let keyframes: Vec<_> = [0, 1_900, 2_500, 4_000, 5_100, 6_000].into_iter().enumerate().map(|(index, t)| {
                 let file = format!("frames/frame-{index:03}.png");
@@ -2305,7 +2305,7 @@ mod tests {
                 "contactSheet": "contact-sheet.png"
             });
             fs::write(
-                path.join("scrawl.json"),
+                path.join("apparent.json"),
                 serde_json::to_vec(&bundle).unwrap(),
             )
             .unwrap();
@@ -2329,7 +2329,7 @@ mod tests {
         });
         let text_only = session_prompt(&dir, &bundle);
         assert_eq!(text_only["files"], serde_json::json!([]));
-        assert!(text_only["text"].as_str().unwrap().contains("scrawl zoom"));
+        assert!(text_only["text"].as_str().unwrap().contains("apparent zoom"));
         assert!(!text_only["text"].as_str().unwrap().contains(crate::sketch::LOOK_AT_IMAGES));
         assert!(!text_only["text"].as_str().unwrap().contains("contact sheet is attached"));
         assert!(dir.join("frames/frame-000.png").exists());
@@ -2352,7 +2352,7 @@ mod tests {
             plain_path(older.canonicalize().unwrap())
         );
         assert_eq!(
-            resolve_bundle_dir(&older.join("scrawl.json")).unwrap(),
+            resolve_bundle_dir(&older.join("apparent.json")).unwrap(),
             plain_path(older.canonicalize().unwrap())
         );
         assert_eq!(
@@ -2360,17 +2360,17 @@ mod tests {
             plain_path(newer.canonicalize().unwrap())
         );
         assert!(resolve_bundle_dir(&fixture.0).is_err());
-        assert!(resolve_bundle_dir(&fixture.0.join("missing.scrawl")).is_err());
+        assert!(resolve_bundle_dir(&fixture.0.join("missing.apparent")).is_err());
     }
 
     #[test]
     fn latest_skips_cancelled_and_partial_captures() {
         let fixture = Fixture::new();
-        let cancelled = fixture.0.join("cancelled.scrawl");
+        let cancelled = fixture.0.join("cancelled.apparent");
         fs::create_dir(&cancelled).unwrap();
         fs::write(cancelled.join("audio.wav"), b"partial recording").unwrap();
         let partial = fixture.bundle("partial", 300);
-        fs::write(partial.join("scrawl.json"), b"{\"version\":").unwrap();
+        fs::write(partial.join("apparent.json"), b"{\"version\":").unwrap();
         assert!(newest_bundle(&fixture.0).is_err());
 
         let completed = fixture.bundle("completed", 100);
@@ -2386,10 +2386,10 @@ mod tests {
         let older = fixture.bundle("older", 100);
         let newer = fixture.bundle("newer", 300);
         let same_time = fixture.bundle("same-time", 300);
-        let cancelled = fixture.0.join("cancelled.scrawl");
+        let cancelled = fixture.0.join("cancelled.apparent");
         fs::create_dir(&cancelled).unwrap();
         let broken = fixture.bundle("broken", 400);
-        fs::write(broken.join("scrawl.json"), b"invalid").unwrap();
+        fs::write(broken.join("apparent.json"), b"invalid").unwrap();
         let history = capture_history(&fixture.0).unwrap();
         assert_eq!(history.len(), 3);
         assert_eq!(history[0], plain_path(same_time.canonicalize().unwrap()));
@@ -2419,9 +2419,9 @@ mod tests {
     fn file_uris_are_percent_encoded() {
         assert_eq!(
             file_uri(Path::new(
-                "/Users/kit/Library/Application Support/scrawl/captures/a b#1.scrawl/contact-sheet.png"
+                "/Users/kit/Library/Application Support/apparent/captures/a b#1.apparent/contact-sheet.png"
             )),
-            "file:///Users/kit/Library/Application%20Support/scrawl/captures/a%20b%231.scrawl/contact-sheet.png"
+            "file:///Users/kit/Library/Application%20Support/apparent/captures/a%20b%231.apparent/contact-sheet.png"
         );
     }
 
@@ -2429,11 +2429,11 @@ mod tests {
     fn loads_manifest_and_reports_invalid_json() {
         let fixture = Fixture::new();
         let path = fixture.bundle("example", 123);
-        let (resolved, bundle) = load_bundle(&path.join("scrawl.json")).unwrap();
+        let (resolved, bundle) = load_bundle(&path.join("apparent.json")).unwrap();
         assert_eq!(resolved, plain_path(path.canonicalize().unwrap()));
         assert_eq!(bundle.id, "example");
         assert_eq!(bundle.created_at_ms, 123);
-        fs::write(path.join("scrawl.json"), b"not json").unwrap();
+        fs::write(path.join("apparent.json"), b"not json").unwrap();
         assert!(load_bundle(&path).is_err());
     }
 
@@ -2466,7 +2466,7 @@ mod tests {
 
     #[test]
     fn recordings_go_to_their_addressed_session_not_the_viewed_one() {
-        let dir = std::env::temp_dir().join(format!("scrawl-dest-{}", crate::make_bundle_id()));
+        let dir = std::env::temp_dir().join(format!("apparent-dest-{}", crate::make_bundle_id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("timeline.json"),
@@ -2695,7 +2695,7 @@ mod tests {
 
     #[test]
     fn an_unusable_captures_folder_is_refused() {
-        let root = std::env::temp_dir().join(format!("scrawl-usable-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("apparent-usable-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let file = root.join("file");
         fs::write(&file, "x").unwrap();
@@ -2709,8 +2709,8 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         assert_eq!(configured_captures_dir("~"), Some(home.clone()));
         assert_eq!(
-            configured_captures_dir(" ~/Scrawl Captures "),
-            Some(home.join("Scrawl Captures"))
+            configured_captures_dir(" ~/Apparent Captures "),
+            Some(home.join("Apparent Captures"))
         );
         let absolute = std::env::temp_dir().join("captures");
         assert_eq!(
@@ -2926,9 +2926,9 @@ mod sync_live_check {
     #[ignore]
     fn sync_to_pro() {
         let base = std::path::PathBuf::from(std::env::var("HOME").unwrap())
-            .join("Library/Caches/scrawl-sync-live");
+            .join("Library/Caches/apparent-sync-live");
         let _ = std::fs::remove_dir_all(&base);
-        let bundle = base.join("scrawl-synctest.scrawl");
+        let bundle = base.join("apparent-synctest.apparent");
         std::fs::create_dir_all(bundle.join("frames-full")).unwrap();
         std::fs::write(bundle.join("summary.md"), "hi").unwrap();
         std::fs::write(bundle.join("recording.mp4"), vec![7u8; 8_000_000]).unwrap();

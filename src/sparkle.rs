@@ -13,7 +13,7 @@ use objc2::{AnyThread, DefinedClass, MainThreadMarker, msg_send};
 use objc2_app_kit::NSApplication;
 use objc2_foundation::{NSError, NSInteger, NSObject};
 
-use crate::capture::scrawl_log;
+use crate::capture::apparent_log;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -34,7 +34,7 @@ objc2::extern_protocol!(
 
 objc2::define_class!(
     #[unsafe(super = NSObject)]
-    #[name = "ScrawlSparkleUpdaterDelegate"]
+    #[name = "ApparentSparkleUpdaterDelegate"]
     #[ivars = &'static AtomicU8]
     struct SparkleDelegate;
 
@@ -89,7 +89,7 @@ thread_local! {
 
 pub fn start() {
     if let Err(error) = start_inner() {
-        scrawl_log(format!("Sparkle updater failed to start: {error:#}"));
+        apparent_log(format!("Sparkle updater failed to start: {error:#}"));
     }
 }
 
@@ -159,7 +159,7 @@ pub fn check_for_updates() {
     UPDATER.with(|u| {
         let borrow = u.borrow();
         let Some(updater) = borrow.as_ref() else {
-            scrawl_log("Sparkle updater is not available");
+            apparent_log("Sparkle updater is not available");
             return;
         };
         unsafe {

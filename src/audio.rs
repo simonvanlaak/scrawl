@@ -157,12 +157,12 @@ impl AudioRecorder {
         let worker_error = Arc::clone(&error);
         let worker_health = Arc::clone(&health);
         let worker = std::thread::Builder::new()
-            .name("scrawl-audio".into())
+            .name("apparent-audio".into())
             .spawn(move || {
                 let stream =
                     Self::open_stream(worker_samples, worker_error, Arc::clone(&worker_health)).inspect_err(|error| {
                         if let Ok(mut health) = worker_health.lock() { health.open_failed(); }
-                        crate::capture::scrawl_log(format!("Microphone startup failed: {error:#}"));
+                        crate::capture::apparent_log(format!("Microphone startup failed: {error:#}"));
                     })?;
                 crate::ui::start_metric("audio_ready_ms", started);
                 // Stream never crosses threads. Disconnect also stops abandoned recorders.
@@ -175,7 +175,7 @@ impl AudioRecorder {
             .then(|| crate::live_transcribe::Live::start(Arc::clone(&samples)))
             .and_then(|live| {
                 live.inspect_err(|error| {
-                    crate::capture::scrawl_log(format!("Live transcription: {error:#}"));
+                    crate::capture::apparent_log(format!("Live transcription: {error:#}"));
                 })
                 .ok()
             });
@@ -185,7 +185,7 @@ impl AudioRecorder {
         let pause = crate::pause_transcribe::wanted()
             .then(|| crate::pause_transcribe::Pause::start(Arc::clone(&samples)))
             .and_then(|result| {
-                result.inspect_err(|error| crate::capture::scrawl_log(format!("Pause transcription: {error:#}"))).ok()
+                result.inspect_err(|error| crate::capture::apparent_log(format!("Pause transcription: {error:#}"))).ok()
             });
         Ok(Self {
             worker: Some(worker),
@@ -221,10 +221,10 @@ impl AudioRecorder {
                 crate::mic::note_pick(&crate::mic::Pick::Chosen(&input));
                 match Self::open_device(&device, samples.clone(), error.clone(), health.clone()) {
                     Ok(stream) => {
-                        crate::capture::scrawl_log(format!("Microphone: {}", input.name));
+                        crate::capture::apparent_log(format!("Microphone: {}", input.name));
                         return Ok(stream);
                     }
-                    Err(e) => crate::capture::scrawl_log(format!(
+                    Err(e) => crate::capture::apparent_log(format!(
                         "Microphone: could not open {} ({e:#}); using the default",
                         input.name
                     )),
@@ -249,7 +249,7 @@ impl AudioRecorder {
             .default_input_device()
             .context("No microphone is available")?;
         let stream = Self::open_device(&device, samples, error, health)?;
-        crate::capture::scrawl_log(format!(
+        crate::capture::apparent_log(format!(
             "Microphone: {} (default)",
             device_name(&device).unwrap_or_default()
         ));
@@ -264,7 +264,7 @@ impl AudioRecorder {
     ) -> Result<cpal::Stream> {
         let supported = device.default_input_config()?;
         let config = supported.config();
-        crate::capture::scrawl_log(format!(
+        crate::capture::apparent_log(format!(
             "Microphone: {} Hz, {} ch, {:?}",
             config.sample_rate,
             config.channels,
@@ -332,7 +332,7 @@ impl AudioRecorder {
             if samples_16k.is_empty() {
                 bail!("Microphone capture failed: {error}");
             }
-            crate::capture::scrawl_log(format!("Microphone: {error}; keeping what it heard"));
+            crate::capture::apparent_log(format!("Microphone: {error}; keeping what it heard"));
         }
         let sample_count = samples_16k.len();
         let duration_ms = sample_count as u64 * 1_000 / SAMPLE_RATE as u64;
@@ -428,7 +428,7 @@ where
     )?)
 }
 
-/// Reads a 16 kHz mono WAV (as written by `scrawl-helper audio`) back into a recording.
+/// Reads a 16 kHz mono WAV (as written by `apparent-helper audio`) back into a recording.
 pub fn recorded_audio_from_wav(wav_bytes: Vec<u8>) -> Result<RecordedAudio> {
     let sample_count = wav_16k_reader(&wav_bytes)?.duration() as usize;
     Ok(RecordedAudio {

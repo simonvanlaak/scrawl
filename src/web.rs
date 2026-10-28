@@ -1,4 +1,4 @@
-//! Dev pages telling Scrawl which OpenCode session they belong to.
+//! Dev pages telling Apparent which OpenCode session they belong to.
 //!
 //! A project adds `<script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>`
 //! (or `data-directory`) to its dev build. The script registers the page with the ingest server
@@ -116,8 +116,8 @@ pub fn lookup(url: &str) -> Option<Registration> {
     if SERVING.load(Ordering::Acquire) {
         return registry().lookup(url, now);
     }
-    // `SCRAWL_INGEST_PORT` points at a `scrawl serve --port` other than the app's.
-    let port = std::env::var("SCRAWL_INGEST_PORT")
+    // `APPARENT_INGEST_PORT` points at a `apparent serve --port` other than the app's.
+    let port = std::env::var("APPARENT_INGEST_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(crate::phone::DEFAULT_INGEST_PORT);
@@ -133,7 +133,7 @@ pub fn fetch_registrations(port: u16) -> Result<Vec<Registration>> {
     let token = crate::handoff::ensure_ingest_token()?;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(400))
-        .with_context(|| format!("Scrawl isn't listening on port {port}"))?;
+        .with_context(|| format!("Apparent isn't listening on port {port}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     write!(
         stream,
@@ -147,7 +147,7 @@ pub fn fetch_registrations(port: u16) -> Result<Vec<Registration>> {
         .context("Malformed response")?;
     anyhow::ensure!(
         head.starts_with("HTTP/1.1 200"),
-        "Scrawl answered {}",
+        "Apparent answered {}",
         head.lines().next().unwrap_or("")
     );
     let value: serde_json::Value = serde_json::from_str(body)?;
@@ -293,7 +293,7 @@ fn respond_json(
     );
 }
 
-/// Answers the SDK's routes; `false` when the request is for something else (the ScrawlKit
+/// Answers the SDK's routes; `false` when the request is for something else (the ApparentKit
 /// routes, which need the token).
 #[cfg(test)]
 pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Result<bool> {
@@ -416,7 +416,7 @@ pub fn handle_with_policy(
                     let context = origin.is_some_and(is_loopback_origin)
                         && crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
                     policy.effect(|| {
-                        crate::capture::scrawl_log(format!(
+                        crate::capture::apparent_log(format!(
                             "web: {} registered (session {}, directory {})",
                             reg.url,
                             reg.session.as_deref().unwrap_or("-"),

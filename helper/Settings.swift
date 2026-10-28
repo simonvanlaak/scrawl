@@ -2,10 +2,11 @@ import AVFoundation
 import AppKit
 import Carbon.HIToolbox
 import Combine
+import CoreText
 import SwiftUI
 
-// `scrawl-helper settings [--pane P] [--icon PNG] [--render DIR]`: the Settings window.
-// Scrawl decides everything (`src/settings.rs`) and sends what to show as JSON lines on stdin:
+// `apparent-helper settings [--pane P] [--icon PNG] [--render DIR]`: the Settings window.
+// Apparent decides everything (`src/settings.rs`) and sends what to show as JSON lines on stdin:
 //   {"type":"state","version":"0.3.2","login":{"on":false,"available":true,"needsApproval":false},
 //    "autoSend":true,"shortcuts":[{"kind":"record","title":"Record","label":"⌥⇧S","key":"S",
 //    "shift":true,"control":false,"option":true,"command":false,"isDefault":true,
@@ -134,7 +135,7 @@ struct SettingsPermission: Decodable, Equatable, Identifiable {
 
 /// Where new captures go: `~`-relative, and whether it was chosen here (Reset shows).
 struct SettingsCapturesDir: Decodable, Equatable {
-  var path = "~/Library/Application Support/scrawl/captures"
+  var path = "~/Library/Application Support/apparent/captures"
   var custom = false
 }
 
@@ -143,7 +144,7 @@ struct SettingsCommandLine: Decodable, Equatable {
   /// "install", "uninstall", or none.
   var button: String? = "install"
   var enabled = true
-  var caption = "Links scrawl into /opt/homebrew/bin, so agents and your terminal can run it."
+  var caption = "Links apparent into /opt/homebrew/bin, so agents and your terminal can run it."
   var error = false
 }
 
@@ -168,7 +169,7 @@ struct SettingsState: Decodable, Equatable {
     .map { SettingsPermission(permission: $0, required: ["screen-recording", "microphone", "accessibility"].contains($0)) }
   var updates = true
   var commandLine = SettingsCommandLine()
-  var skillCommand = "bunx skills add kitlangton/scrawl"
+  var skillCommand = "bunx skills add tryapparent/apparent"
 
   var pasteLabel: String { shortcuts.first { $0.kind == "paste" }?.label ?? "⌥⇧V" }
   var recording: String? { shortcuts.first(where: \.recording)?.kind }
@@ -306,23 +307,23 @@ struct SettingsTheme {
 
   private func ink(_ alpha: Double) -> Color { dark ? Color.white.opacity(alpha) : Color.black.opacity(alpha) }
 
-  var window: Color { dark ? Color(white: 0.118) : Color(white: 0.955) }
-  var sidebar: Color { dark ? Color(white: 0.15) : Color(white: 0.915) }
-  var group: Color { dark ? Color.white.opacity(0.045) : Color.white }
+  var window: Color { dark ? Color(red: 0.125, green: 0.106, blue: 0.141) : Color(red: 0.961, green: 0.941, blue: 0.91) }
+  var sidebar: Color { Color(red: 0.008, green: 0.004, blue: 0.008) }
+  var group: Color { dark ? Color(red: 0.188, green: 0.165, blue: 0.212) : Color(red: 0.906, green: 0.878, blue: 0.933) }
   var groupLine: Color { ink(dark ? 0.075 : 0.08) }
   var separator: Color { ink(dark ? 0.07 : 0.075) }
-  var text: Color { dark ? Color(white: 0.95) : Color(white: 0.1) }
+  var text: Color { dark ? Color(red: 0.961, green: 0.941, blue: 0.91) : Color(red: 0.008, green: 0.004, blue: 0.008) }
   var secondary: Color { ink(dark ? 0.55 : 0.5) }
   var tertiary: Color { ink(dark ? 0.3 : 0.28) }
-  var selection: Color { ink(dark ? 0.08 : 0.07) }
+  var selection: Color { Color(red: 0.188, green: 0.141, blue: 0.259) }
   var control: Color { ink(dark ? 0.08 : 0.06) }
   var controlLine: Color { ink(dark ? 0.1 : 0.1) }
   var track: Color { ink(dark ? 0.12 : 0.13) }
   var key: Color { dark ? Color.black.opacity(0.28) : Color.black.opacity(0.035) }
   var keyLine: Color { ink(dark ? 0.08 : 0.09) }
-  var accent: Color { Color.accentColor }
-  var positive: Color { Color(red: 0.2, green: 0.74, blue: 0.42) }
-  var negative: Color { Color(red: 1, green: 0.27, blue: 0.23) }
+  var accent: Color { Color(red: 0.478, green: 0.345, blue: 0.78) }
+  var positive: Color { Color(red: 0.078, green: 0.42, blue: 0.263) }
+  var negative: Color { Color(red: 0.706, green: 0.137, blue: 0.094) }
 }
 
 private struct ThemeKey: EnvironmentKey {
@@ -338,7 +339,7 @@ extension EnvironmentValues {
 
 enum SettingsMotion {
   static let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-  /// Switch knobs and captions answering Scrawl (bounce 0).
+  /// Switch knobs and captions answering Apparent (bounce 0).
   static let state: Animation = reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.25, bounce: 0)
   /// A caption replaced in place: a little blur with the fade, the old one leaving sooner.
   static let replace: AnyTransition = {
@@ -379,13 +380,13 @@ final class KeyClock: ObservableObject {
 
 /// Sizes: 16 titles, 14 rows, 13 keycaps, 12 captions.
 enum SettingsMetrics {
-  static let width: CGFloat = 620
-  static let height: CGFloat = 448
+  static let width: CGFloat = 720
+  static let height: CGFloat = 530
   static let sidebar: CGFloat = 210
   static let titlebar: CGFloat = 52
-  static let inset: CGFloat = 20
+  static let inset: CGFloat = 30
   static let row: CGFloat = 42
-  static let radius: CGFloat = 12
+  static let radius: CGFloat = 2
 }
 
 // MARK: Controls
@@ -608,7 +609,7 @@ struct SettingsCaption: View {
 // MARK: Input level
 
 /// The level of the microphone recordings will use, only while the Recording pane is on screen
-/// and only once Microphone is allowed (Scrawl sends `meter` then). Its own object, so the level
+/// and only once Microphone is allowed (Apparent sends `meter` then). Its own object, so the level
 /// redraws the meter and nothing else.
 final class MicMeter: NSObject, ObservableObject, AVCaptureAudioDataOutputSampleBufferDelegate {
   /// 0…1, rising at once and falling at `release` a tick, like a level meter.
@@ -617,7 +618,7 @@ final class MicMeter: NSObject, ObservableObject, AVCaptureAudioDataOutputSample
   private var session: AVCaptureSession?
   private var output: AVCaptureAudioDataOutput?
   private var timer: Timer?
-  private let queue = DispatchQueue(label: "dev.kitlangton.scrawl.helper.meter")
+  private let queue = DispatchQueue(label: "dev.kitlangton.apparent.helper.meter")
   private static let floor: Float = -50
   private static let release: Float = 0.035
 
@@ -796,7 +797,7 @@ struct SettingsView: View {
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
-    let theme = SettingsTheme(scheme)
+    let theme = SettingsTheme(.light)
     HStack(spacing: 0) {
       sidebar
         .frame(width: SettingsMetrics.sidebar)
@@ -814,6 +815,7 @@ struct SettingsView: View {
     }
     .frame(width: SettingsMetrics.width, height: SettingsMetrics.height)
     .environment(\.settingsTheme, theme)
+    .preferredColorScheme(.light)
   }
 
   // Sidebar
@@ -821,19 +823,35 @@ struct SettingsView: View {
   private var sidebar: some View {
     VStack(alignment: .leading, spacing: 0) {
       if model.rendering { trafficLights } else { Spacer().frame(height: SettingsMetrics.titlebar) }
-      item(.general)
-      section("Settings")
-      VStack(spacing: 2) {
-        item(.recording)
-        item(.storage)
-        item(.permissions)
-        item(.agents)
+      VStack(alignment: .leading, spacing: 10) {
+        if let url = Bundle.main.url(forResource: "apparent-wordmark", withExtension: "png"),
+           let wordmark = NSImage(contentsOf: url) {
+          Image(nsImage: wordmark)
+            .resizable()
+            .frame(width: 150, height: 35)
+            .accessibilityLabel("apparent")
+        } else {
+          Text("apparent")
+            .font(.custom("HostGrotesk_700wght", size: 22))
+            .foregroundStyle(Color(red: 0.008, green: 0.004, blue: 0.008))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color(red: 0.718, green: 0.647, blue: 0.847))
+        }
+        Text("CAPTURE SETTINGS")
+          .font(.custom("HostGrotesk_500wght", size: 10))
+          .foregroundStyle(Color(red: 0.718, green: 0.647, blue: 0.847))
       }
-      section("Scrawl")
+      .padding(.leading, 20)
+      .padding(.bottom, 28)
+      item(.general)
+      item(.recording)
+      item(.storage)
+      item(.permissions)
+      item(.agents)
       item(.about)
       Spacer()
     }
-    .padding(.horizontal, 10)
   }
 
   private var trafficLights: some View {
@@ -847,28 +865,28 @@ struct SettingsView: View {
     .frame(height: SettingsMetrics.titlebar, alignment: .center)
   }
 
-  private func section(_ title: String) -> some View {
-    Text(title)
-      .font(.system(size: 12, weight: .semibold))
-      .foregroundStyle(SettingsTheme(scheme).secondary)
-      .padding(.leading, 10)
-      .padding(.top, 16)
-      .padding(.bottom, 4)
-  }
-
   private func item(_ pane: SettingsPane) -> some View {
     let theme = SettingsTheme(scheme)
     let selected = model.pane == pane
     return HStack(spacing: 10) {
-      IconTile(symbol: pane.symbol, tint: pane.tint)
+      Image(systemName: pane.symbol)
+        .font(.system(size: 16, weight: .medium))
+        .frame(width: 20)
+        .foregroundStyle(Color(red: 0.718, green: 0.647, blue: 0.847))
       Text(pane.title)
-        .font(.system(size: 14))
-        .foregroundStyle(theme.text)
+        .font(.custom("HostGrotesk_500wght", size: 14))
+        .foregroundStyle(Color(red: 0.961, green: 0.941, blue: 0.91))
       Spacer(minLength: 0)
     }
-    .padding(.horizontal, 8)
-    .frame(height: 36)
-    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(selected ? theme.selection : .clear))
+    .padding(.leading, 17)
+    .frame(height: 44)
+    .frame(maxWidth: .infinity)
+    .background(selected ? theme.selection : .clear)
+    .overlay(alignment: .leading) {
+      Rectangle()
+        .fill(selected ? Color(red: 0.718, green: 0.647, blue: 0.847) : .clear)
+        .frame(width: 3)
+    }
     .contentShape(Rectangle())
     // Selects on mouse-down, as a sidebar does, rather than a button's mouse-up.
     .onLongPressGesture(minimumDuration: 0, perform: {}, onPressingChanged: { down in
@@ -889,12 +907,12 @@ struct SettingsView: View {
   private func content(_ pane: SettingsPane) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 10) {
-        IconTile(symbol: pane.symbol, tint: pane.tint)
         Text(pane.title)
-          .font(.system(size: 16, weight: .semibold))
+          .font(.custom("HostGrotesk_700wght", size: 31))
           .foregroundStyle(SettingsTheme(scheme).text)
       }
-      .frame(height: SettingsMetrics.titlebar)
+      .frame(height: 92)
+      Rectangle().fill(SettingsTheme(scheme).groupLine).frame(height: 1)
       switch pane {
       case .general: general
       case .recording: recording
@@ -935,9 +953,9 @@ struct SettingsView: View {
         }
       }
       if state.login.needsApproval {
-        SettingsCaption(text: "Allow Scrawl in System Settings › General › Login Items.")
+        SettingsCaption(text: "Allow Apparent in System Settings › General › Login Items.")
       } else if !state.login.available {
-        SettingsCaption(text: "Launch at login works in the installed Scrawl.app.")
+        SettingsCaption(text: "Launch at login works in the installed Apparent.app.")
       }
       ForEach(state.shortcuts) { shortcut in
         Color.clear.frame(height: 14)
@@ -1071,7 +1089,7 @@ struct SettingsView: View {
     let optional = state.permissions.filter { !$0.required }
     return VStack(spacing: 0) {
       SettingsGroup { permissionRows(required) }
-      SettingsCaption(text: "Scrawl needs these three to record.")
+      SettingsCaption(text: "Apparent needs these three to record.")
       SettingsHeader("When you use them")
       SettingsGroup { permissionRows(optional) }
     }
@@ -1114,7 +1132,7 @@ struct SettingsView: View {
         .animation(SettingsMotion.state, value: cli)
       SettingsHeader("Agent skill")
       SettingsGroup { CopyLine(text: state.skillCommand) }
-      SettingsCaption(text: "Run it in a terminal. It teaches Claude Code, OpenCode, Codex and other agents to read your captures and use scrawl.")
+      SettingsCaption(text: "Run it in a terminal. It teaches Claude Code, OpenCode, Codex and other agents to read your captures and use apparent.")
     }
   }
 
@@ -1127,7 +1145,7 @@ struct SettingsView: View {
             Image(nsImage: icon).resizable().interpolation(.high).frame(width: 40, height: 40)
           }
           VStack(alignment: .leading, spacing: 1) {
-            Text("Scrawl").font(.system(size: 14, weight: .semibold)).foregroundStyle(theme.text)
+            Text("Apparent").font(.system(size: 14, weight: .semibold)).foregroundStyle(theme.text)
             Text("Version \(state.version)").font(.system(size: 12).monospacedDigit()).foregroundStyle(theme.secondary)
           }
           Spacer()
@@ -1137,13 +1155,13 @@ struct SettingsView: View {
         .frame(height: 64)
       }
       if !state.updates {
-        SettingsCaption(text: "Updates work in the installed Scrawl.app.")
+        SettingsCaption(text: "Updates work in the installed Apparent.app.")
       }
       SettingsHeader("Links")
       SettingsGroup {
-        link("Website", "scrawl.kitlangton.com", "https://scrawl.kitlangton.com")
+        link("Website", "app.tryapparent.com", "https://app.tryapparent.com")
         SettingsSeparator()
-        link("Source", "github.com/kitlangton/scrawl", "https://github.com/kitlangton/scrawl")
+        link("Source", "github.com/tryapparent/apparent", "https://github.com/tryapparent/apparent")
         SettingsSeparator()
         SettingsRow(title: "Welcome tour") {
           SettingsButton(title: "Show") { model.act("tour") }
@@ -1214,7 +1232,7 @@ struct PermissionLine: View {
       Spacer(minLength: 8)
       ZStack(alignment: .trailing) {
         if row.granted && row.relaunch {
-          SettingsButton(title: "Reopen Scrawl") { model.act("reopen") }
+          SettingsButton(title: "Reopen Apparent") { model.act("reopen") }
         } else if row.granted {
           HStack(spacing: 5) {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.positive)
@@ -1313,6 +1331,9 @@ enum ShortcutKeys {
 
 final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
   static func run(arguments: [String]) -> Never {
+    if let font = Bundle.main.url(forResource: "HostGrotesk-Variable", withExtension: "ttf") {
+      CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
+    }
     let pane = option("--pane", in: arguments).flatMap(SettingsPane.init(rawValue:)) ?? .general
     let model = SettingsModel(pane: pane, icon: Onboarding.loadIcon(option("--icon", in: arguments)))
     if let dir = option("--render", in: arguments) {
@@ -1357,13 +1378,13 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
       defer: false
     )
     // A toolbar makes the title bar as tall as the pane titles, so the traffic lights share their line.
-    let toolbar = NSToolbar(identifier: "scrawl-settings")
+    let toolbar = NSToolbar(identifier: "apparent-settings")
     toolbar.showsBaselineSeparator = false
     window.toolbar = toolbar
     window.toolbarStyle = .unified
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
-    window.title = "Scrawl Settings"
+    window.title = "Apparent Settings"
     window.isMovableByWindowBackground = true
     window.isReleasedWhenClosed = false
     window.delegate = self
@@ -1621,7 +1642,7 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var languageUnsupported = ready
     languageUnsupported.transcriber.appleLocale = "xx-XX"
     var command = base
-    command.transcriber = SettingsTranscriber(engine: "command", command: "whisper-scrawl")
+    command.transcriber = SettingsTranscriber(engine: "command", command: "whisper-apparent")
     var missing = base
     missing.permissions[0].status = "granted"
     missing.permissions[0].relaunch = true
@@ -1630,25 +1651,25 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var noUpdates = base
     noUpdates.updates = false
     var storageCustom = base
-    storageCustom.capturesDir = SettingsCapturesDir(path: "~/Documents/Scrawl Captures", custom: true)
+    storageCustom.capturesDir = SettingsCapturesDir(path: "~/Documents/Apparent Captures", custom: true)
     var cliInstalled = base
     cliInstalled.commandLine = SettingsCommandLine(
-      path: "/opt/homebrew/bin/scrawl", button: "uninstall",
-      caption: "Agents and your terminal can run scrawl to read captures, zoom into a moment and export video.")
+      path: "/opt/homebrew/bin/apparent", button: "uninstall",
+      caption: "Agents and your terminal can run apparent to read captures, zoom into a moment and export video.")
     var cliLocal = base
     cliLocal.commandLine = SettingsCommandLine(
-      path: "~/.local/bin/scrawl", button: "uninstall",
-      caption: "If your shell can't find scrawl, add ~/.local/bin to your PATH.")
+      path: "~/.local/bin/apparent", button: "uninstall",
+      caption: "If your shell can't find apparent, add ~/.local/bin to your PATH.")
     var cliHomebrew = base
     cliHomebrew.commandLine = SettingsCommandLine(
-      path: "/opt/homebrew/bin/scrawl", button: nil,
-      caption: "Installed with Homebrew. Agents and your terminal can run scrawl to read captures, zoom into a moment and export video.")
+      path: "/opt/homebrew/bin/apparent", button: nil,
+      caption: "Installed with Homebrew. Agents and your terminal can run apparent to read captures, zoom into a moment and export video.")
     var cliTaken = base
     cliTaken.commandLine = SettingsCommandLine(
-      button: nil, caption: "/usr/local/bin/scrawl is another program, so Scrawl leaves it alone.", error: true)
+      button: nil, caption: "/usr/local/bin/apparent is another program, so Apparent leaves it alone.", error: true)
     var cliDev = base
     cliDev.commandLine = SettingsCommandLine(
-      enabled: false, caption: "The command-line tool works in the installed Scrawl.app.")
+      enabled: false, caption: "The command-line tool works in the installed app.")
     var micChosen = base
     micChosen.microphone = SettingsMicrophone(selected: devices[1].id, value: "Shure MV7", options: micOptions, note: nil, meter: devices[1].id)
     var micMissing = base

@@ -1,6 +1,6 @@
-//! Tooling around `src/autocrop.rs`: the tuning playground (`scrawl autocrop`), simulated
-//! captures built through the real pipeline (`scrawl fixture`), and the scorer that compares
-//! crops with hand-labelled ground truth (`scrawl autocrop-eval`).
+//! Tooling around `src/autocrop.rs`: the tuning playground (`apparent autocrop`), simulated
+//! captures built through the real pipeline (`apparent fixture`), and the scorer that compares
+//! crops with hand-labelled ground truth (`apparent autocrop-eval`).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::autocrop::{self, Crop, Input, Rect, Settings};
 use crate::model::{
-    InteractionEvent, KeyframeReason, RgbaFrame, ScrawlBundle, Stroke, TargetInfo, TranscriptData,
+    InteractionEvent, KeyframeReason, RgbaFrame, ApparentBundle, Stroke, TargetInfo, TranscriptData,
     TranscriptSegment, WordTiming,
 };
 use crate::windows::{ActivityLog, CursorSample, WindowSnapshot};
@@ -81,9 +81,9 @@ pub fn resize(frame: &RgbaFrame, w: u32, h: u32) -> RgbaFrame {
     RgbaFrame::new(frame.t_ms, w as u32, h as u32, rgba)
 }
 
-/// The crop algorithm's input for a bundle: change regions from `scrawl.json` when the bundle
+/// The crop algorithm's input for a bundle: change regions from `apparent.json` when the bundle
 /// was cropped, else from its keyframe images.
-pub fn input_for_bundle(dir: &Path, bundle: &ScrawlBundle) -> Input {
+pub fn input_for_bundle(dir: &Path, bundle: &ApparentBundle) -> Input {
     let changes = match &bundle.autocrop {
         Some(info) if !info.changes.is_empty() => info.changes.clone(),
         _ => {
@@ -117,7 +117,7 @@ pub fn input_for_bundle(dir: &Path, bundle: &ScrawlBundle) -> Input {
         &changes,
     );
     input.pin_ink(&bundle.keyframes, &bundle.strokes, &bundle.marks);
-    // The full frames carry Scrawl's ink, which reads as content too; close enough for tuning.
+    // The full frames carry Apparent's ink, which reads as content too; close enough for tuning.
     let full = bundle
         .autocrop
         .as_ref()
@@ -151,7 +151,7 @@ pub fn input_for_bundle(dir: &Path, bundle: &ScrawlBundle) -> Input {
 // ---------------------------------------------------------------------------------------------
 
 const PLAYGROUND: &str = include_str!("autocrop-playground.html");
-const DATA_MARKER: &str = "/*SCRAWL_AUTOCROP_DATA*/null";
+const DATA_MARKER: &str = "/*APPARENT_AUTOCROP_DATA*/null";
 
 /// The named settings the playground offers as presets.
 pub fn presets() -> Vec<(&'static str, Settings)> {
@@ -182,7 +182,7 @@ pub fn presets() -> Vec<(&'static str, Settings)> {
     ]
 }
 
-fn playground_data(dir: &Path, bundle: &ScrawlBundle, served: bool) -> Value {
+fn playground_data(dir: &Path, bundle: &ApparentBundle, served: bool) -> Value {
     let input = input_for_bundle(dir, bundle);
     let full_dir = bundle
         .autocrop
@@ -225,14 +225,14 @@ fn playground_data(dir: &Path, bundle: &ScrawlBundle, served: bool) -> Value {
     })
 }
 
-fn playground_page(dir: &Path, bundle: &ScrawlBundle, served: bool) -> Result<String> {
+fn playground_page(dir: &Path, bundle: &ApparentBundle, served: bool) -> Result<String> {
     let data = playground_data(dir, bundle, served);
     let inline = serde_json::to_string(&data)?.replace("</", "<\\/");
     Ok(PLAYGROUND.replace(DATA_MARKER, &inline))
 }
 
 /// Writes `autocrop/index.html` (presets only; serve it to tune live) and returns its path.
-pub fn export(dir: &Path, bundle: &ScrawlBundle) -> Result<PathBuf> {
+pub fn export(dir: &Path, bundle: &ApparentBundle) -> Result<PathBuf> {
     let out = dir.join("autocrop");
     std::fs::create_dir_all(&out)?;
     let page = out.join("index.html");
@@ -242,7 +242,7 @@ pub fn export(dir: &Path, bundle: &ScrawlBundle) -> Result<PathBuf> {
 
 /// Serves the playground on `127.0.0.1:port`: the page, the bundle's files, and `POST /crop`,
 /// which runs the crop with the posted settings.
-pub fn serve(dir: &Path, bundle: &ScrawlBundle, port: u16, open: bool) -> Result<()> {
+pub fn serve(dir: &Path, bundle: &ApparentBundle, port: u16, open: bool) -> Result<()> {
     let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
     let url = format!(
         "http://127.0.0.1:{}/autocrop/",
@@ -328,7 +328,7 @@ pub fn serve(dir: &Path, bundle: &ScrawlBundle, port: u16, open: bool) -> Result
 // Simulated captures
 // ---------------------------------------------------------------------------------------------
 
-/// A simulated Screen capture, written by `scripts/autocrop-corpus.mjs`: what Scrawl's input
+/// A simulated Screen capture, written by `scripts/autocrop-corpus.mjs`: what Apparent's input
 /// monitors and window log would have recorded, plus a rendered frame for each screen state.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1229,8 +1229,8 @@ pub fn print_scores(label: &str, scores: &[CaseScore]) {
 mod tests {
     use super::*;
 
-    /// The simulated corpus (`scripts/autocrop-corpus.mjs`, built with `scrawl fixture` and
-    /// exported with `scrawl autocrop-eval --export`), without images: no content maps, so edges
+    /// The simulated corpus (`scripts/autocrop-corpus.mjs`, built with `apparent fixture` and
+    /// exported with `apparent autocrop-eval --export`), without images: no content maps, so edges
     /// don't snap to white space here.
     fn corpus() -> Vec<Case> {
         serde_json::from_str(include_str!("autocrop-corpus.json")).unwrap()

@@ -2,23 +2,23 @@
 import PackageDescription
 
 let package = Package(
-  name: "ScrawlKit",
+  name: "ApparentKit",
   // macOS only so `swift test` can run the platform-independent parts (the outbox) on a Mac;
   // everything UIKit is `#if os(iOS)`.
   platforms: [.iOS(.v18), .macOS(.v15)],
   products: [
-    .library(name: "ScrawlKit", targets: ["ScrawlKit"]),
+    .library(name: "ApparentKit", targets: ["ApparentKit"]),
   ],
   targets: [
     .target(
-      name: "ScrawlKit",
-      path: "Sources/ScrawlKit",
+      name: "ApparentKit",
+      path: "Sources/ApparentKit",
       swiftSettings: [.swiftLanguageMode(.v5)]
     ),
     .testTarget(
-      name: "ScrawlKitTests",
-      dependencies: ["ScrawlKit"],
-      path: "Tests/ScrawlKitTests",
+      name: "ApparentKitTests",
+      dependencies: ["ApparentKit"],
+      path: "Tests/ApparentKitTests",
       swiftSettings: [.swiftLanguageMode(.v5)]
     ),
   ]

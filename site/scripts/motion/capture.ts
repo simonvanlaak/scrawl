@@ -1,6 +1,6 @@
 // Deterministic frame capture and per-frame motion trace for the stage demo.
 //
-// Seeks the demo's timeline (window.__scrawlDemo) at a fixed rate of demo time, steps every CSS
+// Seeks the demo's timeline (window.__apparentDemo) at a fixed rate of demo time, steps every CSS
 // animation and transition by the same dt through the Web Animations API, then records a trace of
 // the tracked elements and (optionally) a PNG of the stage. Any frame renders the same on every run.
 //
@@ -22,7 +22,7 @@ for (let i = 2; i < process.argv.length; i++) {
 const arg = (k: string, d: string) => args.get(k) ?? d
 
 const url = arg("url", "http://localhost:4602/")
-const out = arg("out", "/tmp/scrawl-cap")
+const out = arg("out", "/tmp/apparent-cap")
 const size = arg("size", "desktop")
 const mode = arg("mode", "mac")
 const from = Number(arg("from", "0"))
@@ -54,10 +54,10 @@ const context = await browser.newContext({
 const page = await context.newPage()
 const full = `${url}${url.includes("?") ? "&" : "?"}${query}`
 await page.goto(full, { waitUntil: "networkidle" })
-await page.waitForFunction(() => window.__scrawlDemo?.ready?.() === true, null, { timeout: 20000 })
+await page.waitForFunction(() => window.__apparentDemo?.ready?.() === true, null, { timeout: 20000 })
 if (mode === "iphone") {
-  await page.evaluate(() => window.__scrawlDemo!.mode("iphone"))
-  await page.waitForFunction(() => window.__scrawlDemo?.ready?.() === true)
+  await page.evaluate(() => window.__apparentDemo!.mode("iphone"))
+  await page.waitForFunction(() => window.__apparentDemo?.ready?.() === true)
 }
 // Let the lazy GPU overlay initialise before the first frame.
 await page.waitForTimeout(1200)
@@ -173,7 +173,7 @@ const raf = () => page.evaluate(() => new Promise<void>((r) => requestAnimationF
 
 // Preroll at the capture rate so in-flight CSS animations are in the right state at `from`.
 let t = Math.max(0, from - preroll)
-await page.evaluate((ms) => window.__scrawlDemo!.seek(ms), t)
+await page.evaluate((ms) => window.__apparentDemo!.seek(ms), t)
 await page.evaluate(() => (window as unknown as { __drive: (d: number) => void }).__drive(0))
 const prerollStep = 1000 / 60
 while (t < from - 1e-6) {
@@ -181,7 +181,7 @@ while (t < from - 1e-6) {
   t += dt
   await page.evaluate(
     ([ms, d]) => {
-      window.__scrawlDemo!.seek(ms)
+      window.__apparentDemo!.seek(ms)
       ;(window as unknown as { __drive: (d: number) => void }).__drive(d)
     },
     [t, dt] as const,
@@ -193,7 +193,7 @@ let frame = 0
 for (t = from; t <= to + 1e-6; t += step, frame++) {
   const snap = await page.evaluate(
     ([ms, d, first]) => {
-      window.__scrawlDemo!.seek(ms)
+      window.__apparentDemo!.seek(ms)
       const w = window as unknown as { __drive: (d: number) => void; __trace: () => { scale: number; els: unknown[] } }
       w.__drive(first ? 0 : d)
       return w.__trace()
@@ -209,7 +209,7 @@ for (t = from; t <= to + 1e-6; t += step, frame++) {
 }
 
 writeFileSync(join(out, "trace.json"), JSON.stringify({ url: full, size, mode, from, to, fps, slow, frames: trace }))
-const diag = await page.evaluate(() => (window as unknown as { __scrawlGpu?: () => unknown }).__scrawlGpu?.() ?? null)
+const diag = await page.evaluate(() => (window as unknown as { __apparentGpu?: () => unknown }).__apparentGpu?.() ?? null)
 writeFileSync(join(out, "meta.json"), JSON.stringify({ viewport, dpr, clip, diag }, null, 2))
 await browser.close()
 process.stderr.write(`wrote ${trace.length} frames to ${out}\n`)

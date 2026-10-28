@@ -23,8 +23,8 @@ export type GpuDiagnostics = {
 
 declare global {
   interface Window {
-    __scrawlGpu?: () => GpuDiagnostics
-    __scrawlForceFx?: "webgpu" | "webgl2" | "css"
+    __apparentGpu?: () => GpuDiagnostics
+    __apparentForceFx?: "webgpu" | "webgl2" | "css"
   }
 }
 
@@ -247,7 +247,7 @@ function createWebGl2(canvas: HTMLCanvasElement): Renderer | null {
 
 function forcedBackend(): "webgpu" | "webgl2" | "css" | null {
   if (typeof window === "undefined") return null
-  if (window.__scrawlForceFx) return window.__scrawlForceFx
+  if (window.__apparentForceFx) return window.__apparentForceFx
   const q = new URLSearchParams(window.location.search).get("fx")
   return q === "webgpu" || q === "webgl2" || q === "css" ? q : null
 }
@@ -328,7 +328,7 @@ export function StageGpuOverlay({
   const diag = useRef<GpuDiagnostics>({ backend: "initializing", drawCalls: 0, points: 0, avgRenderMs: 0, reducedMotion: false, lastT: 0 })
 
   useEffect(() => {
-    window.__scrawlGpu = () => diag.current
+    window.__apparentGpu = () => diag.current
     const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)")
     const onMq = () => {
       reduced.current = !!mq?.matches

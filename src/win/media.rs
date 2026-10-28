@@ -63,7 +63,7 @@ use windows::core::{GUID, HSTRING, Interface};
 
 use crate::capture::{
     CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, FRAME_SAMPLE_INTERVAL, Sampler, capture_size,
-    scrawl_log,
+    apparent_log,
 };
 use crate::helper::{FrameTimes, Probe};
 use crate::model::{CaptureMode, RgbaFrame, TargetInfo};
@@ -660,12 +660,12 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     let mut recorder = match Recorder::new(&target, video_output_path.as_deref(), long_edge) {
         Ok(recorder) => Some(recorder),
         Err(error) => {
-            scrawl_log(format!("Screen capture failed to start: {error:#}"));
+            apparent_log(format!("Screen capture failed to start: {error:#}"));
             None
         }
     };
     if let Some(ref r) = recorder {
-        scrawl_log(format!(
+        apparent_log(format!(
             "Recording {}x{} ({:?})",
             r.out.0, r.out.1, target.mode
         ));
@@ -692,7 +692,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                 r.encode(None)
             });
             if let Err(error) = step {
-                scrawl_log(format!("Recording frame failed: {error:#}"));
+                apparent_log(format!("Recording frame failed: {error:#}"));
                 failed = true;
             }
         }
@@ -731,7 +731,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     match encoder.finish() {
         Ok(()) => video_output_path,
         Err(error) => {
-            scrawl_log(format!("Finishing the recording failed: {error:#}"));
+            apparent_log(format!("Finishing the recording failed: {error:#}"));
             None
         }
     }

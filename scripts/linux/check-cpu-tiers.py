@@ -50,9 +50,9 @@ TIERS = {
 def check(directory):
     libraries = {"libtranscribe.so": set(), "libggml.so": set(), "libggml-base.so": set()}
     libraries.update({f"libggml-cpu-{tier}.so": features for tier, features in TIERS.items()})
-    needed = subprocess.check_output(["readelf", "-d", str(directory / "scrawl")], text=True)
+    needed = subprocess.check_output(["readelf", "-d", str(directory / "apparent")], text=True)
     if not re.search(r"NEEDED.*\[libtranscribe\.so(?:\.[^]]+)?\]", needed):
-        raise RuntimeError("scrawl must dynamically link libtranscribe, not embed native ggml")
+        raise RuntimeError("apparent must dynamically link libtranscribe, not embed native ggml")
     failed = []
     observed = {}
     for name, allowed in libraries.items():

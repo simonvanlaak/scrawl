@@ -412,7 +412,7 @@ function CropDiagram({ t, script }: { t: number; script: Script | null }) {
 
 /* ---------- 4. A closer look when needed ---------- */
 
-const COMMAND = `scrawl zoom latest --at "colliding"`
+const COMMAND = `apparent zoom latest --at "colliding"`
 const TYPE: [number, number] = [300, 300 + COMMAND.length * 28]
 const CELLS_AT = TYPE[1] + 350
 const CELL = { w: 102, h: 58, gap: 8, top: 58 }
@@ -497,7 +497,7 @@ export function HowItWorks() {
           </Visual>
           <div className="feature-copy">
             <h3>Frames only when something happens</h3>
-            <p>Scrawl takes a frame when you draw, click, say “look” or “now”, or the screen changes.</p>
+            <p>Apparent takes a frame when you draw, click, say “look” or “now”, or the screen changes.</p>
           </div>
         </article>
         <article className="feature-card">

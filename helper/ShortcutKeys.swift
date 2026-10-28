@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 // The shortcut control in Settings: only the keys of the shortcut, as rounded keycaps with a
-// little depth, in a recessed field (Hex's control, Scrawl's red).
+// little depth, in a recessed field (Hex's control, Apparent's red).
 //
 //   Resting      ⌥ ⇧ S in the field. Holding the shortcut's modifiers presses those keys onto
 //                their bases and turns the key red: pressing it now would fire.
@@ -15,7 +15,7 @@ import SwiftUI
 //   Off          No keys: "Set shortcut" sits in the field (paste only).
 //
 // Every value is a spring evaluated in closed form at a time, so a moment draws the same live
-// from a TimelineView or frame by frame for `scrawl-helper settings --render`. Retargeting
+// from a TimelineView or frame by frame for `apparent-helper settings --render`. Retargeting
 // keeps position and velocity. Timings (s): enter .3 (after .06 when others move), exit .22,
 // slide .32, width .28, press down .07 and up .24, tint .2; refused keys turn red at +.08 and shake from +.1 for .55,
 // old keys at +.7; accepted bob over .5. Reduced motion: no travel, shake or press depth;
@@ -294,7 +294,7 @@ func keyLabels(_ flags: NSEvent.ModifierFlags) -> Set<String> {
 
 // MARK: Controller
 
-/// Decides what one shortcut's keys show, from what Scrawl sent and what the hands are doing.
+/// Decides what one shortcut's keys show, from what Apparent sent and what the hands are doing.
 final class KeyController {
   let motion: KeyMotion
   private(set) var shortcut: [String]

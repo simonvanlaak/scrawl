@@ -1,7 +1,7 @@
 //! Where a Mac capture of a browser tab goes. When the capture ends on a browser showing a dev
 //! site, the bundle is sent to that project's OpenCode session instead of only the clipboard:
 //!
-//! 1. The page registered itself through Scrawl's `/sdk.js` (`web`): its session, or the session
+//! 1. The page registered itself through Apparent's `/sdk.js` (`web`): its session, or the session
 //!    for the directory it named.
 //! 2. The tab is on a loopback host: the process listening on that port, its working directory,
 //!    that directory's git root, and the most recently active root session in it.
@@ -23,9 +23,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::capture::scrawl_log;
+use crate::capture::apparent_log;
 use crate::handoff::{ApiGet, OpenCodeSession};
-use crate::model::{Destination, ScrawlBundle};
+use crate::model::{Destination, ApparentBundle};
 use crate::web::Registration;
 
 /// The parts of an `http(s)` URL routing needs.
@@ -152,7 +152,7 @@ fn safe_bundle_id(id: &str) -> bool {
 }
 
 /// The front tab's URL in the browser `bundle_id`, through AppleScript. The first time macOS
-/// asks whether Scrawl may control the browser; while that prompt is up this waits a few
+/// asks whether Apparent may control the browser; while that prompt is up this waits a few
 /// seconds, then gives up for this capture. A denial just returns `None`.
 pub fn browser_tab_url(bundle_id: &str) -> Option<String> {
     let kind = browser_kind(bundle_id)?;
@@ -171,7 +171,7 @@ pub fn browser_tab_url(bundle_id: &str) -> Option<String> {
         Duration::from_secs(6),
     )?;
     if !output.status.success() {
-        scrawl_log(format!(
+        apparent_log(format!(
             "routing: couldn't read the {bundle_id} tab ({})",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
@@ -215,7 +215,7 @@ fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<std::pro
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                scrawl_log("routing: gave up waiting on a subprocess");
+                apparent_log("routing: gave up waiting on a subprocess");
                 return None;
             }
         }
@@ -422,7 +422,7 @@ pub fn route(url: &str, hooks: &Hooks) -> std::result::Result<Destination, Strin
 }
 
 fn routing_enabled() -> bool {
-    crate::handoff::auto_send() && std::env::var_os("SCRAWL_NO_OPENCODE").is_none()
+    crate::handoff::auto_send() && std::env::var_os("APPARENT_NO_OPENCODE").is_none()
 }
 
 /// Decides where a capture that just finished goes; `None` (logged) keeps it on the clipboard.
@@ -436,14 +436,14 @@ pub fn route_capture(
     let url = capture_url(front_bundle_id, target_bundle_id)?;
     match route(&url, &Hooks::default()) {
         Ok(dest) => {
-            scrawl_log(format!(
+            apparent_log(format!(
                 "routing: {url} → {} ({}) via {}",
                 dest.title, dest.session, dest.via
             ));
             Some(dest)
         }
         Err(reason) => {
-            scrawl_log(format!("routing: {url} stays on the clipboard: {reason}"));
+            apparent_log(format!("routing: {url} stays on the clipboard: {reason}"));
             None
         }
     }
@@ -468,17 +468,17 @@ pub fn look_capture(
 /// the bundle (`RECORD`), and logs the outcome.
 pub fn judge_capture(
     dir: &Path,
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     live: look::Live,
 ) -> (smart::Judgement, Option<String>) {
     let url = live.url.clone();
     if let Some(error) = &live.error {
-        scrawl_log(format!("routing: {error}"));
+        apparent_log(format!("routing: {error}"));
     }
     let evidence = look::evidence_for(bundle, dir, live);
     let judgement = smart::decide(&evidence, smart::Policy::Weigh);
     if let Err(err) = write_record(dir, &evidence, &judgement) {
-        scrawl_log(format!("routing: couldn't save {RECORD}: {err:#}"));
+        apparent_log(format!("routing: couldn't save {RECORD}: {err:#}"));
     }
     let outcome = match &judgement.decision {
         smart::Decision::Send { to, .. } => {
@@ -494,7 +494,7 @@ pub fn judge_capture(
         ),
         smart::Decision::Keep { reason } => format!("clipboard only: {reason}"),
     };
-    scrawl_log(format!(
+    apparent_log(format!(
         "routing (smart): {} clues, {} sessions → {outcome}",
         evidence.clues.len(),
         evidence.candidates.len()
@@ -502,7 +502,7 @@ pub fn judge_capture(
     (judgement, url)
 }
 
-/// `scrawl route --explain`: what smart routing sees for a bundle and what it decides, beside
+/// `apparent route --explain`: what smart routing sees for a bundle and what it decides, beside
 /// what the ladder (smart routing off) does. Read-only.
 pub fn explain_bundle(bundle: &Path, url: Option<&str>) -> Result<String> {
     use std::fmt::Write as _;
@@ -562,7 +562,7 @@ pub fn explain_bundle(bundle: &Path, url: Option<&str>) -> Result<String> {
 }
 
 /// The evidence and decision behind a capture's routing, saved beside it so
-/// `scrawl route --explain` replays the same decision.
+/// `apparent route --explain` replays the same decision.
 pub const RECORD: &str = "routing.json";
 
 pub fn write_record(
@@ -581,10 +581,10 @@ pub fn read_record(dir: &Path) -> Option<smart::Evidence> {
     serde_json::from_value(value.get("evidence")?.clone()).ok()
 }
 
-/// Writes `dest` into the bundle's `scrawl.json` and `summary.md`.
-pub fn record_destination(dir: &Path, bundle: &mut ScrawlBundle, dest: Destination) -> Result<()> {
+/// Writes `dest` into the bundle's `apparent.json` and `summary.md`.
+pub fn record_destination(dir: &Path, bundle: &mut ApparentBundle, dest: Destination) -> Result<()> {
     bundle.destination = Some(dest);
-    std::fs::write(dir.join("scrawl.json"), serde_json::to_vec_pretty(bundle)?)?;
+    std::fs::write(dir.join("apparent.json"), serde_json::to_vec_pretty(bundle)?)?;
     std::fs::write(
         dir.join("summary.md"),
         crate::sketch::summary_markdown(bundle, dir),
@@ -664,17 +664,17 @@ mod tests {
         let listen = "p48211\ncnode\np48211\np50002\n";
         assert_eq!(parse_lsof_pids(listen), vec![48211, 50002]);
         assert!(parse_lsof_pids("").is_empty());
-        let cwd = "p48211\nfcwd\nn/Users/kit/code/open-source/scrawl/site\n";
+        let cwd = "p48211\nfcwd\nn/Users/kit/code/open-source/apparent/site\n";
         assert_eq!(
             parse_lsof_cwd(cwd),
-            Some(PathBuf::from("/Users/kit/code/open-source/scrawl/site"))
+            Some(PathBuf::from("/Users/kit/code/open-source/apparent/site"))
         );
         assert_eq!(parse_lsof_cwd("p1\nfcwd\n"), None);
     }
 
     #[test]
     fn project_root_walks_up_to_git() {
-        let base = std::env::temp_dir().join(format!("scrawl-root-{}", crate::make_bundle_id()));
+        let base = std::env::temp_dir().join(format!("apparent-root-{}", crate::make_bundle_id()));
         let site = base.join("repo/site/src");
         std::fs::create_dir_all(&site).unwrap();
         std::fs::create_dir_all(base.join("repo/.git")).unwrap();
@@ -864,9 +864,9 @@ mod tests {
     #[test]
     fn destination_is_recorded_and_preferred_by_send() {
         let dir =
-            std::env::temp_dir().join(format!("scrawl-route-{}.scrawl", crate::make_bundle_id()));
+            std::env::temp_dir().join(format!("apparent-route-{}.apparent", crate::make_bundle_id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut bundle: ScrawlBundle = serde_json::from_value(serde_json::json!({
+        let mut bundle: ApparentBundle = serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 1_000,
             "target": {"mode": "display", "displayId": 1,
                 "frame": {"x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "scale": 1.0}},

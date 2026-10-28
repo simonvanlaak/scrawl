@@ -1,14 +1,14 @@
-// Scrawl dev SDK, served by the Scrawl app at http://127.0.0.1:47777/sdk.js.
+// Apparent dev SDK, served by the Apparent app at http://127.0.0.1:47777/sdk.js.
 // <script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>
 // or data-directory="/abs/project" to use that project's newest OpenCode session.
-// Registers this tab with Scrawl while it's open, so a Mac capture of it is sent to that
+// Registers this tab with Apparent while it's open, so a Mac capture of it is sent to that
 // session. It does nothing outside localhost unless data-token (the ingest token) is set.
-// When Scrawl asks for it (loopback pages only), it also tells Scrawl what's under clicks and
+// When Apparent asks for it (loopback pages only), it also tells Apparent what's under clicks and
 // ⇧ marks (element, component, source file:line), video seeks, console errors and failed
 // requests. It never sends request bodies, headers, cookies, query strings or typed values.
 (() => {
   const script = document.currentScript;
-  if (!script || window.__scrawlSdk) return;
+  if (!script || window.__apparentSdk) return;
   const host = location.hostname;
   const loopback =
     host === "localhost" ||
@@ -18,7 +18,7 @@
     /^127\./.test(host);
   const token = script.dataset.token;
   if (!loopback && !token) return;
-  window.__scrawlSdk = true;
+  window.__apparentSdk = true;
 
   const base = new URL(script.src).origin;
   const tab = Math.random().toString(36).slice(2, 14);
@@ -261,11 +261,11 @@
     const open = XMLHttpRequest.prototype.open;
     const xhrSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-      this.__scrawl = { method: String(method || "GET").toUpperCase(), url: String(url) };
+      this.__apparent = { method: String(method || "GET").toUpperCase(), url: String(url) };
       return open.call(this, method, url, ...rest);
     };
     XMLHttpRequest.prototype.send = function (...args) {
-      const info = this.__scrawl;
+      const info = this.__apparent;
       if (info) {
         const started = performance.now();
         this.addEventListener("loadend", () => {

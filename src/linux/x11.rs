@@ -1,8 +1,8 @@
 //! The X server: displays (RandR), the window list (EWMH), the pointer and keys (polled), and
-//! the properties that make Scrawl's GPUI windows float (override-redirect, always on top,
+//! the properties that make Apparent's GPUI windows float (override-redirect, always on top,
 //! click-through input shapes).
 //!
-//! On a Wayland session this is XWayland: it holds Scrawl's own windows and any X11 apps, but
+//! On a Wayland session this is XWayland: it holds Apparent's own windows and any X11 apps, but
 //! not native Wayland windows, and it hears the pointer and keys only while an X11 window has
 //! them. `crate::linux::wayland_session` says which.
 
@@ -121,7 +121,7 @@ impl X {
 // MARK: Displays
 
 /// A display: its RandR monitor's bounds and the work area on it (without panels), in global
-/// pixels, and the scale Scrawl's windows draw at (X11 has one for the whole screen).
+/// pixels, and the scale Apparent's windows draw at (X11 has one for the whole screen).
 #[derive(Clone, Debug)]
 pub struct Monitor {
     /// The RandR monitor's name atom; stable while it stays connected.
@@ -142,7 +142,7 @@ fn intersect(a: [f64; 4], b: [f64; 4]) -> Option<[f64; 4]> {
     (x1 > x0 && y1 > y0).then_some([x0, y0, x1 - x0, y1 - y0])
 }
 
-/// The scale GPUI draws Scrawl's windows at: `GPUI_X11_SCALE_FACTOR`, else `Xft.dpi` / 96.
+/// The scale GPUI draws Apparent's windows at: `GPUI_X11_SCALE_FACTOR`, else `Xft.dpi` / 96.
 pub fn ui_scale() -> f64 {
     if let Some(scale) = std::env::var("GPUI_X11_SCALE_FACTOR")
         .ok()
@@ -467,7 +467,7 @@ pub fn top_level_windows() -> Vec<WindowInfo> {
         .collect()
 }
 
-/// Scrawl's own floating windows (override-redirect, so not in the window manager's list),
+/// Apparent's own floating windows (override-redirect, so not in the window manager's list),
 /// front to back.
 pub fn own_floating_windows() -> Vec<WindowInfo> {
     let Some(x) = x() else {
@@ -538,9 +538,9 @@ pub fn activate(id: isize) {
     x.flush();
 }
 
-// MARK: Scrawl's own windows
+// MARK: Apparent's own windows
 
-/// Takes one of Scrawl's GPUI windows out of the window manager's hands (no frame, no
+/// Takes one of Apparent's GPUI windows out of the window manager's hands (no frame, no
 /// placement, above ordinary windows, not in the taskbar), places it over `rect` (global
 /// pixels) and shows it. GPUI has mapped it already, so it is unmapped and mapped again.
 pub fn float(id: u32, rect: [f64; 4]) {
@@ -614,7 +614,7 @@ fn configure(x: &X, id: u32, rect: [f64; 4]) {
     );
 }
 
-/// Moves and resizes one of Scrawl's windows to `rect` (global pixels).
+/// Moves and resizes one of Apparent's windows to `rect` (global pixels).
 pub fn place(id: u32, rect: [f64; 4]) {
     if let Some(x) = x() {
         // Hyprland takes an override-redirect window's position when it maps it and ignores
@@ -670,7 +670,7 @@ pub fn set_visible(id: u32, visible: bool) {
 }
 
 /// Asks a window to close (`WM_DELETE_WINDOW`), as its close button would: for GPUI windows
-/// Scrawl holds no handle to.
+/// Apparent holds no handle to.
 pub fn request_close(id: u32) {
     let Some(x) = x() else {
         return;
@@ -685,7 +685,7 @@ pub fn request_close(id: u32) {
     x.flush();
 }
 
-/// Gives one of Scrawl's override-redirect windows the keyboard (the picker's Esc and digits).
+/// Gives one of Apparent's override-redirect windows the keyboard (the picker's Esc and digits).
 pub fn focus(id: u32) {
     if let Some(x) = x() {
         let _ = x
@@ -722,7 +722,7 @@ pub fn set_click_through(id: u32, through: bool) {
     x.flush();
 }
 
-/// Lets a window of Scrawl's take clicks on Hyprland, where a click on the pill or the picker
+/// Lets a window of Apparent's take clicks on Hyprland, where a click on the pill or the picker
 /// otherwise lands on the app below it, for two reasons. Omarchy's `windows.lua` gives
 /// `no_focus` to floating XWayland windows with an empty class and title, which Hyprland's hit
 /// test then skips: GPUI sets no class on these, so they get one. And for an override-redirect
@@ -748,7 +748,7 @@ pub fn accept_pointer(id: u32) {
     set_class(id);
 }
 
-/// Scrawl's own windows, including KWin's frame → wrapper → client nesting.
+/// Apparent's own windows, including KWin's frame → wrapper → client nesting.
 fn own_gpui_windows(x: &X) -> Vec<Window> {
     let pid = std::process::id();
     let children = |window: Window| -> Vec<Window> {
@@ -808,7 +808,7 @@ pub fn window_id(window: &gpui::Window) -> Option<u32> {
     Some(fresh)
 }
 
-/// Sets a window's `WM_CLASS`, so docks and the window switcher match it to `scrawl.desktop`.
+/// Sets a window's `WM_CLASS`, so docks and the window switcher match it to `apparent.desktop`.
 pub fn set_class(id: u32) {
     if let Some(x) = x() {
         let _ = x.conn.change_property8(
@@ -816,7 +816,7 @@ pub fn set_class(id: u32) {
             id,
             AtomEnum::WM_CLASS,
             AtomEnum::STRING,
-            b"scrawl\0Scrawl\0",
+            b"apparent\0Apparent\0",
         );
         x.flush();
     }
@@ -854,7 +854,7 @@ pub fn geometry(id: u32) -> Option<[f64; 4]> {
     ])
 }
 
-/// A window's pixels (for `scrawl preview --capture-screenshot`), from the root window.
+/// A window's pixels (for `apparent preview --capture-screenshot`), from the root window.
 pub fn capture_rect(rect: [f64; 4]) -> anyhow::Result<crate::model::RgbaFrame> {
     use anyhow::Context as _;
     let x = x().context("No X server")?;

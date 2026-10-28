@@ -1,5 +1,5 @@
 //! Keeps `site/src/features.json` (the feature map) in step with the code. Every top-level key
-//! of `~/.config/scrawl/config.json` the app reads and every `handoff::experiment` it asks about
+//! of `~/.config/apparent/config.json` the app reads and every `handoff::experiment` it asks about
 //! needs a feature entry; every entry with a stable, main or experiment status must name keys
 //! and flags that still exist; and every doc it links must be in the repo.
 //!

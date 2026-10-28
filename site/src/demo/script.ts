@@ -443,12 +443,12 @@ export const clauses = (mode: Mode) => {
 }
 
 export const summaryText = (mode: Mode, short = false) => {
-  const dir = short ? "~/…/captures" : "~/Library/Application Support/scrawl/captures"
+  const dir = short ? "~/…/captures" : "~/Library/Application Support/apparent/captures"
   const target = mode === "mac" ? "Pulse “Deploy Activity”" : "iPhone · dev.pulse.app (212)"
   const [first, second] = clauses(mode)
   const start = recStart(mode)
   return [
-    `[scrawl ${clock(T.finish - start)} · ${target} · ${dir}/scrawl-1791924018273-3a1f.scrawl]`,
+    `[apparent ${clock(T.finish - start)} · ${target} · ${dir}/apparent-1791924018273-3a1f.apparent]`,
     `- #1 (${clock(T.pin1 - start)}) “${first}”`,
     `- #2 (${clock(T.pin2 - start)}) “${second}”`,
   ]

@@ -71,6 +71,9 @@ pub struct ScrawlBundle {
     pub events: Vec<InteractionEvent>,
     pub keyframes: Vec<Keyframe>,
     pub contact_sheet: String,
+    /// Why some keyframes use lower-resolution candidates instead of MP4 frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_quality_warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video: Option<String>,
     /// When the video starts on the bundle's clock (ms): video time = bundle time − this.

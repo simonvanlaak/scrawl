@@ -73,6 +73,36 @@ pub fn can_record_video() -> bool {
     init().is_ok() && encoder().is_some()
 }
 
+/// Check this process's registry, not the host's gst-inspect executable.
+pub fn h264_decoder_available() -> bool {
+    if init().is_err() { return false; }
+    let caps = gst::Caps::builder("video/x-h264").build();
+    gst::ElementFactory::factories_with_type(
+        gst::ElementFactoryType::DECODER | gst::ElementFactoryType::MEDIA_VIDEO,
+        gst::Rank::MARGINAL,
+    ).iter().any(|factory| factory.can_sink_any_caps(&caps) && factory.create().build().is_ok())
+}
+
+fn decoder_repair_for(distro: &str) -> &'static str {
+    match distro {
+        "arch" | "archarm" | "omarchy" | "manjaro" | "endeavouros" => "sudo pacman -S gst-libav",
+        "ubuntu" | "debian" | "linuxmint" | "pop" => "sudo apt install gstreamer1.0-libav",
+        "fedora" => "sudo dnf install gstreamer1-plugin-libav",
+        _ => "Install your distribution's GStreamer H.264 decoder (often gst-libav)",
+    }
+}
+
+pub fn decoder_warning() -> Option<String> {
+    if h264_decoder_available() { return None; }
+    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    let distro = os_release.lines().find_map(|line| line.strip_prefix("ID="))
+        .unwrap_or_default().trim_matches('"');
+    Some(format!(
+        "H.264 decoder missing. Install: {}. Restart Scrawl. MP4 recording may work, but full-quality keyframes use smaller candidate frames until fixed.",
+        decoder_repair_for(distro)
+    ))
+}
+
 fn source_launch(source: &Source) -> String {
     match source {
         #[cfg(test)]
@@ -712,6 +742,15 @@ pub fn shrink(_movie: &Path, _out: &Path, _max_edge: u32) -> Result<crate::reten
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoder_repair_names_the_host_package_without_installing_it() {
+        assert_eq!(decoder_repair_for("arch"), "sudo pacman -S gst-libav");
+        assert_eq!(decoder_repair_for("omarchy"), "sudo pacman -S gst-libav");
+        assert_eq!(decoder_repair_for("ubuntu"), "sudo apt install gstreamer1.0-libav");
+        assert_eq!(decoder_repair_for("fedora"), "sudo dnf install gstreamer1-plugin-libav");
+        assert!(decoder_repair_for("other").contains("distribution"));
+    }
 
     #[test]
     fn frames_shrink_to_their_long_edge() {

@@ -295,6 +295,10 @@ enum Command {
         #[arg(long)]
         watch: Option<u64>,
     },
+    /// Verify that this Linux runtime can decode an H.264 MP4 into keyframes.
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    DecoderCheck { movie: PathBuf },
     /// Transcribe a bundle's audio again with Apple Speech, in place: its transcript, each
     /// keyframe's words, `scrawl.json` and `summary.md`. Scrawl does this by itself for captures
     /// made while the speech model was still downloading.
@@ -957,8 +961,8 @@ pub fn finalize_capture_bundle(
                 } else {
                     decoded.clone()
                 };
-                let (merged, _) = merge_full_keyframes(preview, decoded);
-                let vis = prepare_visuals(
+                let (merged, matched) = merge_full_keyframes(preview, decoded);
+                let vis = (matched == merged.len()).then(|| prepare_visuals(
                     merged,
                     frames.first(),
                     crop_settings.as_ref(),
@@ -968,7 +972,7 @@ pub fn finalize_capture_bundle(
                     &preview_marks,
                     &events,
                     &activity,
-                );
+                )).flatten();
                 (cache, vis)
             } else {
                 (decoded, None)
@@ -1161,6 +1165,7 @@ pub fn build_bundle_from_parts(
     }
 
     let mut extras = extras;
+    let mut keyframe_warning = None;
     let (keyframes, autocrop, selected_at, annotated_at, rendered_at, output) = if matches_prepared
     {
         drop(frames);
@@ -1195,11 +1200,13 @@ pub fn build_bundle_from_parts(
                             capture::scrawl_log(format!(
                                 "Full-quality keyframes: decoded {matched} of {total}"
                             ));
+                            keyframe_warning = Some(format!("Only {matched} of {total} keyframes could be decoded at full quality; the rest use smaller candidate frames."));
                         }
                         merged
                     }
                     Err(error) => {
                         capture::scrawl_log(format!("Full-quality keyframes failed: {error:#}"));
+                        keyframe_warning = Some(format!("Full-quality keyframes could not be decoded from the MP4. This capture uses smaller candidate frames.{}", if cfg!(target_os = "linux") { " Check Settings › Recording for an H.264 decoder repair instruction." } else { "" }));
                         selected
                     }
                 }
@@ -1285,6 +1292,7 @@ pub fn build_bundle_from_parts(
         events,
         keyframes,
         contact_sheet: "contact-sheet.png".into(),
+        image_quality_warning: keyframe_warning,
         video: video_rel,
         video_offset_ms: extras.video_offset_ms,
         audio: audio_rel,
@@ -2084,6 +2092,15 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        #[cfg(target_os = "linux")]
+        Command::DecoderCheck { movie } => {
+            anyhow::ensure!(linux::media::h264_decoder_available(), "{}", linux::media::decoder_warning().unwrap_or_default());
+            let frames = linux::media::frames(&movie, helper::FrameTimes::At(&[0]), 0)?;
+            let frame = &frames[0];
+            anyhow::ensure!(frame.width > 0 && frame.height > 0, "Decoded frame has no dimensions");
+            println!("Decoded {} full-quality H.264 keyframe(s) ({}x{})", frames.len(), frame.width, frame.height);
+            Ok(())
+        }
         Command::SckProbe { watch } => {
             let end = std::time::Instant::now() + std::time::Duration::from_secs(watch.unwrap_or(0));
             loop {
@@ -2548,5 +2565,38 @@ mod tests {
         assert_eq!(merged[1].1.t_ms, 2_000);
         assert_eq!(merged[2].1.width, 160);
         assert_eq!(merged[2].1.t_ms, 3_000);
+    }
+
+    #[test]
+    fn failed_full_decode_explains_candidate_frames_in_written_summary() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        let bundle_dir = dir.join("fallback.scrawl");
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let frames = vec![RgbaFrame::new(0, 32, 32, vec![128; 32 * 32 * 4])];
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &bundle_dir, target, 1000, frames, vec![], vec![],
+            TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|_| anyhow::bail!("decoder missing"))),
+                autocrop: Some(None),
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert_eq!(bundle.keyframes.len(), 1);
+        assert!(summary.contains("Image quality: Full-quality keyframes could not be decoded"));
+        assert!(summary.contains("smaller candidate frames"));
+        assert_eq!(std::fs::read_to_string(bundle_dir.join("summary.md")).unwrap(), summary);
+        let (directory, mut loaded) = handoff::load_bundle(&bundle_dir).unwrap();
+        assert_eq!(sketch::summary_markdown(&loaded, &directory), summary);
+        loaded.note = Some("a later edit".into());
+        let regenerated = sketch::summary_markdown(&loaded, &directory);
+        assert!(regenerated.contains("Image quality: Full-quality keyframes could not be decoded"));
+        assert!(regenerated.contains("Note: a later edit"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

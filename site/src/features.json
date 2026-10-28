@@ -22,6 +22,15 @@
   ],
   "features": [
     {
+      "id": "linux-h264-decoder-check",
+      "group": "settings",
+      "name": "H.264 decoder setup warning",
+      "says": "Warns when the Linux GStreamer runtime lacks H.264 decoding, gives a distro-specific repair command, and explains candidate-frame fallback in the capture summary.",
+      "status": "main",
+      "platforms": ["linux"],
+      "docs": ["docs/linux.md"]
+    },
+    {
       "id": "record-screen",
       "group": "start",
       "name": "Record the screen",

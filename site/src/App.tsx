@@ -1,5 +1,4 @@
 import { Demo } from "./demo/Demo"
-import { HowItWorks } from "./HowItWorks"
 import { Copy } from "./Copy"
 
 const REPO = "https://github.com/tryapparent/apparent"
@@ -15,7 +14,6 @@ export function App() {
         </a>
         <nav>
           <a href="#demo">Demo</a>
-          <a href="#how">How it works</a>
           <a href={REPO}>GitHub</a>
           <a className="nav-dl" href={RELEASES}>Get the app</a>
         </nav>
@@ -37,21 +35,8 @@ export function App() {
           </div>
         </section>
         <section className="demo-section" id="demo" aria-label="Product demo">
-          <div className="demo-film" id="demo-film">
-            <div className="demo-film-intro">
-              <div>
-                <h2>See the handoff</h2>
-              </div>
-              <p>21-second scripted walkthrough. The terminal sequence is illustrative, not a live agent session.</p>
-            </div>
-            <video controls playsInline preload="metadata" poster="/apparent-demo-pi-poster.jpg?v=525a5c3" aria-label="Apparent capture and Pi handoff walkthrough">
-              <source src="/apparent-demo-pi.mp4?v=silent-20261028" type="video/mp4" />
-              Your browser does not support this video.
-            </video>
-          </div>
           <Demo />
         </section>
-        <HowItWorks />
       </main>
       <footer className="foot">
         <img src="/apparent-wordmark.svg" width={130} height={30} decoding="async" alt="apparent" />

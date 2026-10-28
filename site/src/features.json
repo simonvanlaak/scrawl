@@ -507,6 +507,15 @@
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
+      "id": "linux-element-fallback",
+      "group": "agent",
+      "name": "Linux element fallback",
+      "says": "With agent context enabled, unnamed Linux clicks say element unavailable; marks keep their ink but get no OS-derived element name. Registered dev pages can supply their own context.",
+      "status": "experiment:agentContext",
+      "platforms": ["linux"],
+      "docs": ["docs/linux.md", "docs/keyframes-and-text.md"]
+    },
+    {
       "id": "screen-text",
       "group": "agent",
       "name": "Text under marks",
@@ -925,7 +934,7 @@
       "id": "linux",
       "group": "platforms",
       "name": "Linux preview",
-      "says": "X11, and GNOME, KDE and Hyprland on Wayland through XWayland; without the iPhone, export, agent context, Sparkle or the tab URL.",
+      "says": "X11, and GNOME, KDE and Hyprland on Wayland through XWayland; without the iPhone, export, OS element names, Sparkle or the tab URL. Agent context has an unnamed-click fallback.",
       "status": "main",
       "platforms": ["linux"],
       "added": "2026-10-26",

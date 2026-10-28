@@ -15,7 +15,7 @@ use gpui::{
     MouseButton, ParentElement, Pixels, Point, Render, Rgba, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowBounds,
     WindowControlArea, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient,
-    point, prelude::*, px, rgb, rgba, size, svg,
+    point, prelude::*, px, relative, rgb, rgba, size, svg,
 };
 use serde::Deserialize;
 
@@ -28,12 +28,12 @@ use crate::settings::{Action, Event, Pane, Pressed};
 const WIDTH: f32 = 720.0;
 const HEIGHT: f32 = 530.0;
 const SIDEBAR: f32 = 210.0;
-/// The content pane's width: what the window keeps after the sidebar and the
-/// hairline between them. Giving the pane an explicit width (rather than `flex_1`) makes the
-/// space it hands its children definite, which GPUI requires to wrap text: with an indefinite
-/// width a caption measures as one full line, inflates the column and pushes trailing controls
-/// (the permission rows' buttons) past the window's edge.
-const CONTENT: f32 = WIDTH - SIDEBAR - 1.0;
+/// GPUI needs a definite content width to wrap captions, but a window manager can give us
+/// less than the requested window width (notably XWayland under Hyprland).
+fn column_widths(viewport: f32) -> (f32, f32) {
+    let sidebar = if viewport < 650.0 { 150.0 } else { SIDEBAR };
+    (sidebar, (viewport - sidebar - 1.0).max(0.0))
+}
 const TITLEBAR: f32 = 52.0;
 const INSET: f32 = 30.0;
 const ROW: f32 = 42.0;
@@ -817,10 +817,10 @@ impl SettingsWindow {
         self.meter = wanted.map(|id| (id.clone(), crate::mic::Meter::start(id)));
     }
 
-    fn sidebar(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+    fn sidebar(&self, theme: Theme, width: f32, cx: &mut Context<Self>) -> Div {
         div()
             .flex_none()
-            .w(px(SIDEBAR))
+            .w(px(width))
             .h_full()
             .bg(theme.sidebar())
             .flex()
@@ -831,7 +831,7 @@ impl SettingsWindow {
                     .px(px(20.0))
                     .pt(px(8.0))
                     .pb(px(28.0))
-                    .child(img(Arc::clone(&self.wordmark)).w(px(150.0)).h(px(35.0)))
+                    .child(img(Arc::clone(&self.wordmark)).w(px((width - 40.0).min(150.0))).h(px(35.0)))
                     .child(div().pt(px(12.0)).text_size(px(10.0))
                         .text_color(rgb(0xb7a5d8)).child("CAPTURE SETTINGS")),
             )
@@ -876,18 +876,18 @@ impl SettingsWindow {
             }))
     }
 
-    fn content(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn content(&self, theme: Theme, state: &ViewState, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let body = match self.pane {
             Pane::General => self.general(theme, state, cx),
             Pane::Recording => self.recording_pane(theme, state, cx),
             Pane::Storage => self.storage(theme, state, cx),
             Pane::Permissions => self.permissions(theme, state, cx),
             Pane::Agents => self.agents(theme, state, cx),
-            Pane::About => self.about(theme, state, cx),
+            Pane::About => self.about(theme, state, width < 500.0, cx),
         };
         div()
             .id("settings-content")
-            .w(px(CONTENT))
+            .w(px(width))
             .h_full()
             .bg(theme.window())
             .relative()
@@ -922,6 +922,7 @@ impl SettingsWindow {
                     .id("settings-pane-scroll")
                     .w_full()
                     .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
                     .px(px(INSET))
                     .flex()
@@ -1244,9 +1245,9 @@ impl SettingsWindow {
             ).into_any_element()]))
             .when_some(mic.note.clone(), |pane, note| pane.child(caption(theme, &note, true)))
             .when(mic.meter.is_some(), |pane| pane.child(
-                div().mx(px(8.0)).mt(px(8.0)).w(px(260.0)).h(px(7.0))
+                div().mx(px(8.0)).mt(px(8.0)).w_full().max_w(px(260.0)).h(px(7.0))
                     .rounded_full().bg(theme.track()).child(
-                        div().w(px(260.0 * level.clamp(0.0, 1.0))).h(px(7.0))
+                        div().w(relative(level.clamp(0.0, 1.0))).h(px(7.0))
                             .rounded_full().bg(theme.accent())
                     ),
             ))
@@ -1588,13 +1589,19 @@ impl SettingsWindow {
             ))
     }
 
-    fn about(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
+    fn about(&self, theme: Theme, state: &ViewState, compact: bool, cx: &mut Context<Self>) -> Div {
         let link = |id: &'static str, title: &str, shown: &str, url: &'static str| {
             div()
                 .id(id)
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.ink(0.03)))
-                .child(row(
+                .child(if compact {
+                    div().min_h(px(62.0)).px(px(12.0)).py(px(8.0))
+                        .flex().flex_col().justify_center()
+                        .child(div().text_size(px(14.0)).text_color(theme.text()).child(title.to_owned()))
+                        .child(div().text_size(px(12.0)).text_color(theme.secondary()).child(shown.to_owned()))
+                } else {
+                    row(
                     theme,
                     title,
                     true,
@@ -1609,7 +1616,8 @@ impl SettingsWindow {
                                 .child(shown.to_owned()),
                         )
                         .child(icon(crate::icons::ARROW_UP_RIGHT, 10.0, theme.tertiary())),
-                ))
+                    )
+                })
                 .on_click(move |_, _, _| {
                     let _ = crate::handoff::open_path(std::path::Path::new(url));
                 })
@@ -1618,9 +1626,10 @@ impl SettingsWindow {
             theme,
             vec![
                 div()
-                    .h(px(64.0))
+                    .min_h(px(if compact { 100.0 } else { 64.0 }))
                     .px(px(12.0))
                     .flex()
+                    .when(compact, |d| d.flex_wrap())
                     .items_center()
                     .gap(px(12.0))
                     .child(
@@ -1628,7 +1637,7 @@ impl SettingsWindow {
                     )
                     .child(
                         div()
-                            .flex_1()
+                            .flex_1().min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(1.0))
@@ -1704,7 +1713,7 @@ impl SettingsWindow {
                     link(
                         "settings-source",
                         "Source",
-                        "github.com/tryapparent/apparent",
+                        if compact { "tryapparent/apparent" } else { "github.com/tryapparent/apparent" },
                         "https://github.com/tryapparent/apparent",
                     )
                     .into_any_element(),
@@ -1952,9 +1961,10 @@ impl Render for SettingsWindow {
             return root.children(caption_buttons(theme));
         };
         let viewport = window.viewport_size();
-        root.child(self.sidebar(theme, cx))
+        let (sidebar, content) = column_widths(f32::from(viewport.width));
+        root.child(self.sidebar(theme, sidebar, cx))
             .child(div().w(px(1.0)).h_full().flex_none().bg(theme.separator()))
-            .child(self.content(theme, &state, cx))
+            .child(self.content(theme, &state, content, cx))
             .children(caption_buttons(theme))
             .children(self.menu_layer(theme, viewport, cx))
             .children(self.update_result_layer(theme, &state, cx))
@@ -1964,6 +1974,16 @@ impl Render for SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_columns_fit_the_actual_narrow_viewport() {
+        // XWayland can give the window less space than its requested size.
+        for viewport in [440.0, 560.0, WIDTH] {
+            let (sidebar, content) = column_widths(viewport);
+            assert!(sidebar + 1.0 + content <= viewport);
+            assert!(content > 0.0);
+        }
+    }
 
     #[test]
     fn the_command_transcriber_is_read_from_the_view() {

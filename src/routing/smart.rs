@@ -44,7 +44,7 @@ pub struct Evidence {
 pub enum Address {
     /// The user picked it (`--session`, a chip).
     Chosen(String),
-    /// The recording carries it (a ApparentKit timeline's `session`, an earlier routing).
+    /// An earlier routing recorded the session in the bundle.
     Recorded(String),
 }
 

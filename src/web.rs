@@ -1,18 +1,16 @@
-//! Dev pages telling Apparent which OpenCode session they belong to.
+//! Local dev-page registration and context for browser captures.
 //!
 //! A project adds `<script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>`
-//! (or `data-directory`) to its dev build. The script registers the page with the ingest server
-//! and heartbeats while the tab is open; a Mac capture of that tab is then sent to the session
-//! (`routing`). Registrations last `TTL_MS` past the last heartbeat.
+//! (or `data-directory`) to its dev build. The script registers the page with the local server
+//! and heartbeats while the tab is open. Registrations last `TTL_MS` past the last heartbeat.
 //!
-//! Without the ingest token, only a page on a loopback origin, calling from this Mac, may
-//! register, and only for its own origin. Any other origin must send the token as a bearer.
+//! Only a page on a loopback origin, calling from this Mac, may register.
 //!
 //! With the `agentContext` experiment on, a loopback page also posts what it sees under clicks
 //! and marks, plus errors, failed requests and video playback, to `/web/context` (`crate::page`).
 
 use std::io::{Read as _, Write as _};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -26,6 +24,36 @@ use crate::routing::{is_loopback_host, parse_url};
 pub const TTL_MS: u64 = 120_000;
 const MAX_ENTRIES: usize = 64;
 const SDK_JS: &str = include_str!("sdk.js");
+pub const PORT: u16 = 47777;
+
+/// The browser SDK runs on a local listener independently of phone capture.
+pub fn start_server() {
+    std::thread::spawn(|| {
+        let listener = match TcpListener::bind(("127.0.0.1", PORT)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                crate::capture::apparent_log(format!("Web SDK port {PORT}: {error}"));
+                return;
+            }
+        };
+        set_serving();
+        let connections = crate::ingest_http::Connections::default();
+        for incoming in listener.incoming() {
+            let Ok(mut stream) = incoming else { continue };
+            let Some(permit) = connections.acquire() else { continue };
+            std::thread::spawn(move || {
+                let _permit = permit;
+                if let Ok(Some(header)) = crate::ingest_http::read_header(
+                    &mut stream, crate::ingest_http::HEADER_TIMEOUT,
+                ) {
+                    if !handle(&mut stream, &header).unwrap_or(false) {
+                        respond_json(&mut stream, "404 Not Found", &serde_json::json!({"ok":false}), None);
+                    }
+                }
+            });
+        }
+    });
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,7 +124,7 @@ impl Registry {
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     entries: Vec::new(),
 });
-/// Whether this process owns the ingest port, and so holds the registrations.
+/// Whether this process owns the browser SDK port, and so holds the registrations.
 static SERVING: AtomicBool = AtomicBool::new(false);
 
 fn registry() -> std::sync::MutexGuard<'static, Registry> {
@@ -109,35 +137,29 @@ pub fn set_serving() {
     SERVING.store(true, Ordering::Release);
 }
 
-/// The live registration for `url`, from this process when it runs the ingest server, else
+/// The live registration for `url`, from this process when it runs the web server, else
 /// from the one that does.
 pub fn lookup(url: &str) -> Option<Registration> {
     let now = crate::now_epoch_ms();
     if SERVING.load(Ordering::Acquire) {
         return registry().lookup(url, now);
     }
-    // `APPARENT_INGEST_PORT` points at a `apparent serve --port` other than the app's.
-    let port = std::env::var("APPARENT_INGEST_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(crate::phone::DEFAULT_INGEST_PORT);
     let mut remote = Registry::default();
-    for reg in fetch_registrations(port).ok()? {
+    for reg in fetch_registrations(PORT).ok()? {
         remote.entries.push(reg);
     }
     remote.lookup(url, now)
 }
 
-/// The running server's live registrations (`GET /web/registrations` with the ingest token).
+/// The running local server's live registrations.
 pub fn fetch_registrations(port: u16) -> Result<Vec<Registration>> {
-    let token = crate::handoff::ensure_ingest_token()?;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(400))
         .with_context(|| format!("Apparent isn't listening on port {port}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     write!(
         stream,
-        "GET /web/registrations HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+        "GET /web/registrations HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
     )?;
     let mut response = Vec::new();
     stream.read_to_end(&mut response)?;
@@ -163,17 +185,14 @@ pub fn is_loopback_origin(origin: &str) -> bool {
     parse_url(origin).is_some_and(|u| is_loopback_host(&u.host))
 }
 
-/// Unauthenticated registration needs a loopback page calling from this Mac (non-browser
-/// clients can claim any `Origin`, so the peer address matters too); anything else needs the
-/// ingest token.
-pub fn may_register(origin: Option<&str>, peer_loopback: bool, token_ok: bool) -> bool {
-    token_ok || (peer_loopback && origin.is_some_and(is_loopback_origin))
+/// A browser origin and peer must both be local.
+pub fn may_register(origin: Option<&str>, peer_loopback: bool) -> bool {
+    peer_loopback && origin.is_some_and(is_loopback_origin)
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Body {
-    origin: Option<String>,
     url: Option<String>,
     title: Option<String>,
     session: Option<String>,
@@ -189,22 +208,9 @@ fn valid_session(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// The registration a request describes. Without the token the page's own `Origin` header is
-/// used, whatever the body says.
-fn registration_from(
-    body: Body,
-    header_origin: Option<&str>,
-    token_ok: bool,
-) -> std::result::Result<Registration, &'static str> {
-    let claimed = if token_ok {
-        body.origin
-            .as_deref()
-            .or(header_origin)
-            .or(body.url.as_deref())
-    } else {
-        header_origin
-    };
-    let origin = claimed
+/// The registration a request describes. The page's own `Origin` header is authoritative.
+fn registration_from(body: Body, header_origin: Option<&str>) -> std::result::Result<Registration, &'static str> {
+    let origin = header_origin
         .and_then(parse_url)
         .ok_or("missing or invalid origin")?
         .origin();
@@ -256,6 +262,15 @@ fn header_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
+/// Reject rebinding to the loopback listener through an attacker-controlled hostname.
+fn local_host(header: &str) -> bool {
+    header_value(header, "host").is_some_and(|host| {
+        ["127.0.0.1", "localhost"]
+            .iter()
+            .any(|name| host.eq_ignore_ascii_case(name) || host.eq_ignore_ascii_case(&format!("{name}:{PORT}")))
+    })
+}
+
 fn respond(
     stream: &mut TcpStream,
     status: &str,
@@ -269,7 +284,7 @@ fn respond(
     );
     if let Some(origin) = origin {
         head.push_str(&format!(
-            "Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
+            "Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
         ));
     }
     head.push_str("\r\n");
@@ -293,20 +308,8 @@ fn respond_json(
     );
 }
 
-/// Answers the SDK's routes; `false` when the request is for something else (the ApparentKit
-/// routes, which need the token).
-#[cfg(test)]
-pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Result<bool> {
-    handle_with_policy(stream, header, expected_token, &(|| true))
-}
-
-pub fn handle_with_policy(
-    stream: &mut TcpStream,
-    header: &str,
-    expected_token: &str,
-    policy: &impl crate::phone::IngestPolicy,
-) -> Result<bool> {
-    anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
+/// Answers the SDK's routes; `false` for unrecognized paths.
+pub fn handle(stream: &mut TcpStream, header: &str) -> Result<bool> {
     let first = header.lines().next().unwrap_or("");
     let mut parts = first.split_whitespace();
     let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
@@ -315,13 +318,11 @@ pub fn handle_with_policy(
     if !(path == "/sdk.js" || is_web) {
         return Ok(false);
     }
+    if !local_host(header) {
+        respond_json(stream, "403 Forbidden", &serde_json::json!({"ok": false}), None);
+        return Ok(true);
+    }
     let origin = header_value(header, "origin").filter(|o| *o != "null");
-    let token_ok = header_value(header, "authorization")
-        .and_then(|v| {
-            v.strip_prefix("Bearer ")
-                .or_else(|| v.strip_prefix("bearer "))
-        })
-        .is_some_and(|t| crate::phone::constant_time_eq(t.trim(), expected_token));
     let peer_loopback = stream.peer_addr().is_ok_and(|a| a.ip().is_loopback());
 
     match (method, path) {
@@ -336,8 +337,7 @@ pub fn handle_with_policy(
         }
         ("OPTIONS", _) => respond(stream, "204 No Content", "text/plain", b"", origin),
         ("GET", "/web/registrations") => {
-            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
-            if token_ok {
+            if peer_loopback {
                 let live = registry().live(crate::now_epoch_ms());
                 respond_json(
                     stream,
@@ -361,8 +361,7 @@ pub fn handle_with_policy(
             anyhow::ensure!(len <= 64 * 1024, "Page context too large");
             let bytes =
                 crate::ingest_http::read_body(stream, len, crate::ingest_http::SMALL_BODY_TIMEOUT)?;
-            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
-            // Loopback pages only, token or not.
+            // Loopback pages only.
             let Some(page_origin) = origin
                 .filter(|o| peer_loopback && is_loopback_origin(o))
                 .and_then(parse_url)
@@ -378,7 +377,7 @@ pub fn handle_with_policy(
             };
             let wanted = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
             if wanted && let Ok(post) = serde_json::from_slice::<crate::page::Post>(&bytes) {
-                policy.effect(|| crate::page::record(&page_origin, post))?;
+                crate::page::record(&page_origin, post);
             }
             respond_json(
                 stream,
@@ -396,35 +395,32 @@ pub fn handle_with_policy(
             // total deadline, so a client trickling it can't hold a connection slot.
             let bytes =
                 crate::ingest_http::read_body(stream, len, crate::ingest_http::SMALL_BODY_TIMEOUT)?;
-            anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
-            if !may_register(origin, peer_loopback, token_ok) {
+            if !may_register(origin, peer_loopback) {
                 respond_json(
                     stream,
                     "403 Forbidden",
-                    &serde_json::json!({"ok": false, "error": "only loopback pages may register without the ingest token"}),
+                    &serde_json::json!({"ok": false, "error": "only loopback pages may register"}),
                     None,
                 );
                 return Ok(true);
             }
             let body: Body = serde_json::from_slice(&bytes).unwrap_or_default();
-            match registration_from(body, origin, token_ok) {
+            match registration_from(body, origin) {
                 Ok(reg) if path == "/web/unregister" => {
-                    policy.effect(|| registry().unregister(&reg.origin, &reg.tab))?;
+                    registry().unregister(&reg.origin, &reg.tab);
                     respond_json(stream, "200 OK", &serde_json::json!({"ok": true}), origin);
                 }
                 Ok(reg) => {
                     // `context`: the page may send what it sees (`crate::page`); loopback only.
                     let context = origin.is_some_and(is_loopback_origin)
                         && crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
-                    policy.effect(|| {
-                        crate::capture::apparent_log(format!(
+                    crate::capture::apparent_log(format!(
                             "web: {} registered (session {}, directory {})",
                             reg.url,
                             reg.session.as_deref().unwrap_or("-"),
                             reg.directory.as_deref().unwrap_or("-")
                         ));
-                        registry().register(reg, crate::now_epoch_ms());
-                    })?;
+                    registry().register(reg, crate::now_epoch_ms());
                     respond_json(
                         stream,
                         "200 OK",
@@ -455,64 +451,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn loopback_origins_register_without_the_token_and_others_need_it() {
-        for origin in [
-            "http://localhost:5173",
-            "http://127.0.0.1:3000",
-            "https://app.localhost",
-            "http://[::1]:8080",
-        ] {
-            assert!(may_register(Some(origin), true, false), "{origin}");
-            // A non-browser client elsewhere can send any Origin.
-            assert!(!may_register(Some(origin), false, false), "{origin}");
-        }
-        for origin in [
-            "https://example.com",
-            "http://studio.example.ts.net:5173",
-            "http://localhost.evil.com",
-            "http://192.168.1.4:5173",
-        ] {
-            assert!(!may_register(Some(origin), true, false), "{origin}");
-            assert!(may_register(Some(origin), false, true), "{origin}");
-        }
-        assert!(!may_register(None, true, false));
+    fn only_loopback_origins_register() {
+        assert!(may_register(Some("http://localhost:5173"), true));
+        assert!(!may_register(Some("http://localhost:5173"), false));
+        assert!(!may_register(Some("https://example.com"), true));
+        assert!(!may_register(None, true));
     }
 
     #[test]
-    fn unauthenticated_pages_register_only_their_own_origin() {
+    fn pages_register_only_their_own_origin() {
         let body = Body {
-            origin: Some("https://victim.example".into()),
             url: Some("https://victim.example/x".into()),
             session: Some("ses_abc".into()),
             tab: Some("t1!".into()),
             ..Body::default()
         };
-        let reg = registration_from(body, Some("http://localhost:5173"), false).unwrap();
+        let reg = registration_from(body, Some("http://localhost:5173")).unwrap();
         assert_eq!(reg.origin, "http://localhost:5173");
         assert_eq!(reg.url, "http://localhost:5173/");
         assert_eq!(reg.tab, "t1");
         assert_eq!(reg.session.as_deref(), Some("ses_abc"));
-
-        let bad = Body {
-            session: Some("ses_a; rm -rf".into()),
-            ..Body::default()
-        };
-        assert!(registration_from(bad, Some("http://localhost:1"), false).is_err());
-        let relative = Body {
-            directory: Some("site".into()),
-            ..Body::default()
-        };
-        assert!(registration_from(relative, Some("http://localhost:1"), false).is_err());
-        assert!(registration_from(Body::default(), None, false).is_err());
-
-        let with_token = Body {
-            url: Some("https://studio.ts.net:5173/a".into()),
-            directory: Some("/p/app/".into()),
-            ..Body::default()
-        };
-        let reg = registration_from(with_token, None, true).unwrap();
-        assert_eq!(reg.origin, "https://studio.ts.net:5173");
-        assert_eq!(reg.directory.as_deref(), Some("/p/app"));
+        assert!(registration_from(Body { session: Some("ses_a; rm -rf".into()), ..Body::default() }, Some("http://localhost:1")).is_err());
+        assert!(registration_from(Body::default(), None).is_err());
     }
 
     fn reg(origin: &str, url: &str, tab: &str, session: &str) -> Registration {
@@ -559,10 +519,14 @@ mod tests {
         assert_eq!(registry.live(100_500).len(), 1);
     }
 
-    fn request(raw: &str, token: &str) -> String {
+    fn request(raw: &str) -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let raw = raw.to_owned();
+        let raw = if raw.to_ascii_lowercase().contains("\r\nhost:") {
+            raw.to_owned()
+        } else {
+            raw.replacen("\r\n", "\r\nHost: 127.0.0.1:47777\r\n", 1)
+        };
         let client = std::thread::spawn(move || {
             let mut stream = TcpStream::connect(addr).unwrap();
             stream.write_all(raw.as_bytes()).unwrap();
@@ -578,7 +542,7 @@ mod tests {
             header.push(byte[0]);
         }
         let header = String::from_utf8(header).unwrap();
-        assert!(handle(&mut stream, &header, token).unwrap());
+        assert!(handle(&mut stream, &header).unwrap());
         drop(stream);
         client.join().unwrap()
     }
@@ -590,7 +554,7 @@ mod tests {
         let writer = std::thread::spawn(move || {
             let mut client = TcpStream::connect(addr).unwrap();
             client
-                .write_all(b"POST /web/register HTTP/1.1\r\nOrigin: http://localhost:6123\r\nContent-Length: 100\r\n\r\n")
+                .write_all(b"POST /web/register HTTP/1.1\r\nHost: 127.0.0.1:47777\r\nOrigin: http://localhost:6123\r\nContent-Length: 100\r\n\r\n")
                 .unwrap();
             for _ in 0..7 {
                 if client.write_all(b"x").is_err() {
@@ -605,7 +569,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let start = std::time::Instant::now();
-        assert!(handle(&mut server, &header, "tok").is_err());
+        assert!(handle(&mut server, &header).is_err());
         assert!(
             start.elapsed() < std::time::Duration::from_millis(6_000),
             "body trickle occupied a connection beyond the deadline"
@@ -616,7 +580,7 @@ mod tests {
 
     #[test]
     fn http_routes_serve_the_script_and_check_registrations() {
-        let js = request("GET /sdk.js HTTP/1.1\r\nHost: x\r\n\r\n", "tok");
+        let js = request("GET /sdk.js HTTP/1.1\r\nHost: 127.0.0.1:47777\r\n\r\n" );
         assert!(
             js.starts_with("HTTP/1.1 200") && js.contains("/web/register"),
             "{js}"
@@ -628,7 +592,6 @@ mod tests {
                 "POST /web/register HTTP/1.1\r\nOrigin: http://localhost:6123\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             ),
-            "tok",
         );
         assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
         assert!(ok.contains("Access-Control-Allow-Origin: http://localhost:6123"));
@@ -645,7 +608,6 @@ mod tests {
                 "POST /web/register HTTP/1.1\r\nOrigin: https://example.com\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             ),
-            "tok",
         );
         assert!(remote.starts_with("HTTP/1.1 403"), "{remote}");
         let authed = request(
@@ -653,15 +615,16 @@ mod tests {
                 "POST /web/register HTTP/1.1\r\nOrigin: https://example.com\r\nAuthorization: Bearer tok\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             ),
-            "tok",
         );
-        assert!(authed.starts_with("HTTP/1.1 200"), "{authed}");
+        assert!(authed.starts_with("HTTP/1.1 403"), "{authed}");
 
-        let list = request("GET /web/registrations HTTP/1.1\r\n\r\n", "tok");
-        assert!(list.starts_with("HTTP/1.1 401"), "{list}");
+        let list = request("GET /web/registrations HTTP/1.1\r\n\r\n" );
+        assert!(list.starts_with("HTTP/1.1 200"), "{list}");
+        let rebound = request("GET /web/registrations HTTP/1.1\r\nHost: attacker.example:47777\r\n\r\n");
+        assert!(rebound.starts_with("HTTP/1.1 403"), "{rebound}");
+        assert!(!rebound.contains("ses_webtest"), "{rebound}");
         let list = request(
             "GET /web/registrations HTTP/1.1\r\nAuthorization: Bearer tok\r\n\r\n",
-            "tok",
         );
         assert!(list.contains("ses_webtest"), "{list}");
 
@@ -670,18 +633,16 @@ mod tests {
                 "POST /web/unregister HTTP/1.1\r\nOrigin: http://localhost:6123\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             ),
-            "tok",
         );
         assert!(unregister.starts_with("HTTP/1.1 200"), "{unregister}");
 
-        // Page context is loopback-only even with the token, and ignored with the experiment off.
+        // Page context is loopback-only and ignored with the experiment off.
         let context = r#"{"tab":"zz","events":[]}"#;
         let refused = request(
             &format!(
                 "POST /web/context HTTP/1.1\r\nOrigin: https://example.com\r\nAuthorization: Bearer tok\r\nContent-Length: {}\r\n\r\n{context}",
                 context.len()
             ),
-            "tok",
         );
         assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
         let accepted = request(
@@ -689,7 +650,6 @@ mod tests {
                 "POST /web/context HTTP/1.1\r\nOrigin: http://localhost:6123\r\nContent-Length: {}\r\n\r\n{context}",
                 context.len()
             ),
-            "tok",
         );
         assert!(
             accepted.starts_with("HTTP/1.1 200") && accepted.contains(r#""context":false"#),

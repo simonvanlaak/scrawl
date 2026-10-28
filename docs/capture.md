@@ -14,6 +14,12 @@ Carbon hotkeys and the key event tap report presses through `emit_capture_shortc
 
 ## Mac captures (`src/capture.rs`)
 
+### Timed CLI recording versus the app shortcut
+
+`apparent record --duration N` starts a separate, timed screen-and-microphone recorder. It does **not** start the app's global input tap or ink overlay. A click may be visible in `recording.mp4`, but no click or Shift mark is collected for `events`, `marks`, click keyframes or ripples. New timed screen bundles say `"interactionTelemetry": "videoOnly"` in `apparent.json` and explain this in `summary.md` (including after reprocessing or journal-backed recovery). An absent field on an older bundle or orphaned movie says nothing about its collection mode. Window/cursor samples and scene-change keyframes are still possible; “video only” describes *interaction telemetry*, not a lack of audio or all other context.
+
+For interaction-aware agent captures, use the already-running app's recording shortcut (`apparent shortcut record` on Linux, or the configured shortcut on Mac) to start and finish. This follows the same permission rules as an ordinary app recording: macOS Accessibility for click/ink collection; Linux input-device access on supported Wayland sessions, or the X server on X11. It must not silently install a global input hook from the CLI, bypass consent, or forward a bundle to a chat. CLI `--iphone` is a separate native video/mirror path, not the timed screen path.
+
 The sampler keeps only small candidates (480 px long edge, in a `CandidateBuffer` capped at 384 MB that thins evenly and halves its sampling rate when full, never dropping the start or click/stroke frames). At finish the chosen keyframes are decoded from `recording.mp4` at native size (2560 px Screen, 1280 px Window/Region, never above the display's own scale, so a 1x 1920 pt display records 1920 px), shifted by `videoOffsetMs` (when the movie started on the capture clock); if decoding fails the candidates are used. macOS prompts over a Screen or Area capture (`windows::system_prompts_over`: UserNotificationCenter, SecurityAgent; ScreenCaptureKit's "bypass the system private window picker" alert comes back every 30 days) are left out of the recording through the content filter when ScreenCaptureKit lists them, frames that may show one are dropped from the candidates (`CandidateBuffer::drop_since`), and clicks on them aren't recorded. `apparent capture-sim` drives this headless for memory and timing checks.
 
 ## More than one display (`src/screens.rs`)

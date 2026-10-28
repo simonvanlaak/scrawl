@@ -2823,6 +2823,7 @@ impl ApparentCoordinator {
                         recorded_audio,
                         None,
                         activity,
+                        None,
                     )
                     .map(|(dir, bundle, summary)| {
                         #[cfg(target_os = "linux")]

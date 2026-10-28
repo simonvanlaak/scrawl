@@ -261,7 +261,7 @@ enum Command {
         #[arg(long)]
         clipboard: bool,
     },
-    /// Record a live screen + microphone capture from the terminal for a fixed duration.
+    /// Record for a fixed duration. Timed CLI screen capture does not collect clicks or Shift ink; use the app's recording shortcut for interaction telemetry.
     Record {
         /// Optional window title or app substring to target.
         #[arg(long)]
@@ -751,6 +751,7 @@ pub fn prepare_visuals(
 #[derive(Default)]
 pub struct SourceExtras {
     pub source: Option<String>,
+    pub interaction_telemetry: Option<model::InteractionTelemetry>,
     pub device: Option<DeviceInfo>,
     /// What the recorded app said about itself: values at the start, their changes, and screens.
     pub context: std::collections::BTreeMap<String, String>,
@@ -850,6 +851,7 @@ pub fn finalize_capture_bundle(
     recorded_audio: Option<RecordedAudio>,
     note: Option<String>,
     activity: windows::ActivityLog,
+    interaction_telemetry: Option<model::InteractionTelemetry>,
 ) -> Result<(PathBuf, ApparentBundle, String)> {
     let started_at = activity
         .stop_started
@@ -884,6 +886,7 @@ pub fn finalize_capture_bundle(
             video_offset_ms,
             strokes: strokes.clone(),
             events: events.clone(),
+            interaction_telemetry,
             note: note.clone(),
             windows: activity.windows.clone(),
             cursor: activity.cursor.clone(),
@@ -961,6 +964,7 @@ pub fn finalize_capture_bundle(
         note,
         SourceExtras {
             activity,
+            interaction_telemetry,
             video_offset_ms,
             autocrop: Some(crop_settings),
             full_frames: video_path
@@ -1043,6 +1047,7 @@ pub fn rebuild_screen_bundle_with(
                 cursor: old.cursor,
                 ..Default::default()
             },
+            interaction_telemetry: old.interaction_telemetry,
             full_frames,
             video_offset_ms: offset,
             autocrop,
@@ -1256,6 +1261,7 @@ pub fn build_bundle_from_parts(
         strokes,
         marks,
         events,
+        interaction_telemetry: extras.interaction_telemetry,
         keyframes,
         contact_sheet: "contact-sheet.png".into(),
         image_quality_warning: keyframe_warning,
@@ -1729,6 +1735,7 @@ fn main() -> Result<()> {
                 recorded_audio,
                 note,
                 activity,
+                Some(model::InteractionTelemetry::VideoOnly),
             )?;
             print!("{summary}");
             Ok(())
@@ -1896,6 +1903,7 @@ fn main() -> Result<()> {
                             recorded,
                             iter_note,
                             iter_activity,
+                            old.interaction_telemetry,
                         )?;
                         let _ = handoff::copy_bundle_to_clipboard(&iter_out);
                         runs_ms.push(t0.elapsed().as_secs_f64() * 1_000.0);
@@ -1962,6 +1970,7 @@ fn main() -> Result<()> {
                         video_offset_ms: old.video_offset_ms,
                         strokes: old.strokes,
                         events: old.events,
+                        interaction_telemetry: old.interaction_telemetry,
                         note: old.note,
                         windows: old.windows,
                         cursor: old.cursor,
@@ -2414,6 +2423,59 @@ mod tests {
     #[test]
     fn cli_identifies_as_apparent() {
         assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
+    fn timed_record_help_discloses_missing_interaction_telemetry() {
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let mut help = Vec::new();
+        command.find_subcommand_mut("record").unwrap().write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+        assert!(help.contains("does not collect clicks or Shift ink"), "{help}");
+        assert!(help.contains("app's recording shortcut"), "{help}");
+    }
+
+    #[test]
+    fn video_only_bundle_discloses_telemetry_gap_after_reload() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let dir = root.join("video-only.apparent");
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &dir, target, 1000,
+            vec![RgbaFrame::new(0, 32, 32, vec![128; 32 * 32 * 4])],
+            vec![], vec![], TranscriptData::default(), None, None,
+            SourceExtras {
+                interaction_telemetry: Some(model::InteractionTelemetry::VideoOnly),
+                autocrop: Some(None),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert!(bundle.events.is_empty());
+        assert!(bundle.marks.is_empty());
+        assert!(summary.contains("clicks and Shift ink were not collected"));
+        assert_eq!(std::fs::read_to_string(dir.join("summary.md")).unwrap(), summary);
+        let (_, loaded) = handoff::load_bundle(&dir).unwrap();
+        assert_eq!(loaded.interaction_telemetry, Some(model::InteractionTelemetry::VideoOnly));
+        assert!(sketch::summary_markdown_with(&loaded, &dir, true).contains("clicks and Shift ink were not collected"));
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("apparent.json")).unwrap()).unwrap();
+        assert_eq!(manifest["interactionTelemetry"], "videoOnly");
+        let old: model::ApparentBundle = serde_json::from_value({
+            let mut old = manifest;
+            old.as_object_mut().unwrap().remove("interactionTelemetry");
+            old
+        }).unwrap();
+        assert_eq!(old.interaction_telemetry, None);
+        assert!(!sketch::summary_markdown_with(&old, &dir, false).contains("timed CLI video only"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

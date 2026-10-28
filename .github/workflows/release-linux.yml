@@ -1,24 +1,17 @@
 name: Release (Linux)
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/release-linux.yml
-      - scripts/linux/**
-      - packaging/linux/**
-      - Cargo.toml
-      - build.rs
-      - src/speech.rs
-      - .cargo/config.toml
-  push:
-    tags: ["v*"]
-    branches: ["release/**", "main"]
   workflow_dispatch:
     inputs:
       tag:
         description: Tag to build and attach to. Empty builds the branch without publishing.
         required: false
         default: ""
+      publish_main:
+        description: Publish a checked main build as a Linux preview release and advance its update feed.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -40,8 +33,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
-      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      TAG: ${{ inputs.tag }}
+      PUBLISH_MAIN: ${{ inputs.publish_main }}
     steps:
+      - name: Validate release request
+        run: |
+          if [[ "$PUBLISH_MAIN" == "true" && ( -n "$TAG" || "$GITHUB_REF" != "refs/heads/main" ) ]]; then
+            echo "Publish main requires the main branch and no release tag" >&2
+            exit 1
+          fi
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -121,7 +121,7 @@ jobs:
           gh release upload "$TAG" dist/* --clobber
 
   main-feed:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: inputs.publish_main && inputs.tag == '' && github.ref == 'refs/heads/main'
     needs: linux
     runs-on: ubuntu-24.04
     steps:

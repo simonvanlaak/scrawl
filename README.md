@@ -900,9 +900,9 @@ system owns differ:
 - **Not on Windows:** the cabled iPhone (it needs AVFoundation's screen capture devices), video
   export, Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL
   (`/sdk.js` registrations still route).
-- **Releases:** a `v*` tag builds `Scrawl-<version>-windows-x64.zip` on GitHub Actions
-  (`.github/workflows/release-windows.yml`) and attaches it to the release. It isn't code-signed
-  yet; signing and automatic updates are planned.
+- **Releases:** manually dispatch `.github/workflows/release-windows.yml` on `main` with
+  `tag=v<version>` to build `Scrawl-<version>-windows-x64.zip` and attach it to the release.
+  It isn't code-signed yet; signing and automatic updates are planned.
 
 Build with the MSVC toolchain, CMake and the Windows SDK (Visual Studio Build Tools with the C++
 workload). Release builds also need GPUI's shader compiler: set `GPUI_FXC_PATH` to the SDK's

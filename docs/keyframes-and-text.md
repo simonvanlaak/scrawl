@@ -76,11 +76,11 @@ same bundle: chunk boundaries can change recognition even when finish is faster.
 
 ## Click-based visual handoff (`src/handoff.rs`, `src/sketch.rs`)
 
-On by default. Automatic OpenCode delivery attaches the contact sheet only when the saved bundle has an `InteractionEvent::Click` (including a phone tap). With no click, it queues the transcript and bundle path with no image attachment, and tells the agent `scrawl zoom` is available on demand. The full capture, keyframes, contact sheet, and video are still built and saved; remote bundle sync still makes them accessible to the agent's CLI. A manual Paste action remains explicitly image-first. The summary's imperative image instruction is replaced by an optional visual pointer on no-click captures. A drag, mark, scene change, or spoken “look” alone is not a click. This is an attachment policy, not an intent classifier or a faster image-processing path. The former `clickVisualHandoff` experiment setting no longer controls this behavior.
+The old automatic OpenCode attachment policy is inactive. The full capture, keyframes, contact sheet, and video are still built and saved. Manual Paste remains image-first; `scrawl zoom` is available for closer inspection.
 
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`)
 
-Off by default; Windows only. A finished capture (and `scrawl send` to the clipboard) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.
+Off by default; Windows only. A finished capture (and `scrawl copy`) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.
 
 ## Experiment `draftHandoff` (`src/handoff.rs`, `src/linux/clipboard.rs`)
 

@@ -530,40 +530,43 @@
     {
       "id": "devsite-routing",
       "group": "delivery",
-      "name": "Dev-site captures to their session",
-      "says": "A capture that ends on a localhost dev site goes to that project's newest OpenCode session, and is still copied.",
-      "status": "stable@0.3.4",
+      "name": "Legacy dev-site routing (disabled)",
+      "says": "Old autoSend configuration is preserved, but captures now stay local and are copied; it no longer sends anything.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac"],
-      "note": "Reads the browser's tab URL, which only the Mac does; /sdk.js registrations route everywhere.",
-      "config": [{ "key": "autoSend", "value": "false", "does": "Keep dev-site captures on the clipboard" }],
-      "docs": ["README.md#sending-captures-of-a-dev-site-to-its-session", "docs/iphone-and-routing.md"]
+      "note": "Retained only to document old configuration keys; no active routing.",
+      "config": [{ "key": "autoSend", "value": "true", "does": "Ignored; captures are never sent automatically" }],
+      "docs": ["docs/iphone-and-routing.md"]
     },
     {
       "id": "sdk-js",
       "group": "delivery",
-      "name": "/sdk.js page registration",
-      "says": "A dev page that loads Scrawl's /sdk.js names its session or project folder.",
-      "status": "stable@0.3.4",
+      "name": "Legacy /sdk.js registration (inactive)",
+      "says": "The script can still register a dev page, but captures no longer use its session or project folder.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["README.md#sending-captures-of-a-dev-site-to-its-session"]
+      "docs": ["docs/iphone-and-routing.md"]
     },
     {
       "id": "smart-routing",
       "group": "delivery",
-      "name": "Smart routing",
-      "says": "Weighs more clues (tab, Ghostty pane, window title, transcript) and sends with a 3 s undo, or offers a choice.",
-      "status": "experiment:smartRouting",
+      "name": "Legacy smart routing (disabled)",
+      "says": "The old routing settings remain readable; the smartRouting experiment no longer sends captures.",
+      "status": "main",
       "platforms": ["mac"],
       "added": "2026-10-19",
-      "config": [{ "key": "routing", "value": "{\"apps\": {…}, \"servers\": {…}}", "does": "Checkouts for apps and folders for file servers" }],
+      "config": [{ "key": "routing", "value": "{\"apps\": {…}, \"servers\": {…}}", "does": "Ignored by capture delivery" }],
       "docs": ["docs/routing.md"]
     },
     {
       "id": "delivery-retries",
       "group": "delivery",
-      "name": "Retries",
-      "says": "A send OpenCode didn't take is retried every 15 s, backing off to 30 min, for a day.",
-      "status": "stable@0.3.4",
+      "name": "Legacy delivery retries (disabled)",
+      "says": "Capture processing does not queue new OpenCode deliveries. Old retry markers are not processed on startup.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/iphone-and-routing.md"]
     },
@@ -833,13 +836,14 @@
       "docs": ["skills/scrawl/SKILL.md"]
     },
     {
-      "id": "cli-send",
+      "id": "cli-copy",
       "group": "cli",
-      "name": "send and route",
-      "says": "Queue a capture into a session (refusing a different one than recorded without --reroute); see where a URL would route.",
-      "status": "stable@0.3.4",
+      "name": "copy",
+      "says": "Copy a saved capture to the clipboard without selecting or contacting an agent session.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md", "README.md#sending-captures-of-a-dev-site-to-its-session"]
+      "docs": ["skills/scrawl/SKILL.md", "README.md#usage"]
     },
     {
       "id": "cli-reprocess",

@@ -3,7 +3,7 @@ import Foundation
 /// What a Scrawl server said became of a recording it took: the JSON of its 2xx, or the `.sent`
 /// and `.delivery` markers a Mac writes back over USB.
 ///
-/// The Mac answers once it has built the bundle and tried to queue it into the agent session:
+/// The Mac answers once it has built the bundle, or while it is still processing:
 /// `{"ok":true,"delivered":bool,"state":"sent"|"queued"|"saved"|"processing","sessionTitle":…}`.
 /// Servers from before `delivered` answered as soon as the files arrived; that reads as delivered.
 public enum IngestReply: Equatable, Sendable {
@@ -11,9 +11,9 @@ public enum IngestReply: Equatable, Sendable {
   case delivered(sessionTitle: String)
   /// On the Mac, which couldn't reach the session and keeps trying on its own.
   case queued(sessionTitle: String)
-  /// On the Mac, still being built or sent when it answered.
+  /// On the Mac, still being built when it answered.
   case processing(sessionTitle: String)
-  /// On the Mac and going no further (it has no session for this app).
+  /// Saved on the Mac, without forwarding to an agent session.
   case saved
 
   /// Reads a 2xx response body.

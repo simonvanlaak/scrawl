@@ -655,6 +655,15 @@
       "docs": ["README.md#settings", "docs/onboarding-and-settings.md"]
     },
     {
+      "id": "github-star-link",
+      "group": "settings",
+      "name": "GitHub star link",
+      "says": "Settings › About offers a button to open Apparent's GitHub repository if you'd like to star it.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
+      "docs": ["docs/onboarding-and-settings.md"]
+    },
+    {
       "id": "custom-shortcuts",
       "group": "settings",
       "name": "Custom shortcuts",

@@ -128,6 +128,11 @@ pub fn measure_metrics() -> Metrics {
         inspect: measure_text_pt("Inspect", HUD_TEXT, WEIGHT_MEDIUM, false),
         clock_000: measure_text_pt("0:00", HUD_TEXT, WEIGHT_SEMIBOLD, true),
         clock_0000: measure_text_pt("00:00", HUD_TEXT, WEIGHT_SEMIBOLD, true),
+        mic_warning: [
+            measure_text_pt("Mic unavailable", HUD_TEXT, WEIGHT_MEDIUM, false),
+            measure_text_pt("Mic stopped", HUD_TEXT, WEIGHT_MEDIUM, false),
+            measure_text_pt("Mic very quiet", HUD_TEXT, WEIGHT_MEDIUM, false),
+        ],
     }
 }
 
@@ -367,6 +372,9 @@ impl GlyphAtlas {
             ("Record", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Cancel", HUD_TEXT, WEIGHT_MEDIUM),
             ("Finish", HUD_TEXT, WEIGHT_SEMIBOLD),
+            ("Mic unavailable", HUD_TEXT, WEIGHT_MEDIUM),
+            ("Mic stopped", HUD_TEXT, WEIGHT_MEDIUM),
+            ("Mic very quiet", HUD_TEXT, WEIGHT_MEDIUM),
             ("Processing…", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Paste", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Inspect", HUD_TEXT, WEIGHT_MEDIUM),

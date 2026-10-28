@@ -29,7 +29,7 @@ pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 #[cfg(target_os = "linux")]
 pub(crate) use platform::set_app_icon;
 
-use crate::audio::AudioRecorder;
+use crate::audio::{AudioRecorder, InputWarning};
 use crate::capture::{
     LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, current_mouse_screen,
     discover_target, install_global_hotkeys, list_selectable_windows,
@@ -383,6 +383,7 @@ fn island_content_width(
     clock: &str,
     iphone: bool,
     chips: bool,
+    warning: Option<InputWarning>,
     completed_note: Option<&str>,
     routes: &[String],
 ) -> f32 {
@@ -400,6 +401,10 @@ fn island_content_width(
         }
         IslandPhase::Recording => {
             let trail = recording_trail_widths(window, chips, iphone);
+            let warning_w = warning.map_or(0.0, |warning| {
+                measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
+                    + 2.0 * CHIP_PX + divider + 2.0 * CHIP_GAP
+            });
             CHIP_H
                 + measure_text(
                     window,
@@ -409,6 +414,7 @@ fn island_content_width(
                 )
                 + LEAD_TRAIL
                 + divider
+                + warning_w
                 + trail.iter().sum::<f32>()
                 + (trail.len() + 1) as f32 * CHIP_GAP
         }
@@ -674,6 +680,14 @@ struct ActiveRecording {
 }
 
 impl ActiveRecording {
+    fn mic_warning(&self) -> Option<InputWarning> {
+        match &self.source {
+            CaptureSource::Screen { audio: Some(audio), .. } => audio.warning(),
+            CaptureSource::Screen { audio: None, .. } => Some(InputWarning::Unavailable),
+            CaptureSource::Phone(_) | CaptureSource::Lab => None,
+        }
+    }
+
     fn elapsed_ms(&self) -> u64 {
         match &self.source {
             CaptureSource::Screen { session, .. } => session.elapsed_ms(),
@@ -1936,6 +1950,7 @@ impl ScrawlCoordinator {
         PillSnapshot {
             pres,
             clock,
+            mic_warning: self.active_recording.as_ref().and_then(ActiveRecording::mic_warning),
             reduced_motion: self.reduced_motion,
             style: PillStyle::current(),
         }
@@ -3225,6 +3240,11 @@ impl Render for HudPillWindow {
             .active_recording
             .as_ref()
             .map(ActiveRecording::elapsed_ms);
+        let mic_warning = if matches!(phase, IslandPhase::Recording) {
+            coord.active_recording.as_ref().and_then(ActiveRecording::mic_warning)
+        } else {
+            None
+        };
         let elapsed_ms = recording_ms.unwrap_or(coord.last_elapsed_ms);
         let switch = coord
             .switch
@@ -3260,6 +3280,7 @@ impl Render for HudPillWindow {
             &clock,
             has_iphone,
             chips,
+            mic_warning,
             completed_note.as_deref(),
             &routes,
         );
@@ -3663,6 +3684,17 @@ impl Render for HudPillWindow {
                         ),
                 )
                 .child(island_divider())
+                .when_some(mic_warning, |row, warning| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .px(px(CHIP_PX))
+                            .text_size(px(HUD_TEXT))
+                            .text_color(rgb(0xffca70))
+                            .child(warning.label()),
+                    )
+                    .child(island_divider())
+                })
                 .child({
                     // The trailing slot: switch chips or controls. The lead is pinned to the
                     // shell's left edge (`justify_start` below), so each item's fade follows how
@@ -3672,7 +3704,11 @@ impl Render for HudPillWindow {
                         + LEAD_TRAIL
                         + CHIP_GAP
                         + (1.0 + 2.0 * DIVIDER_MX)
-                        + CHIP_GAP;
+                        + CHIP_GAP
+                        + mic_warning.map_or(0.0, |warning| {
+                            measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
+                                + 2.0 * CHIP_PX + (1.0 + 2.0 * DIVIDER_MX) + 2.0 * CHIP_GAP
+                        });
                     let inner_now = render_width - 2.0 * ISLAND_INSET;
                     let alphas = |group_chips: bool, fade: f32| -> (Vec<f32>, f32) {
                         let widths = recording_trail_widths(window, group_chips, has_iphone);

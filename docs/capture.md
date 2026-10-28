@@ -8,6 +8,8 @@ A press of `⌥⇧S` (or the shortcut set in Settings), however long it's held, 
 
 Recording starts on the release rather than the press so nothing is captured while ⌥⇧ is still down (⇧ is the ink key), and Esc before the release cancels. The picker opens only from the menu's **Choose What to Record…** (or a chip), on the pointer's display and on the mode last used; there the shortcut records what it's on, and repeats of a held S never record (`handle_selection_key`'s `repeat`). While recording, a press finishes, ignoring one within 400 ms of the start.
 
+During a screen recording, the capsule shows **Mic unavailable** if the input cannot open, **Mic stopped** if samples stop after a startup grace period, or **Mic very quiet** after sustained near-silent captured samples. Quiet input does not prove broken hardware. The warning is inline beside the timer; the red screen-recording cue and the recording controls remain in place, and the screen capture continues. Finish stays visible when the normal controls are shown; during the existing 3.5-second switch-chip reveal, Cancel is shown instead. The warning clears after sustained input recovery or when recording ends. Phone and simulated captures have no microphone warning, and an audio animation does not determine input health.
+
 Carbon hotkeys and the key event tap report presses through `emit_capture_shortcut` (deduplicated within 90 ms); while a press waits for its release the UI loop polls the modifiers and takes Esc from the key tap (`tick_shortcut`, `take_escape`), so the release is seen whichever window has focus. Esc from the key tap also closes an open picker when another app has the keys.
 
 ## Mac captures (`src/capture.rs`)

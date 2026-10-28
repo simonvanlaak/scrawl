@@ -64,6 +64,30 @@ pub enum PillAction {
 pub struct PillSnapshot {
     pub pres: Pres,
     pub clock: String,
+    pub mic_warning: Option<crate::audio::InputWarning>,
     pub reduced_motion: bool,
     pub style: PillStyle,
+}
+
+/// The warning describes the microphone; the named action must match the visible control.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn mic_warning_accessibility_label(warning: crate::audio::InputWarning, chips: bool) -> String {
+    format!(
+        "Scrawl recording controls. {}. {} available",
+        warning.announcement(),
+        if chips { "Cancel recording" } else { "Finish recording" }
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mic_warning_accessibility_names_the_actual_control() {
+        let warning = crate::audio::InputWarning::Stopped;
+        assert!(mic_warning_accessibility_label(warning, true).contains("Cancel recording available"));
+        assert!(mic_warning_accessibility_label(warning, false).contains("Finish recording available"));
+        assert!(mic_warning_accessibility_label(warning, true).contains("screen recording continues"));
+    }
 }

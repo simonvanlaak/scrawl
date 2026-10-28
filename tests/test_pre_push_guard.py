@@ -12,7 +12,11 @@ HOOK = Path(__file__).resolve().parents[1] / ".githooks" / "pre-push"
 
 
 def run(*args, cwd, env=None, input=None):
-    return subprocess.run(args, cwd=cwd, env=env, input=input, text=True,
+    # Git exports its own GIT_DIR/GIT_WORK_TREE when it invokes a hook. Never
+    # let those redirect fixture commands back to the checkout being pushed.
+    clean_env = {key: value for key, value in (env or os.environ).items()
+                 if not key.startswith("GIT_")}
+    return subprocess.run(args, cwd=cwd, env=clean_env, input=input, text=True,
                           capture_output=True, check=False)
 
 
@@ -41,6 +45,13 @@ class PrePushGuardTests(unittest.TestCase):
         line = f"{local} {oid or self.head} {remote} {'0' * 40}\n"
         return run("sh", str(HOOK), "origin", "example.invalid:repo", cwd=self.repo,
                    env=env or self.env, input=line)
+
+    def test_fixture_commands_ignore_parent_hook_git_environment(self):
+        env = dict(self.env, GIT_DIR=str(HOOK.parents[1] / ".git"),
+                   GIT_WORK_TREE=str(HOOK.parents[1]))
+        result = run("git", "rev-parse", "--show-toplevel", cwd=self.repo, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(self.repo))
 
     def test_clean_head_requires_build_and_tests(self):
         result = self.push()

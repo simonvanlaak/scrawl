@@ -1,0 +1,59 @@
+#!/bin/sh
+# Git supplies one local/remote ref and object-ID pair per line on stdin.
+set -eu
+
+refs=$(cat)
+[ -n "$refs" ] || exit 0
+
+head=$(git rev-parse --verify HEAD) || exit 1
+printf '%s\n' "$refs" | while read -r local_ref local_oid remote_ref remote_oid; do
+    [ -n "$local_ref" ] && [ -n "$local_oid" ] &&
+        [ -n "$remote_ref" ] && [ -n "$remote_oid" ] || exit 1
+    case "$local_oid" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+    if [ "$local_oid" != "$head" ]; then
+        echo "pre-push: $local_ref is not the checked-out HEAD; push the tested HEAD from its own worktree" >&2
+        exit 1
+    fi
+done || exit 1
+
+# Deletion sends no new commit. All other pushes must test the precise tree
+# being sent, not an older build or a dirty checkout's different contents.
+if ! printf '%s\n' "$refs" | grep -qv ' 0000000000000000000000000000000000000000 '; then
+    exit 0
+fi
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    echo "pre-push: working tree is dirty; commit or remove changes before verification" >&2
+    exit 1
+fi
+if git ls-files -v | LC_ALL=C grep -q '^[a-zS] '; then
+    echo "pre-push: hidden index flags (assume-unchanged or skip-worktree); clear them before verification" >&2
+    exit 1
+fi
+
+echo "pre-push: verifying $head (build and full test suite)" >&2
+if [ -f tests/test_pre_push_guard.py ] &&
+    ! python3 -m unittest discover -s tests -p test_pre_push_guard.py; then
+    echo "pre-push: hook tests failed; push rejected" >&2
+    exit 1
+fi
+if command -v taskpolicy >/dev/null 2>&1; then
+    set -- taskpolicy -c utility cargo
+else
+    set -- cargo
+fi
+if ! "$@" build -j 3 --offline; then
+    echo "pre-push: build failed; push rejected" >&2
+    exit 1
+fi
+if ! "$@" test -j 3 --offline -- --test-threads=2; then
+    echo "pre-push: tests failed; push rejected" >&2
+    exit 1
+fi
+if [ "$(git rev-parse --verify HEAD)" != "$head" ] ||
+    [ -n "$(git status --porcelain --untracked-files=normal)" ] ||
+    git ls-files -v | LC_ALL=C grep -q '^[a-zS] '; then
+    echo "pre-push: working tree changed during verification; push rejected" >&2
+    exit 1
+fi

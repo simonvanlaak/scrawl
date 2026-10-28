@@ -889,6 +889,7 @@ mod tests {
             strokes: Vec::new(),
             marks: Vec::new(),
             events: Vec::new(),
+            interaction_telemetry: None,
             keyframes,
             contact_sheet: "contact-sheet.png".into(),
             video: None,

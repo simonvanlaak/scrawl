@@ -339,10 +339,11 @@ pub enum ElemId {
     MicWarning = 17,
     DividerWarning = 18,
     LiveWarning = 19,
+    Whiteboard = 20,
 }
 
 impl ElemId {
-    pub const COUNT: usize = 20;
+    pub const COUNT: usize = 21;
     pub const ROUTES: [ElemId; 2] = [Self::Route0, Self::Route1];
     pub const ALL: [ElemId; Self::COUNT] = [
         Self::Lead,
@@ -365,6 +366,7 @@ impl ElemId {
         Self::MicWarning,
         Self::DividerWarning,
         Self::LiveWarning,
+        Self::Whiteboard,
     ];
 
     pub const fn trace_key(self) -> &'static str {
@@ -389,6 +391,7 @@ impl ElemId {
             Self::MicWarning => "mic.warning",
             Self::DividerWarning => "divider.mic",
             Self::LiveWarning => "warning:no-words",
+            Self::Whiteboard => "whiteboard",
         }
     }
 
@@ -430,6 +433,7 @@ impl ElemId {
             Self::Record => "Record",
             Self::Close | Self::Cancel => "Cancel",
             Self::Finish => "Finish",
+            Self::Whiteboard => "Whiteboard",
             Self::Processing => "Processing",
             Self::DoneLead => "Completed",
             Self::Paste => "Paste",
@@ -526,6 +530,7 @@ pub struct Metrics {
     pub iphone: f32,
     pub record: f32,
     pub cancel: f32,
+    pub whiteboard: f32,
     pub finish: f32,
     pub warning: f32,
     pub processing: f32,
@@ -545,6 +550,7 @@ impl Default for Metrics {
             iphone: 43.0,
             record: 46.0,
             cancel: 44.0,
+            whiteboard: 69.0,
             finish: 38.0,
             warning: 77.0,
             processing: 78.0,
@@ -719,6 +725,13 @@ fn layout_of_warning(
                 raw.push((
                     ElemId::Cancel,
                     Metrics::chip_width(m.cancel),
+                    CHIP_CORE_ROUND,
+                    0.0,
+                    true,
+                ));
+                raw.push((
+                    ElemId::Whiteboard,
+                    Metrics::chip_width(m.whiteboard),
                     CHIP_CORE_ROUND,
                     0.0,
                     true,
@@ -2219,7 +2232,7 @@ mod tests {
     }
 
     #[test]
-    fn recording_controls_are_cancel_and_finish() {
+    fn recording_controls_include_whiteboard_between_cancel_and_finish() {
         let pres = Pres::Recording {
             chips: false,
             has_iphone: false,
@@ -2229,7 +2242,7 @@ mod tests {
         let ids: Vec<ElemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(
             ids,
-            [ElemId::Lead, ElemId::DividerLead, ElemId::Cancel, ElemId::Finish]
+            [ElemId::Lead, ElemId::DividerLead, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish]
         );
         let last = items.last().unwrap().rect;
         assert!((layout.r - (last[0] + last[2]) - ISLAND_INSET).abs() < 0.5);

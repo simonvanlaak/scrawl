@@ -24,6 +24,8 @@ Each app reserves the model for itself through `AssetInventory` (attributed to `
 
 ## Keyframe selection (`src/keyframes.rs`)
 
+Timed CLI screen captures deliberately have no click/Shift ink collector. Their manifest sets `interactionTelemetry: "videoOnly"` and their summary warns that a click visible in the movie is not a recorded event or click keyframe. Reprocessing and journal-backed recovery preserve the marker; old manifests and orphaned movies without it have unknown telemetry provenance. Use the app shortcut for click and ink context (subject to OS permissions). See `docs/capture.md`.
+
 - Only cut keyframes on real visual or input events (`Mark` strokes drawn while holding `⇧`, flags, `Click`/`Drag` inside the capture target or phone taps/swipes, `Laser` points, or settled `SceneChange` transitions)—never cut extra keyframes on speech pauses alone over a static screen.
 - The one speech exception is a spoken cue with measured word timings (SpeechAnalyzer; never a Hex transcript, whose times are `estimated`): "now", "here", "look", "watch" snap to a transition that starts within −0.3 s…+1.2 s of the word, else take the frame 150 ms after it. A cue keyframe is dropped unless its image differs (scene diff ≥ 0.03) from every keyframe already chosen, so speech over an unchanged screen still yields one frame. Demonstratives and "see"/"there" are weak (they rank with ordinary scene changes) because they are usually filler.
 - Budget (`keyframe_budget`): 6 up to 40 s, then one more per 20 s, at most 12 (each image costs a reading model ~1–1.5k tokens). Ordinary events fill only the first 6; the rest are for marks and coverage.
@@ -86,7 +88,7 @@ The old automatic OpenCode attachment policy is inactive. The full capture, keyf
 
 ## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
 
-On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes ask the agent to use the repository's `make-it-apparent` skill for a short video of a complex visible change, return the `recording.mp4` path or video link, and say what the video does not verify. If the skill is not installed or the agent cannot access the relevant screen, it should say so rather than claim a video exists. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.
+On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes ask the agent to use the repository's `make-it-apparent` skill for a short video of a complex visible change, inspect the finished recording, and embed or link a playable file where the viewer can access it. A local path alone only works on a shared filesystem. The agent names the exact build/OS and what the video does not verify; if the skill, recording surface or delivery is unavailable, it reports the blocker rather than calling the walkthrough done. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.
 
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`, `src/linux/clipboard.rs`)
 

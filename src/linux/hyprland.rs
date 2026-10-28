@@ -20,7 +20,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use crate::capture::{CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY};
+use crate::capture::{
+    CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, ShortcutConfig,
+};
 
 /// Hyprland's modifier bits, as `hyprctl binds` reports them in `modmask`.
 const MOD_SHIFT: u32 = 1;
@@ -191,6 +193,9 @@ fn key_name(key: &str) -> String {
     match key {
         "Enter" => "Return".into(),
         "Backspace" => "BackSpace".into(),
+        // The dedicated Copilot key arrives as evdev code 201 on Omarchy. Keep its
+        // display name in config while asking Hyprland for the physical key.
+        "Copilot" => "code:201".into(),
         other => other.to_owned(),
     }
 }
@@ -218,6 +223,115 @@ fn shell_quote(text: &str) -> String {
 
 fn description(id: &str) -> String {
     format!("Apparent: {id}")
+}
+
+/// Omarchy's Lua-backed binds hide their physical key in `hyprctl binds -j`. Read the
+/// narrow, user-owned source definition and require its description in the live table;
+/// neither an empty `key` nor a description alone identifies a working Copilot bind.
+fn external_record_from(source: &str, live: &str) -> Option<(ShortcutConfig, PathBuf)> {
+    let matches: Vec<_> = source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let command = line
+                .strip_prefix("o.bind(\"SUPER + SHIFT + code:201\", \"Apparent: record\", \"")?
+                .strip_suffix("\")")?;
+            let parts: Vec<_> = command.split_whitespace().collect();
+            let (prefix, path, action) = match parts.as_slice() {
+                [prefix @ .., path, "shortcut", "record"] => (prefix, path, true),
+                _ => (&[][..], &"", false),
+            };
+            let env = prefix.first().copied() == Some("env");
+            let assignments = if env { &prefix[1..] } else { prefix };
+            let safe_env = assignments.iter().all(|value| {
+                ["LD_PRELOAD", "GST_PLUGIN_PATH", "GPUI_X11_SCALE_FACTOR"]
+                    .iter()
+                    .any(|name| value.starts_with(&format!("{name}=")))
+                    && !value.contains([';', '&', '|', '$', '`', '(', ')', '<', '>', '\\'])
+            });
+            (action
+                && (env || assignments.is_empty())
+                && safe_env
+                && path.starts_with('/')
+                && path.ends_with("/apparent")
+                && !path.contains([';', '&', '|', '$', '`', '(', ')', '<', '>', '\\']))
+            .then(|| PathBuf::from(path))
+        })
+        .collect();
+    if matches.len() != 1 {
+        return None;
+    }
+    let binds: Vec<serde_json::Value> = serde_json::from_str(live).ok()?;
+    let live_matches: Vec<_> = binds
+        .iter()
+        .filter(|bind| {
+            bind["description"].as_str() == Some("Apparent: record")
+                && bind["modmask"].as_u64() == Some(u64::from(MOD_SUPER | MOD_SHIFT))
+                && bind["key"].as_str() == Some("")
+                && bind["keycode"].as_u64() == Some(0)
+        })
+        .collect();
+    (live_matches.len() == 1).then(|| {
+        (
+            ShortcutConfig {
+                key_code: 201,
+                carbon_modifiers: CARBON_CMD_KEY | CARBON_SHIFT_KEY,
+                label: "Super+Shift+Copilot".into(),
+            },
+            matches[0].clone(),
+        )
+    })
+}
+
+/// A permanent Omarchy recording binding overrides Apparent's built-in default.
+/// Re-evaluated at launch; edit/reload Hyprland and restart Apparent after changing it.
+pub fn external_record() -> Option<ShortcutConfig> {
+    static RECORD: std::sync::OnceLock<Option<ShortcutConfig>> = std::sync::OnceLock::new();
+    RECORD.get_or_init(external_record_live).clone()
+}
+
+fn external_record_live() -> Option<ShortcutConfig> {
+    if !running() {
+        return None;
+    }
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    let source = std::fs::read_to_string(config_home.join("hypr/bindings.lua")).ok()?;
+    let live = request("j/binds").ok()?;
+    let (record, command) = external_record_from(&source, &live)?;
+    use std::os::unix::fs::PermissionsExt;
+    let executable = std::fs::metadata(command).ok()?;
+    if !executable.is_file() || executable.permissions().mode() & 0o111 == 0 {
+        return None;
+    }
+    // An old Apparent process may have registered the built-in default in this same
+    // compositor session. Remove only that described chord, never a different owner's S.
+    if remove_obsolete_default_in(&live).is_err() {
+        return None;
+    }
+    Some(record)
+}
+
+fn remove_obsolete_default_in(live: &str) -> Result<()> {
+    if obsolete_default_in(live) {
+        unbind(CARBON_OPTION_KEY | CARBON_SHIFT_KEY, "S")?;
+    }
+    Ok(())
+}
+
+fn obsolete_default_in(live: &str) -> bool {
+    serde_json::from_str::<Vec<serde_json::Value>>(live)
+        .ok()
+        .is_some_and(|binds| {
+            binds.iter().any(|bind| {
+                bind["description"].as_str() == Some("Apparent: record")
+                    && bind["modmask"].as_u64() == Some(u64::from(MOD_ALT | MOD_SHIFT))
+                    && bind["key"]
+                        .as_str()
+                        .is_some_and(|key| key.eq_ignore_ascii_case("S"))
+            })
+        })
 }
 
 fn command(id: &str) -> Result<String> {
@@ -248,11 +362,16 @@ fn existing(binds_json: &str, mask: u32, key: &str, id: &str) -> Existing {
         let same_mask = bind["modmask"].as_u64() == Some(u64::from(mask));
         let same_key = bind["key"]
             .as_str()
-            .is_some_and(|k| k.eq_ignore_ascii_case(&key_name(key)));
+            .is_some_and(|k| k.eq_ignore_ascii_case(&key_name(key)))
+            || (key == "Copilot"
+                && bind["key"].as_str() == Some("")
+                && bind["keycode"].as_u64() == Some(0));
         if !(same_mask && same_key) {
             continue;
         }
-        if bind["description"].as_str() == Some(ours.as_str()) {
+        // Lua-backed code binds are opaque here. A description cannot prove which code
+        // was pressed; only external_record_from can establish the matching source.
+        if key != "Copilot" && bind["description"].as_str() == Some(ours.as_str()) {
             return Existing::Apparent;
         }
         found = Existing::Other;
@@ -279,21 +398,35 @@ pub fn float_whiteboard() -> Result<()> {
     }) else {
         bail!("Whiteboard window not mapped yet");
     };
-    if board["floating"].as_bool() == Some(true) {
+    let floating = board["floating"].as_bool() == Some(true);
+    let fullscreen = board["fullscreen"].as_u64().unwrap_or(0) != 0;
+    if floating && !fullscreen {
         return Ok(());
     }
     let address = board["address"]
         .as_str()
         .context("Whiteboard window has no address")?;
     match syntax()? {
-        Syntax::Lua => run(&format!(
-            "eval local w = hl.get_windows({{ title = 'Apparent Whiteboard' }})[1]; \
-             assert(w and w.address == '{}', 'Whiteboard window changed'); \
-             hl.dispatch(hl.dsp.window.float({{ action = 'set', window = w }})); \
-             hl.dispatch(hl.dsp.window.resize({{ x = 560, y = 460, window = w }}))",
-            address
-        ))?,
+        Syntax::Lua => {
+            let unset_fullscreen = if fullscreen {
+                "hl.dispatch(hl.dsp.window.fullscreen_state({ internal = 0, client = 0, action = 'set', window = w })); "
+            } else {
+                ""
+            };
+            run(&format!(
+                "eval local w = hl.get_windows({{ title = 'Apparent Whiteboard' }})[1]; \
+                 assert(w and w.address == '{}', 'Whiteboard window changed'); \
+                 {}hl.dispatch(hl.dsp.window.float({{ action = 'set', window = w }})); \
+                 hl.dispatch(hl.dsp.window.resize({{ x = 560, y = 460, window = w }}))",
+                address, unset_fullscreen
+            ))?;
+        }
         Syntax::Hyprlang => {
+            if fullscreen {
+                // The old dispatcher targets the focused window, not the address in its
+                // arguments. Never risk changing another window's fullscreen state.
+                bail!("Cannot safely unfullscreen the whiteboard on this Hyprland version");
+            }
             run(&format!("dispatch setfloating address:{address}"))?;
             run(&format!(
                 "dispatch resizewindowpixel exact 560 460,address:{address}"
@@ -332,6 +465,20 @@ pub fn bind(id: &'static str, chord: Option<(u32, &str)>) -> Result<()> {
         return Ok(());
     };
     let mask = modmask(modifiers);
+    if key == "Copilot"
+        && external_record().is_some_and(|record| record.carbon_modifiers == modifiers)
+        && id == "record"
+    {
+        // A config reload restores permanent binds, including the old default.
+        // external_record() is cached, so recheck the source and live bind before
+        // treating it as working or removing the obsolete chord after a reload.
+        if external_record_live().is_none() {
+            bail!(
+                "Hyprland-managed Record shortcut is no longer active; restart Apparent after changing its binding"
+            );
+        }
+        return Ok(());
+    }
     match existing(&request("j/binds")?, mask, key, id) {
         Existing::Apparent => return Ok(()),
         Existing::Other => bail!("{} is already bound", lua_chord(mask, key)),
@@ -460,6 +607,10 @@ mod tests {
             "SUPER + ALT + Return"
         );
         assert_eq!(lua_chord(0, "F5"), "F5");
+        assert_eq!(
+            lua_chord(MOD_SUPER | MOD_SHIFT, "Copilot"),
+            "SUPER + SHIFT + code:201"
+        );
     }
 
     #[test]
@@ -554,5 +705,40 @@ mod tests {
         assert_eq!(existing(binds, 9, "v", "paste"), Existing::Other);
         assert_eq!(existing(binds, 9, "S", "record"), Existing::Free);
         assert_eq!(existing("not json", 9, "S", "record"), Existing::Free);
+        // Hyprland reports a code:201 Lua binding with an empty key and keycode 0.
+        let copilot = r#"[{"modmask":65,"key":"","keycode":0,"description":"Apparent: record"}]"#;
+        assert_eq!(existing(copilot, 65, "Copilot", "record"), Existing::Other);
+        assert_eq!(existing(copilot, 65, "S", "record"), Existing::Free);
+    }
+
+    #[test]
+    fn external_copilot_requires_source_and_live_binding() {
+        let source = "o.bind(\"SUPER + SHIFT + code:201\", \"Apparent: record\", \"env LD_PRELOAD=/usr/lib/libcblas.so.3 GST_PLUGIN_PATH=/home/simon/.local/share/scrawl-setup/gstreamer-1.28.8 GPUI_X11_SCALE_FACTOR=1.6666667 /home/simon/.local/bin/apparent shortcut record\")";
+        let live = r#"[{"modmask":65,"key":"","keycode":0,"description":"Apparent: record"}]"#;
+        assert_eq!(external_record_from(source, live).unwrap().0.key_code, 201);
+        assert!(external_record_from(source, "[]").is_none());
+        assert!(external_record_from("", live).is_none());
+        assert!(external_record_from(&source.replacen("env ", "false && ", 1), live).is_none());
+        assert!(
+            external_record_from(&source.replace("shortcut record", "shortcut paste"), live)
+                .is_none()
+        );
+        assert!(
+            external_record_from(source, &format!("[{0},{0}]", &live[1..live.len() - 1])).is_none()
+        );
+        assert!(!obsolete_default_in(live));
+        assert!(obsolete_default_in(
+            r#"[{"description":"Apparent: record","modmask":9,"key":"S"}]"#
+        ));
+        let both = format!(
+            "[{},{{\"description\":\"Apparent: record\",\"modmask\":9,\"key\":\"S\"}}]",
+            &live[1..live.len() - 1]
+        );
+        // Hyprland restores both permanent binds on reload. Reconciliation must
+        // recognize the obsolete chord even while the Copilot bind is still present.
+        assert!(obsolete_default_in(&both));
+        assert!(!obsolete_default_in(
+            r#"[{"description":"Other app","modmask":9,"key":"S"}]"#
+        ));
     }
 }

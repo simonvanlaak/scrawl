@@ -102,6 +102,8 @@ struct Shortcut {
     command: bool,
     is_default: bool,
     #[serde(default)]
+    externally_managed: bool,
+    #[serde(default)]
     clearable: bool,
     recording: bool,
     error: Option<String>,
@@ -994,7 +996,7 @@ impl SettingsWindow {
         let recording = shortcut.recording;
         let live = self.live;
         let lit = |on: bool, held: bool| if recording { held } else { on };
-        let reset_hidden = shortcut.is_default || recording;
+        let reset_hidden = shortcut.is_default || recording || shortcut.externally_managed;
         let off = shortcut.label.is_empty();
         let clear_shown = shortcut.clearable && !off && !recording;
         let caption_text = if recording && shortcut.clearable {
@@ -1006,6 +1008,8 @@ impl SettingsWindow {
             "Press the new shortcut. Esc cancels.".to_owned()
         } else if let Some(error) = &shortcut.error {
             error.clone()
+        } else if shortcut.externally_managed {
+            "Set in Hyprland bindings.lua. Edit that binding, then restart Apparent.".to_owned()
         } else if kind == ShortcutKind::Paste {
             "Pastes the last capture into the app in front.".to_owned()
         } else {
@@ -1027,6 +1031,26 @@ impl SettingsWindow {
                 .text_size(px(14.0))
                 .text_color(theme.secondary())
                 .child("Set shortcut")
+        } else if shortcut.externally_managed {
+            // A system-owned chord is a label, not a five-key recorder. Show only
+            // the keys that are actually held, so the key stays visible in a
+            // narrow tiled Settings window.
+            div()
+                .flex()
+                .gap(px(6.0))
+                .when(shortcut.shift, |d| {
+                    d.child(keycap(theme, "Shift", None, true, false))
+                })
+                .when(shortcut.control, |d| {
+                    d.child(keycap(theme, "Ctrl", None, true, false))
+                })
+                .when(shortcut.command, |d| {
+                    d.child(keycap(theme, "Super", None, true, false))
+                })
+                .when(shortcut.option, |d| {
+                    d.child(keycap(theme, "Alt", None, true, false))
+                })
+                .child(keycap(theme, &key, None, true, true))
         } else if WINDOWS || LINUX {
             let super_key = if LINUX { "Super" } else { "Win" };
             div()
@@ -1106,18 +1130,20 @@ impl SettingsWindow {
                     } else {
                         theme.group_line()
                     })
-                    .cursor_pointer()
+                    .when(!shortcut.externally_managed, |d| d.cursor_pointer())
                     .child(caps)
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        cx.stop_propagation();
-                        view.menu = None;
-                        if recording {
-                            view.act(Action::CancelShortcut);
-                        } else {
-                            window.focus(&view.focus);
-                            view.act(Action::RecordShortcut { kind });
-                        }
-                    })),
+                    .when(!shortcut.externally_managed, |d| {
+                        d.on_click(cx.listener(move |view, _, window, cx| {
+                            cx.stop_propagation();
+                            view.menu = None;
+                            if recording {
+                                view.act(Action::CancelShortcut);
+                            } else {
+                                window.focus(&view.focus);
+                                view.act(Action::RecordShortcut { kind });
+                            }
+                        }))
+                    }),
             )
             .child(
                 div()

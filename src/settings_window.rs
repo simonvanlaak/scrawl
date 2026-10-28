@@ -251,6 +251,9 @@ impl Theme {
     fn control(self) -> Rgba {
         self.ink(if self.dark { 0.08 } else { 0.06 })
     }
+    fn control_hover(self) -> Rgba {
+        rgb(if self.dark { 0x4a4051 } else { 0xd4cbdc })
+    }
     fn control_line(self) -> Rgba {
         self.ink(0.1)
     }
@@ -713,7 +716,7 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text())
         .when(enabled, |d| {
-            d.cursor_pointer().hover(|s| s.bg(theme.selection()))
+            d.cursor_pointer().hover(|s| s.bg(theme.control_hover()))
         })
         .when(!enabled, |d| d.opacity(0.45))
         .child(title.to_owned())
@@ -1698,9 +1701,17 @@ impl SettingsWindow {
                 .into_any_element()]))
                 .child(caption(theme, "Stable follows reviewed Linux releases. Main follows checked builds from every main commit. Updates install on the next launch.", false));
         }
-        column = column
-            .child(header(theme, "Enjoying Apparent?"))
-            .child(group(theme, vec![row(
+        column = column.child(div().h(px(14.0))).child(group(theme, vec![div()
+            .py(px(11.0))
+            .flex()
+            .flex_col()
+            .child(div()
+                .px(px(12.0))
+                .text_size(px(13.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.secondary())
+                .child("Enjoying Apparent?"))
+            .child(row(
                 theme,
                 "Support the project",
                 true,
@@ -1708,9 +1719,14 @@ impl SettingsWindow {
                     .on_click(|_, _, _| {
                         let _ = crate::handoff::open_path(std::path::Path::new("https://github.com/tryapparent/apparent"));
                     }),
-            )
-            .into_any_element()]))
-            .child(caption(theme, "A GitHub star won’t fix your bugs, but it will make our day.", false));
+            ))
+            .child(div()
+                .px(px(12.0))
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .text_color(theme.secondary())
+                .child("A GitHub star won’t fix your bugs, but it will make our day."))
+            .into_any_element()]));
         column
             .child(header(theme, "Links"))
             .child(group(

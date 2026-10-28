@@ -1153,15 +1153,26 @@ struct SettingsView: View {
       if !state.updates {
         SettingsCaption(text: "Updates work in the installed Apparent.app.")
       }
-      SettingsHeader("Enjoying Apparent?")
+      Color.clear.frame(height: 14)
       SettingsGroup {
-        SettingsRow(title: "Support the project") {
-          SettingsButton(title: "Star on GitHub") {
-            NSWorkspace.shared.open(URL(string: "https://github.com/tryapparent/apparent")!)
+        VStack(alignment: .leading, spacing: 0) {
+          Text("Enjoying Apparent?")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(theme.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 11)
+          SettingsRow(title: "Support the project") {
+            SettingsButton(title: "Star on GitHub") {
+              NSWorkspace.shared.open(URL(string: "https://github.com/tryapparent/apparent")!)
+            }
           }
+          Text("A GitHub star won’t fix your bugs, but it will make our day.")
+            .font(.system(size: 12))
+            .foregroundStyle(theme.secondary)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 11)
         }
       }
-      SettingsCaption(text: "A GitHub star won’t fix your bugs, but it will make our day.")
       SettingsHeader("Links")
       SettingsGroup {
         link("Website", "app.tryapparent.com", "https://app.tryapparent.com")

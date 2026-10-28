@@ -59,13 +59,36 @@ jobs:
           tag="preview-mac-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           dmg="dist/Apparent-Preview-${version}-arm64.dmg"
           zip="dist/Apparent-Preview-${version}-arm64.zip"
-          # Never replace an existing tag or release, including on a re-run.
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
-            echo "Tag already exists: ${tag}" >&2
+          # A maintainer may pre-create this exact tag when the workflow token
+          # cannot tag a commit that changes .github/workflows. Never overwrite
+          # a release or accept a tag pointing at a different commit.
+          error="$RUNNER_TEMP/preview-api-error"
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" >/dev/null 2>"$error"; then
+            echo "Release already exists: ${tag}" >&2
+            exit 1
+          elif ! grep -qE '\(HTTP 404\)$' "$error"; then
+            echo "Could not check whether release ${tag} exists" >&2
             exit 1
           fi
+          tag_type=''
+          existing_sha=''
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+              --jq '.object.type + " " + .object.sha' > "$RUNNER_TEMP/preview-tag" 2>"$error"; then
+            read -r tag_type existing_sha < "$RUNNER_TEMP/preview-tag"
+          elif ! grep -qE '\(HTTP 404\)$' "$error"; then
+            echo "Could not inspect tag ${tag}" >&2
+            exit 1
+          fi
+          # Only lightweight tags are accepted; annotated tags point at a tag
+          # object and need a second dereference, which we deliberately avoid.
+          if [[ -n "$existing_sha" && ( "$tag_type" != "commit" || "$existing_sha" != "$GITHUB_SHA" ) ]]; then
+            echo "Tag ${tag} does not point to the run commit" >&2
+            exit 1
+          fi
+          tag_args=(--target "$GITHUB_SHA")
+          if [[ -n "$existing_sha" ]]; then tag_args=(--verify-tag); fi
           gh release create "$tag" "$dmg" "$dmg.sha256" "$zip" \
-            --target "$GITHUB_SHA" \
+            "${tag_args[@]}" \
             --title "Apparent Mac preview ${version}" \
             --notes "Temporary Mac release. Ad-hoc code signed, not notarized: initial installation may require Privacy & Security → Open Anyway. Later updates use the preview Sparkle feed and EdDSA signature. This does not update Kit's Developer ID signed app." \
             --prerelease --latest=false
@@ -80,6 +103,13 @@ jobs:
           zip="dist/Apparent-Preview-${version}-arm64.zip"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$zip")"
           curl --fail --location --head --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors "$url" > /dev/null
+          # A moved tag must never become an update offered by the live feed.
+          tag_target=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '.object.type + " " + .object.sha')
+          if [[ "$tag_target" != "commit ${GITHUB_SHA}" ]]; then
+            echo "Tag moved before appcast publication: ${tag}" >&2
+            exit 1
+          fi
           branch=preview-mac-feed
           if ! gh api "repos/${GITHUB_REPOSITORY}/branches/${branch}" > /dev/null 2>&1; then
             gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \

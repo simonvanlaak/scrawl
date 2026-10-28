@@ -648,7 +648,8 @@ pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
         let mb_data = NSData::with_bytes(mb_bytes);
         if let Some(img) = NSImage::initWithData(NSImage::alloc(), &mb_data) {
             img.setSize(NSSize::new(18.0, 18.0));
-            img.setTemplate(true);
+            // Keep both approved brand colors in the menu bar icon.
+            img.setTemplate(false);
             button.setImage(Some(&img));
         } else {
             button.setTitle(&NSString::from_str("✎"));

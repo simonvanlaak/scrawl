@@ -26,9 +26,7 @@ cp -f "${REPO_DIR}/target/debug/apparent" "${MACOS_DIR}/apparent"
 cp -f "${REPO_DIR}/target/debug/apparent-helper" "${MACOS_DIR}/apparent-helper"
 chmod +x "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
 
-if [[ -f "${REPO_DIR}/assets/Apparent.icns" ]]; then
-  cp -f "${REPO_DIR}/assets/Apparent.icns" "${RESOURCES_DIR}/Apparent.icns"
-fi
+cp -f "${REPO_DIR}/assets/Apparent.icns" "${RESOURCES_DIR}/Apparent.icns"
 cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${RESOURCES_DIR}/HostGrotesk-Variable.ttf"
 cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${RESOURCES_DIR}/apparent-wordmark.png"
 

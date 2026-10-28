@@ -32,9 +32,7 @@ rm -rf "$app" "$staging"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks" "$staging"
 cp target/release/apparent target/release/apparent-helper "$app/Contents/MacOS/"
 chmod +x "$app/Contents/MacOS/apparent" "$app/Contents/MacOS/apparent-helper"
-if [[ -f assets/Apparent.icns ]]; then
-  cp assets/Apparent.icns "$app/Contents/Resources/Apparent.icns"
-fi
+cp assets/Apparent.icns "$app/Contents/Resources/Apparent.icns"
 cp assets/fonts/HostGrotesk-Variable.ttf "$app/Contents/Resources/HostGrotesk-Variable.ttf"
 cp assets/brand/apparent-wordmark.png "$app/Contents/Resources/apparent-wordmark.png"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"

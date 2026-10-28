@@ -2,6 +2,12 @@
 
 Show an agent a problem instead of describing it.
 
+Want your agent to install the desktop app? Copy this prompt into your agent chat:
+
+```markdown
+Install the Apparent desktop app from [Apparent releases](https://github.com/tryapparent/apparent/releases), then launch it.
+```
+
 Press a shortcut (`⌥⇧S`) and Apparent starts recording the screen. Talk, click around, draw on it, and press `⌥⇧S` again to finish. Apparent records the screen, your voice, and your marks, then packs them into a compact bundle: a contact sheet of annotated keyframes (`contact-sheet.png`), individual full-resolution keyframes (`frames/frame-XX.png`), a time-aligned transcript and interaction timeline (`summary.md`), and a structured manifest (`apparent.json`).
 
 ## Install

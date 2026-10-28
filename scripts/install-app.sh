@@ -29,6 +29,7 @@ chmod +x "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
 cp -f "${REPO_DIR}/assets/Apparent.icns" "${RESOURCES_DIR}/Apparent.icns"
 cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${RESOURCES_DIR}/HostGrotesk-Variable.ttf"
 cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${RESOURCES_DIR}/apparent-wordmark.png"
+cp -f "${REPO_DIR}/assets/brand/apparent-a.png" "${RESOURCES_DIR}/apparent-a.png"
 
 if [[ -n "${SPARKLE_DIR}" && -d "${SPARKLE_DIR}/Sparkle.framework" ]]; then
   rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework"

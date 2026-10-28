@@ -1351,7 +1351,9 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
       CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
     }
     let pane = option("--pane", in: arguments).flatMap(SettingsPane.init(rawValue:)) ?? .general
-    let model = SettingsModel(pane: pane, icon: Onboarding.loadIcon(option("--icon", in: arguments)))
+    let icon = option("--icon", in: arguments).flatMap(NSImage.init(contentsOfFile:))
+      ?? Bundle.main.url(forResource: "apparent-a", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+    let model = SettingsModel(pane: pane, icon: icon)
     if let dir = option("--render", in: arguments) {
       MainActor.assumeIsolated {
         if arguments.contains("--shortcut-clip") {

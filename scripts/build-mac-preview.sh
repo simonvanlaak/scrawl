@@ -35,6 +35,7 @@ chmod +x "$app/Contents/MacOS/apparent" "$app/Contents/MacOS/apparent-helper"
 cp assets/Apparent.icns "$app/Contents/Resources/Apparent.icns"
 cp assets/fonts/HostGrotesk-Variable.ttf "$app/Contents/Resources/HostGrotesk-Variable.ttf"
 cp assets/brand/apparent-wordmark.png "$app/Contents/Resources/apparent-wordmark.png"
+cp assets/brand/apparent-a.png "$app/Contents/Resources/apparent-a.png"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
 
 cat > "$app/Contents/Info.plist" <<PLIST

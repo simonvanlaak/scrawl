@@ -4063,6 +4063,13 @@ kbd {
 .story-hero h1 { max-width: 760px; margin: 0; font-size: clamp(52px, 7vw, 92px); letter-spacing: -.07em; }
 .story-intro > p:not(.release-note) { max-width: 540px; margin: 24px 0 0; font-size: 21px; line-height: 1.35; }
 .story-intro .btn-primary { min-height: 48px; margin-top: 32px; border-radius: 0; }
+.agent-install { width: min(100%, 700px); margin-top: 24px; text-align: left; }
+.agent-install-label { display: block; margin-bottom: 8px; color: #524a55; font-size: 13px; font-weight: 650; }
+.agent-install-prompt { display: flex; align-items: center; gap: 16px; padding: 15px 16px; border: 1px solid #b7a5d8; background: #f5f0e8; }
+.agent-install-prompt p { flex: 1; margin: 0; font-size: 14px; line-height: 1.45; }
+.agent-install-prompt .copy { flex: none; min-width: 64px; height: 36px; border: 1px solid #7a58c7; border-radius: 0; background: #fff; color: #342d40; }
+.agent-install-prompt .copy:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
+.agent-install-prompt .copy:hover { background: #e7e0ee; }
 .story-intro .release-note { margin: 12px 0 0; color: #524a55; font-size: 13px; line-height: 1.4; }
 .nav .nav-dl { border-radius: 0; }
 .nav a:focus-visible, .story-hero a:focus-visible, .foot a:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
@@ -4073,4 +4080,5 @@ kbd {
   .story-hero { min-height: calc(100svh - 62px); padding: 62px 20px; }
   .story-hero h1 { font-size: clamp(48px, 11vw, 72px); }
   .story-intro > p:not(.release-note) { font-size: 18px; }
+  .agent-install-prompt { align-items: flex-start; flex-direction: column; gap: 12px; }
 }

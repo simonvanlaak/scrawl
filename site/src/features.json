@@ -836,6 +836,16 @@
     },
 
     {
+      "id": "agent-install-prompt",
+      "group": "install",
+      "name": "Copy an agent install prompt",
+      "says": "The landing page and README offer a one-sentence prompt asking an agent to install and launch the supported desktop app from official releases.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
+      "added": "2026-10-28",
+      "docs": ["README.md#apparent"]
+    },
+    {
       "id": "mac-download",
       "group": "install",
       "name": "Mac download and Homebrew",

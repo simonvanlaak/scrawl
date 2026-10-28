@@ -22,7 +22,7 @@ class PreviewReleaseTest(unittest.TestCase):
             (root / "scripts").mkdir()
             (root / "bin").mkdir()
             for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png",
-                          "Apparent.icns"):
+                          "Apparent.icns", "brand/apparent-a.png"):
                 destination = root / "assets" / asset
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes((ROOT / "assets" / asset).read_bytes())
@@ -64,7 +64,7 @@ class PreviewReleaseTest(unittest.TestCase):
             self.assertEqual(info["SUPublicEDKey"], env["APPARENT_PREVIEW_PUBLIC_KEY"])
             self.assertTrue((root / "dist/Apparent Preview.app/Contents/Frameworks/Sparkle.framework").is_dir())
             for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png",
-                          "Apparent.icns"):
+                          "Apparent.icns", "brand/apparent-a.png"):
                 self.assertEqual(
                     (root / "dist/Apparent Preview.app/Contents/Resources" / Path(asset).name).read_bytes(),
                     (root / "assets" / asset).read_bytes(),

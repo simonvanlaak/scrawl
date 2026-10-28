@@ -117,6 +117,16 @@ impl ApparentBundle {
     pub fn has_screen_click(&self) -> bool {
         self.events.iter().any(|event| matches!(event, InteractionEvent::Click { .. }))
     }
+
+    /// A local capture can write an empty WAV header before any microphone samples arrive.
+    /// File existence alone does not mean audio was captured or recognition ran.
+    pub fn has_microphone_samples(&self, dir: &std::path::Path) -> bool {
+        self.audio.as_ref().is_some_and(|file| {
+            hound::WavReader::open(dir.join(file)).is_ok_and(|mut reader| {
+                reader.samples::<i16>().next().is_some_and(|sample| sample.is_ok())
+            })
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

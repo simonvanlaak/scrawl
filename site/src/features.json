@@ -370,8 +370,8 @@
       "id": "review-window",
       "group": "finish",
       "name": "Review window",
-      "says": "Open Latest Capture shows the bundle's keyframes and timeline in a window.",
-      "status": "stable@0.3.4",
+      "says": "Open Latest Capture pairs the selected frame with its words and offers the full contact sheet, transcript and timeline in the same window.",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["README.md#usage"]
     },

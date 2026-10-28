@@ -3,8 +3,8 @@
 //! messages: `state`, `request`, `open-settings`, `hide`, `show` and `close`. Its buttons report
 //! the same actions (`continue`, `back`, `later`, `close`, `grant:<permission>`).
 //!
-//! Windows uses it in process (`onboarding::Session`); macOS still runs the SwiftUI window in
-//! `apparent-helper onboarding`.
+//! Linux uses it in process (`onboarding::Session`); macOS runs the SwiftUI window in
+//! `apparent-helper onboarding`. Retained Windows rendering keeps its old theme.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -20,15 +20,65 @@ use serde::Deserialize;
 
 use crate::onboarding::{Event, Permission, Status, Step};
 
-const CANVAS: u32 = 0x161616;
-const SURFACE: u32 = 0x1d1d1d;
-const RAISED: u32 = 0x252525;
-const LINE: u32 = 0xffffff17;
-const TEXT: u32 = 0xf2f2f2;
-const SOFT: u32 = 0xd0d0d0;
-const MUTED: u32 = 0x969696;
-const INK: u32 = 0xff3b30;
-const POSITIVE: u32 = 0x69d89f;
+fn system_dark() -> bool {
+    #[cfg(target_os = "linux")]
+    { crate::linux::appearance::is_dark() }
+    #[cfg(not(target_os = "linux"))]
+    { false }
+}
+
+fn colors() -> Colors {
+    let dark = system_dark();
+    if cfg!(target_os = "windows") {
+        Colors {
+            canvas: 0x161616,
+            surface: 0x1d1d1d,
+            raised: 0x252525,
+            line: 0xffffff17,
+            text: 0xf2f2f2,
+            soft: 0xd0d0d0,
+            muted: 0x969696,
+            ink: 0xff3b30,
+            positive: 0x69d89f,
+        }
+    } else if dark {
+        Colors {
+            canvas: 0x17151b,
+            surface: 0x211e27,
+            raised: 0x2b2732,
+            line: 0xffffff24,
+            text: 0xf3eff8,
+            soft: 0xd5cfdf,
+            muted: 0xa9a1b4,
+            ink: 0xb69aff,
+            positive: 0x77d6a5,
+        }
+    } else {
+        Colors {
+            canvas: 0xf5f0e8,
+            surface: 0xe7e0ee,
+            raised: 0xe7e0ee,
+            line: 0x0201022e,
+            text: 0x020102,
+            soft: 0x020102,
+            muted: 0x020102,
+            ink: 0x7a58c7,
+            positive: 0x146b43,
+        }
+    }
+}
+
+struct Colors {
+    canvas: u32,
+    surface: u32,
+    raised: u32,
+    line: u32,
+    text: u32,
+    soft: u32,
+    muted: u32,
+    ink: u32,
+    positive: u32,
+}
 const WIDTH: f32 = 620.0;
 /// The Windows caption strip (drag area and close button) above the page.
 const CAPTION_H: f32 = if cfg!(target_os = "windows") {
@@ -121,15 +171,21 @@ impl ViewState {
 
     fn height(&self) -> f32 {
         let body = if self.fix {
-            318.0 + 58.0 * self.rows().len().max(1) as f32
+            if cfg!(target_os = "windows") { 318.0 + 58.0 * self.rows().len().max(1) as f32 }
+            else { 360.0 + 76.0 * self.rows().len().max(1) as f32 }
         } else {
-            500.0
+            if cfg!(target_os = "windows") { 500.0 } else { 600.0 }
         };
         body + CAPTION_H
     }
 }
 
 fn open(request: Request, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::appearance::initialize();
+        crate::linux::appearance::watch();
+    }
     for handle in cx.windows() {
         if handle.downcast::<OnboardingWindow>().is_some() {
             let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -144,7 +200,7 @@ fn open(request: Request, cx: &mut App) {
         }
         early.push(message);
     }
-    let height = first.as_ref().map_or(500.0 + CAPTION_H, ViewState::height);
+    let height = first.as_ref().map_or(if cfg!(target_os = "windows") { 500.0 + CAPTION_H } else { 600.0 + CAPTION_H }, ViewState::height);
     let bounds = Bounds::centered(None, size(px(WIDTH), px(height)), cx);
     let Request {
         commands,
@@ -156,7 +212,7 @@ fn open(request: Request, cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Welcome to Apparent".into()),
+                title: Some(if cfg!(target_os = "windows") { "Welcome to Apparent" } else { "Welcome to apparent" }.into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(14.0), px(14.0))),
             }),
@@ -186,6 +242,12 @@ fn open(request: Request, cx: &mut App) {
                     step_since: Instant::now(),
                     forward: true,
                     opened: Instant::now(),
+                    appearance_revision: {
+                        #[cfg(target_os = "linux")]
+                        { crate::linux::appearance::revision() }
+                        #[cfg(not(target_os = "linux"))]
+                        { 0 }
+                    },
                 };
                 for message in early {
                     view.handle(message, None);
@@ -213,8 +275,18 @@ fn open(request: Request, cx: &mut App) {
                                     window.remove_window();
                                     return false;
                                 }
-                                // A new view (a grant that arrived later, say) repaints too.
-                                if arrived || view.animating() {
+                                let appearance_changed = {
+                                    #[cfg(target_os = "linux")]
+                                    {
+                                        let revision = crate::linux::appearance::revision();
+                                        let changed = revision != view.appearance_revision;
+                                        view.appearance_revision = revision;
+                                        changed
+                                    }
+                                    #[cfg(not(target_os = "linux"))]
+                                    { false }
+                                };
+                                if arrived || view.animating() || appearance_changed {
                                     cx.notify();
                                 }
                                 true
@@ -242,6 +314,7 @@ pub struct OnboardingWindow {
     step_since: Instant,
     forward: bool,
     opened: Instant,
+    appearance_revision: u64,
 }
 
 impl OnboardingWindow {
@@ -347,6 +420,7 @@ fn number_word(n: usize) -> String {
 
 fn keycap(label: &str, lit: bool, size: f32) -> Div {
     let wide = label.chars().count() > 1;
+    let windows = cfg!(target_os = "windows");
     div()
         .flex_none()
         .min_w(px(size))
@@ -355,27 +429,27 @@ fn keycap(label: &str, lit: bool, size: f32) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(size * 0.24))
+        .rounded(px(if windows { size * 0.24 } else { 2.0 }))
         .bg(linear_gradient(
             180.0,
-            linear_color_stop(hsla(0.0, 0.0, 1.0, 0.13), 0.0),
-            linear_color_stop(hsla(0.0, 0.0, 1.0, 0.06), 1.0),
+            linear_color_stop(if windows { rgba(0xffffff21) } else { rgb(colors().raised) }, 0.0),
+            linear_color_stop(if windows { rgba(0xffffff0f) } else { rgb(colors().raised) }, 1.0),
         ))
         .border_1()
         .border_color(if lit {
-            rgba(0xff3b30b3)
+            rgba(if windows { 0xff3b30b3 } else { (colors().ink << 8) | 0xff })
         } else {
-            rgba(0xffffff24)
+            rgba(if windows { 0xffffff24 } else { colors().line })
         })
-        .shadow(vec![BoxShadow {
+        .when(windows, |d| d.shadow(vec![BoxShadow {
             color: hsla(0.0, 0.0, 0.0, 0.45),
             offset: point(px(0.0), px(2.0)),
             blur_radius: px(1.5),
             spread_radius: px(0.0),
-        }])
-        .text_size(px(size * 0.44))
+        }]))
+        .text_size(px(if windows { size * 0.44 } else { 18.0 }))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(if lit { INK } else { TEXT }))
+        .text_color(rgb(if lit { colors().ink } else { colors().text }))
         .child(label.to_owned())
 }
 
@@ -391,36 +465,37 @@ fn keycaps(label: &str, lit_mods: bool, size: f32) -> Div {
 }
 
 fn primary_button(id: &'static str, title: &str, enabled: bool) -> Stateful<Div> {
+    let windows = cfg!(target_os = "windows");
     div()
         .id(id)
         .min_w(px(180.0))
-        .h(px(34.0))
+        .h(px(if windows { 34.0 } else { 42.0 }))
         .px(px(22.0))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(9.0))
-        .bg(rgb(if enabled { INK } else { RAISED }))
+        .rounded(px(if windows { 9.0 } else { 2.0 }))
+        .bg(rgb(if enabled { colors().ink } else { colors().raised }))
         .border_1()
         .border_color(if enabled {
-            rgba(0xffffff29)
+            rgba(if windows { 0xffffff29 } else { colors().line })
         } else {
             rgba(0xffffff14)
         })
         .when(enabled, |d| {
+            let d = d.cursor_pointer().hover(|s| s.opacity(0.92));
+            if !windows { return d; }
             d.shadow(vec![BoxShadow {
                 color: hsla(0.0, 1.0, 0.59, 0.35),
                 offset: point(px(0.0), px(3.0)),
                 blur_radius: px(10.0),
                 spread_radius: px(0.0),
             }])
-            .cursor_pointer()
-            .hover(|s| s.opacity(0.92))
         })
         .when(!enabled, |d| d.opacity(0.55))
-        .text_size(px(13.0))
+        .text_size(px(if windows { 13.0 } else { 18.0 }))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(0xffffff))
+        .text_color(rgb(if windows { 0xffffff } else { colors().canvas }))
         .child(title.to_owned())
 }
 
@@ -431,29 +506,35 @@ fn quiet_button(id: &'static str, title: &str) -> Stateful<Div> {
         .py(px(4.0))
         .rounded(px(6.0))
         .cursor_pointer()
-        .hover(|s| s.text_color(rgb(SOFT)))
-        .text_size(px(12.0))
+        .hover(|s| s.text_color(rgb(colors().soft)))
+        .text_size(px(if cfg!(target_os = "windows") { 12.0 } else { 18.0 }))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(MUTED))
+        .text_color(rgb(colors().muted))
         .child(title.to_owned())
 }
 
 fn row_button(id: SharedString, title: &str) -> Stateful<Div> {
     div()
         .id(id)
-        .h(px(26.0))
+        .h(px(if cfg!(target_os = "windows") { 26.0 } else { 32.0 }))
         .px(px(12.0))
         .flex()
         .items_center()
-        .rounded_full()
-        .bg(rgba(0xffffff1a))
+        .rounded(px(if cfg!(target_os = "windows") { 13.0 } else { 2.0 }))
+        .bg(if cfg!(target_os = "windows") { rgba(0xffffff1a) } else { rgb(colors().raised) })
         .border_1()
-        .border_color(rgba(0xffffff24))
+        .border_color(rgba(if cfg!(target_os = "windows") { 0xffffff24 } else { colors().line }))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(0xffffff26)))
-        .text_size(px(12.0))
+        .hover(|s| s.bg(if cfg!(target_os = "windows") {
+            rgba(0xffffff26)
+        } else if system_dark() {
+            rgb(0x51405e)
+        } else {
+            rgb(0xb7a5d8)
+        }))
+        .text_size(px(if cfg!(target_os = "windows") { 12.0 } else { 16.0 }))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT))
+        .text_color(rgb(colors().text))
         .child(title.to_owned())
 }
 
@@ -466,7 +547,7 @@ fn icon(path: &'static str, size: f32, color: u32) -> gpui::Svg {
 }
 
 fn spinner(phase: f32) -> gpui::Svg {
-    icon(crate::icons::SPINNER, 11.0, MUTED).with_transformation(Transformation::rotate(radians(
+    icon(crate::icons::SPINNER, 11.0, colors().muted).with_transformation(Transformation::rotate(radians(
         phase / 0.9 * std::f32::consts::TAU,
     )))
 }
@@ -503,9 +584,9 @@ impl OnboardingWindow {
             .child(
                 div()
                     .pt(px(18.0))
-                    .text_size(px(22.0))
+                    .text_size(px(if cfg!(target_os = "windows") { 22.0 } else { 36.0 }))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT))
+                    .text_color(rgb(colors().text))
                     .child(title.to_owned()),
             )
             .child(
@@ -513,14 +594,23 @@ impl OnboardingWindow {
                     .pt(px(10.0))
                     .max_w(px(440.0))
                     .text_center()
-                    .text_size(px(13.5))
-                    .line_height(px(13.5 * 1.25 + 3.0))
-                    .text_color(rgba(0xd0d0d0d9))
+                    .text_size(px(if cfg!(target_os = "windows") { 13.5 } else { 18.0 }))
+                    .line_height(px(if cfg!(target_os = "windows") { 20.0 } else { 27.0 }))
+                    .text_color(if cfg!(target_os = "windows") { rgba(0xd0d0d0d9) } else { rgb(colors().text) })
                     .child(body),
             )
     }
 
     fn welcome_art(&self, phase: f32) -> AnyElement {
+        if !cfg!(target_os = "windows") {
+            return img(Arc::new(Image::from_bytes(
+                ImageFormat::Png,
+                include_bytes!("../assets/brand/apparent-wordmark.png").to_vec(),
+            )))
+            .w(px(208.0))
+            .h(px(48.0))
+            .into_any_element();
+        }
         let bob = -3.0 * (phase / 4.0 * std::f32::consts::TAU).sin();
         div()
             .relative()
@@ -569,7 +659,11 @@ impl OnboardingWindow {
                     .h(px(86.0 + 60.0 * t))
                     .rounded(px(22.0))
                     .border_2()
-                    .border_color(hsla(0.0, 1.0, 0.59, 0.55 * (1.0 - t))),
+                    .border_color(if cfg!(target_os = "windows") {
+                        hsla(0.0, 1.0, 0.59, 0.55 * (1.0 - t))
+                    } else {
+                        hsla(262.0 / 360.0, 0.48, 0.56, 0.55 * (1.0 - t))
+                    }),
             )
             .child(keycaps(&self.shortcut, true, 52.0))
             .into_any_element()
@@ -589,25 +683,25 @@ impl OnboardingWindow {
                     .absolute()
                     .size(px(150.0))
                     .rounded_full()
-                    .bg(rgba(0x69d89f14))
-                    .shadow(vec![BoxShadow {
+                    .bg(rgba(if cfg!(target_os = "windows") { 0x69d89f14 } else { 0x146b4314 }))
+                    .when(cfg!(target_os = "windows"), |d| d.shadow(vec![BoxShadow {
                         color: hsla(150.0 / 360.0, 0.58, 0.63, 0.16),
                         offset: point(px(0.0), px(0.0)),
                         blur_radius: px(30.0),
                         spread_radius: px(0.0),
-                    }]),
+                    }])),
             )
             .child(
                 div()
                     .size(px(104.0 * (0.96 + 0.04 * appear)))
                     .rounded_full()
-                    .bg(rgba(0x69d89f24))
+                    .bg(rgba(if cfg!(target_os = "windows") { 0x69d89f24 } else { 0x146b4324 }))
                     .border_1()
-                    .border_color(rgba(0x69d89f8c))
+                    .border_color(rgba(if cfg!(target_os = "windows") { 0x69d89f8c } else { 0x146b438c }))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(crate::icons::CHECK, 42.0, POSITIVE)),
+                    .child(icon(crate::icons::CHECK, 42.0, colors().positive)),
             )
             .into_any_element()
     }
@@ -638,13 +732,13 @@ impl OnboardingWindow {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .text_size(px(13.5))
-                        .line_height(px(13.5 * 1.25 + 2.5))
-                        .text_color(rgba(0xd0d0d0e6))
+                        .text_size(px(if cfg!(target_os = "windows") { 13.5 } else { 18.0 }))
+                        .line_height(px(if cfg!(target_os = "windows") { 19.0 } else { 27.0 }))
+                        .text_color(if cfg!(target_os = "windows") { rgba(0xd0d0d0e6) } else { rgb(colors().text) })
                         .child(text),
                 )
         };
-        let divider = || div().ml(px(16.0)).h(px(1.0)).bg(rgba(LINE));
+        let divider = || div().ml(px(16.0)).h(px(1.0)).bg(rgba(colors().line));
         div()
             .flex()
             .flex_col()
@@ -653,17 +747,17 @@ impl OnboardingWindow {
                 div()
                     .text_size(px(22.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT))
+                    .text_color(rgb(colors().text))
                     .text_center()
-                    .child("How Apparent works"),
+                    .child(if cfg!(target_os = "windows") { "How Apparent works" } else { "How apparent works" }),
             )
             .child(
                 div()
                     .mt(px(24.0))
-                    .rounded(px(12.0))
-                    .bg(rgb(SURFACE))
+                    .rounded(px(if cfg!(target_os = "windows") { 12.0 } else { 2.0 }))
+                    .bg(rgb(colors().surface))
                     .border_1()
-                    .border_color(rgba(LINE))
+                    .border_color(rgba(colors().line))
                     .flex()
                     .flex_col()
                     .child(row(
@@ -676,7 +770,8 @@ impl OnboardingWindow {
                     .child(row(
                         keycap(&shift, true, 26.0),
                         format!(
-                            "Talk as you go, and hold {shift} and drag to draw in red. Apparent records your clicks too."
+                            "Talk as you go, and hold {shift} and drag to draw in red. {} records your clicks too.",
+                            if cfg!(target_os = "windows") { "Apparent" } else { "apparent" }
                         ),
                     ))
                     .child(divider())
@@ -740,7 +835,7 @@ impl OnboardingWindow {
                 .flex()
                 .items_center()
                 .gap(px(5.0))
-                .child(icon(crate::icons::REOPEN, 12.0, POSITIVE))
+                .child(icon(crate::icons::REOPEN, 12.0, colors().positive))
                 .child("On after reopen")
                 .into_any_element()
         } else if granted {
@@ -748,7 +843,7 @@ impl OnboardingWindow {
                 .flex()
                 .items_center()
                 .gap(px(5.0))
-                .child(icon(crate::icons::CHECK_CIRCLE, 13.0, POSITIVE))
+                .child(icon(crate::icons::CHECK_CIRCLE, 13.0, colors().positive))
                 .child("Allowed")
                 .into_any_element()
         } else {
@@ -789,7 +884,7 @@ impl OnboardingWindow {
                 .into_any_element()
         };
         div()
-            .h(px(58.0))
+            .h(px(if cfg!(target_os = "windows") { 58.0 } else { 76.0 }))
             .px(px(14.0))
             .flex()
             .items_center()
@@ -800,14 +895,14 @@ impl OnboardingWindow {
                     .flex_none()
                     .rounded_full()
                     .bg(if granted {
-                        rgba(0x69d89f24)
+                        rgba(if cfg!(target_os = "windows") { 0x69d89f24 } else { 0x146b4324 })
                     } else {
-                        rgba(0xffffff12)
+                        if cfg!(target_os = "windows") { rgba(0xffffff12) } else { rgb(colors().raised) }
                     })
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(glyph, 14.0, if granted { POSITIVE } else { TEXT })),
+                    .child(icon(glyph, 14.0, if granted { colors().positive } else { colors().text })),
             )
             .child(
                 div()
@@ -821,9 +916,9 @@ impl OnboardingWindow {
                             .flex()
                             .items_center()
                             .gap(px(6.0))
-                            .text_size(px(13.0))
+                            .text_size(px(if cfg!(target_os = "windows") { 13.0 } else { 18.0 }))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT))
+                            .text_color(rgb(colors().text))
                             .child(name)
                             .when(optional, |d| {
                                 d.child(
@@ -831,22 +926,22 @@ impl OnboardingWindow {
                                         .px(px(6.0))
                                         .py(px(1.5))
                                         .rounded_full()
-                                        .bg(rgba(0xffffff12))
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(MUTED))
+                                        .bg(if cfg!(target_os = "windows") { rgba(0xffffff12) } else { rgb(colors().raised) })
+                                        .text_size(px(if cfg!(target_os = "windows") { 10.0 } else { 16.0 }))
+                                        .text_color(rgb(colors().muted))
                                         .child("Optional"),
                                 )
                             }),
                     )
-                    .child(div().text_size(px(12.0)).text_color(rgb(MUTED)).child(why)),
+                    .child(div().text_size(px(if cfg!(target_os = "windows") { 12.0 } else { 18.0 })).text_color(rgb(colors().muted)).child(why)),
             )
             .child(
                 div()
                     .flex_none()
                     .ml(px(8.0))
-                    .text_size(px(12.0))
+                    .text_size(px(if cfg!(target_os = "windows") { 12.0 } else { 18.0 }))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(SOFT))
+                    .text_color(rgb(colors().soft))
                     .child(trailing),
             )
     }
@@ -857,7 +952,7 @@ impl OnboardingWindow {
         let note = if cfg!(not(target_os = "macos")) {
             ""
         } else {
-            "If macOS offers to Quit & Reopen Apparent, choose Later; Apparent reopens once when you're done."
+            "If macOS offers to Quit & Reopen apparent, choose Later; apparent reopens once when you're done."
         };
         let settings = if windows {
             "Windows Settings"
@@ -870,7 +965,7 @@ impl OnboardingWindow {
         let (title, body) = if state.fix && only(Permission::Camera) {
             (
                 "Camera, for your iPhone".to_owned(),
-                "macOS treats a cabled iPhone's screen as a camera, so Apparent needs Camera access to show and record it. Pick iPhone again once it's on.".to_owned(),
+                "macOS treats a cabled iPhone's screen as a camera, so apparent needs Camera access to show and record it. Pick iPhone again once it's on.".to_owned(),
             )
         } else if state.fix && only(Permission::Accessibility) && cfg!(target_os = "linux") {
             (
@@ -892,7 +987,7 @@ impl OnboardingWindow {
             )
         } else if state.fix {
             (
-                "Apparent can't record yet".to_owned(),
+                if windows { "Apparent can't record yet" } else { "apparent can't record yet" }.to_owned(),
                 format!("Turn these on, then press {} again. {note}", self.shortcut)
                     .trim_end()
                     .to_owned(),
@@ -903,7 +998,8 @@ impl OnboardingWindow {
             let count = rows.iter().filter(|r| r.required).count();
             (
                 format!(
-                    "Apparent needs {} permission{}",
+                    "{} needs {} permission{}",
+                    if windows { "Apparent" } else { "apparent" },
                     number_word(count),
                     if count == 1 { "" } else { "s" }
                 ),
@@ -914,24 +1010,24 @@ impl OnboardingWindow {
         };
         let mut card = div()
             .mt(px(22.0))
-            .rounded(px(12.0))
-            .bg(rgb(SURFACE))
+            .rounded(px(if cfg!(target_os = "windows") { 12.0 } else { 2.0 }))
+            .bg(rgb(colors().surface))
             .border_1()
-            .border_color(rgba(LINE))
+            .border_color(rgba(colors().line))
             .flex()
             .flex_col();
         for (i, row) in rows.iter().enumerate() {
             if i > 0 {
-                card = card.child(div().ml(px(14.0)).h(px(1.0)).bg(rgba(LINE)));
+                card = card.child(div().ml(px(14.0)).h(px(1.0)).bg(rgba(colors().line)));
             }
             card = card.child(self.permission_row(row, phase, cx));
         }
         #[cfg(target_os = "linux")]
         if rows.iter().any(|r| r.permission == Permission::Accessibility && r.status != Status::Granted) {
             card = card.child(
-                div().px(px(14.0)).pb(px(14.0)).text_size(px(12.0)).text_color(rgb(SOFT))
+                div().px(px(14.0)).pb(px(14.0)).text_size(px(18.0)).text_color(rgb(colors().soft))
                     .child(div().child(crate::linux::privacy::INPUT_COMMAND))
-                    .child(div().mt(px(6.0)).child("Run this in a terminal, then log out and back in. Reopen Apparent to continue; access is checked automatically."))
+                    .child(div().mt(px(6.0)).child("Run this in a terminal, then log out and back in. Reopen apparent to continue; access is checked automatically."))
             );
         }
         div()
@@ -941,9 +1037,9 @@ impl OnboardingWindow {
             .pt(px(44.0))
             .child(
                 div()
-                    .text_size(px(22.0))
+                    .text_size(px(if cfg!(target_os = "windows") { 22.0 } else { 36.0 }))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT))
+                    .text_color(rgb(colors().text))
                     .child(title),
             )
             .child(
@@ -951,9 +1047,9 @@ impl OnboardingWindow {
                     .pt(px(8.0))
                     .max_w(px(480.0))
                     .text_center()
-                    .text_size(px(13.0))
-                    .line_height(px(13.0 * 1.25 + 3.0))
-                    .text_color(rgba(0xd0d0d0d9))
+                    .text_size(px(if cfg!(target_os = "windows") { 13.0 } else { 18.0 }))
+                    .line_height(px(if cfg!(target_os = "windows") { 19.0 } else { 27.0 }))
+                    .text_color(if cfg!(target_os = "windows") { rgba(0xd0d0d0d9) } else { rgb(colors().text) })
                     .child(body),
             )
             .child(card.w_full())
@@ -1013,7 +1109,7 @@ impl OnboardingWindow {
                                 .h(px(6.0))
                                 .w(px(if current { 16.0 } else { 6.0 }))
                                 .rounded_full()
-                                .bg(if current { rgb(INK) } else { rgba(0xffffff2e) })
+                                .bg(if current { rgb(colors().ink) } else { rgba(if cfg!(target_os = "windows") { 0xffffff2e } else { colors().line }) })
                         }),
                     ))
                 })
@@ -1067,7 +1163,7 @@ impl OnboardingWindow {
                         .justify_center()
                         .font_family(glyph_font)
                         .text_size(px(10.0))
-                        .text_color(rgb(TEXT))
+                        .text_color(rgb(colors().text))
                         .hover(|s| s.bg(rgb(0xc42b1c)).text_color(rgb(0xffffff)))
                         .child("\u{E8BB}"),
                 ),
@@ -1083,7 +1179,7 @@ impl Render for OnboardingWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(CANVAS))
+            .bg(rgb(colors().canvas))
             .child(
                 // The red glow from the top edge, behind the caption too.
                 div()
@@ -1091,15 +1187,15 @@ impl Render for OnboardingWindow {
                     .top_0()
                     .left_0()
                     .w_full()
-                    .h(px(360.0))
+                    .h(px(if cfg!(target_os = "windows") { 360.0 } else { 0.0 }))
                     .bg(linear_gradient(
                         180.0,
                         linear_color_stop(hsla(3.0 / 360.0, 1.0, 0.59, 0.10), 0.0),
                         linear_color_stop(hsla(3.0 / 360.0, 1.0, 0.59, 0.0), 1.0),
                     )),
             )
-            .text_color(rgb(TEXT))
-            .font_family(".SystemUIFont")
+            .text_color(rgb(colors().text))
+            .font_family(if cfg!(target_os = "windows") { ".SystemUIFont" } else { "Host Grotesk" })
             .children(self.caption(cx));
         let Some(state) = self.state.clone() else {
             return root;
@@ -1115,8 +1211,12 @@ impl Render for OnboardingWindow {
                 .centered(
                     self.welcome_art(phase),
                     200.0,
-                    "Welcome to Apparent",
-                    "Record your screen and your voice, draw on what matters, and paste it all into your agent.".into(),
+                    if cfg!(target_os = "windows") { "Welcome to Apparent" } else { "Welcome to apparent" },
+                    if cfg!(target_os = "windows") {
+                        "Record your screen and your voice, draw on what matters, and paste it all into your agent."
+                    } else {
+                        "Record your screen and voice. Mark what matters, then paste the capture into your agent."
+                    }.into(),
                 )
                 .into_any_element(),
             Step::HowItWorks => self.how_it_works().into_any_element(),
@@ -1125,7 +1225,7 @@ impl Render for OnboardingWindow {
                 .centered(
                     self.try_art(phase),
                     164.0,
-                    "Make your first Apparent",
+                    if cfg!(target_os = "windows") { "Make your first Apparent" } else { "Make your first capture" },
                     format!("Tap {s} now. Talk, point at something, then tap {s} again."),
                 )
                 .into_any_element(),
@@ -1135,7 +1235,8 @@ impl Render for OnboardingWindow {
                     164.0,
                     "It's on your clipboard",
                     format!(
-                        "Press {paste} in your agent. Apparent stays in the {tray}; tap {s} whenever you want to show something."
+                        "Press {paste} in your agent. {} stays in the {tray}; tap {s} whenever you want to show something.",
+                        if cfg!(target_os = "windows") { "Apparent" } else { "apparent" }
                     ),
                 )
                 .into_any_element(),
@@ -1181,6 +1282,7 @@ mod tests {
             step_since: now,
             forward: true,
             opened: now,
+            appearance_revision: 0,
         };
         let mut flow = Flow::tour(Step::Welcome, Some(Grants::default()));
         let granted = Grants {

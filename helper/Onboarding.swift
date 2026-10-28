@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import CoreText
 import Speech
 import SwiftUI
 
@@ -127,7 +128,7 @@ struct SpeechStatus: Decodable, Equatable {
     // macOS 15: the error says what to turn on (Speech Recognition, or Dictation's model).
     case "needsPermission": return error ?? "Speech Recognition isn't allowed yet, so captures have no transcript."
     case "failed" where engine == "SFSpeechRecognizer" && error != nil: return error
-    case "failed": return "The speech model didn't download. Apparent will try again."
+    case "failed": return "The speech model didn't download. apparent will try again."
     default: return nil
     }
   }
@@ -153,8 +154,11 @@ struct OnboardingState: Decodable, Equatable {
 
   /// A fix is shorter than the tour: it has no art or page dots.
   var height: CGFloat {
-    guard fix else { return 500 }
-    return CGFloat(318 + 58 * rows.count)
+    guard fix else {
+      // Four permission rows fit alone, but the picker note needs its own space.
+      return 600 + (step == "permissions" && pickerNote && rows.count >= 4 ? 76 : 0)
+    }
+    return CGFloat(360 + 76 * rows.count)
   }
 }
 
@@ -199,6 +203,27 @@ enum Palette {
   static let muted = Color(red: 0x96 / 255, green: 0x96 / 255, blue: 0x96 / 255)
   static let ink = Color(red: 1.0, green: 0x3B / 255, blue: 0x30 / 255)
   static let positive = Color(red: 0x69 / 255, green: 0xD8 / 255, blue: 0x9F / 255)
+}
+
+// The product demonstration keeps Palette; the tour follows the system appearance.
+enum TourBrand {
+  private static func adaptive(light: UInt32, dark: UInt32) -> NSColor {
+    NSColor(name: nil) { appearance in
+      let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+      return NSColor(red: CGFloat((value >> 16) & 255) / 255,
+                     green: CGFloat((value >> 8) & 255) / 255,
+                     blue: CGFloat(value & 255) / 255, alpha: 1)
+    }
+  }
+  static let paperNS = adaptive(light: 0xf5f0e8, dark: 0x201b24)
+  static let paper = Color(nsColor: paperNS)
+  static let stock = Color(nsColor: adaptive(light: 0xe7e0ee, dark: 0x302a36))
+  static let carbon = Color(nsColor: adaptive(light: 0x020102, dark: 0xf5f0e8))
+  static let lilac = Color(red: 183/255, green: 165/255, blue: 216/255)
+  static let signal = Color(red: 122/255, green: 88/255, blue: 199/255)
+  static let success = Color(nsColor: adaptive(light: 0x146b43, dark: 0x69d89f))
+  static let buttonText = Color(red: 245/255, green: 240/255, blue: 232/255)
+  static let line = carbon.opacity(0.18)
 }
 
 // MARK: Motion (springs by duration and bounce, no bounce; reduced motion keeps a short fade)
@@ -289,20 +314,19 @@ struct PrimaryButton: View {
   let action: () -> Void
 
   var body: some View {
-    let red = enabled && !quiet
+    let prominent = enabled && !quiet
     Button(action: action) {
       ZStack {
         Text(title)
           .id(title)
           .transition(Motion.swap)
       }
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(quiet ? Palette.text : .white)
+        .font(.custom("HostGrotesk_700wght", size: 18))
+        .foregroundStyle(prominent ? TourBrand.buttonText : TourBrand.carbon)
         .padding(.horizontal, 22)
-        .frame(minWidth: 180, minHeight: 34)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(red ? Palette.ink : quiet ? Color.white.opacity(0.10) : Palette.raised))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.white.opacity(red || quiet ? 0.16 : 0.08), lineWidth: 1))
-        .shadow(color: Palette.ink.opacity(red ? 0.35 : 0), radius: 10, y: 3)
+        .frame(minWidth: 180, minHeight: 42)
+        .background(prominent ? TourBrand.signal : TourBrand.stock)
+        .overlay(Rectangle().strokeBorder(TourBrand.line, lineWidth: 1))
         .opacity(enabled ? 1 : 0.55)
         .contentShape(Rectangle())
     }
@@ -319,8 +343,8 @@ struct QuietButton: View {
   var body: some View {
     Button(action: action) {
       Text(title)
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(Palette.muted)
+        .font(.custom("HostGrotesk_500wght", size: 18))
+        .foregroundStyle(TourBrand.carbon)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -338,13 +362,13 @@ struct RowButton: View {
   var body: some View {
     Button(action: action) {
       Text(title)
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(prominent ? .white : Palette.text)
+        .font(.custom("HostGrotesk_700wght", size: 18))
+        .foregroundStyle(prominent ? TourBrand.buttonText : TourBrand.carbon)
         .padding(.horizontal, 12)
-        .frame(height: 26)
-        .background(Capsule().fill(prominent ? Palette.ink : Color.white.opacity(0.10)))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(prominent ? 0.18 : 0.14), lineWidth: 1))
-        .contentShape(Capsule())
+        .frame(height: 32)
+        .background(prominent ? TourBrand.signal : TourBrand.paper)
+        .overlay(Rectangle().strokeBorder(TourBrand.line, lineWidth: 1))
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
   }
@@ -389,7 +413,7 @@ struct TryArt: View {
     Looping(period: 2.2) { t in
       ZStack {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-          .strokeBorder(Palette.ink.opacity(0.55 * (1 - t)), lineWidth: 2)
+          .strokeBorder(TourBrand.signal.opacity(0.55 * (1 - t)), lineWidth: 2)
           .frame(width: 200 + 60 * t, height: 86 + 60 * t)
         Keycaps(shortcut: shortcut, litMods: true, size: 52)
       }
@@ -403,10 +427,8 @@ struct DoneArt: View {
 
   var body: some View {
     ZStack {
-      Circle().fill(Palette.positive.opacity(0.16)).frame(width: 150, height: 150).blur(radius: 30)
-      Circle().fill(Palette.positive.opacity(0.14)).frame(width: 104, height: 104)
-        .overlay(Circle().strokeBorder(Palette.positive.opacity(0.55), lineWidth: 1))
-      Image(systemName: "checkmark").font(.system(size: 42, weight: .semibold)).foregroundStyle(Palette.positive)
+      Circle().fill(TourBrand.success.opacity(0.14)).frame(width: 104, height: 104)
+      Image(systemName: "checkmark").font(.system(size: 42, weight: .semibold)).foregroundStyle(TourBrand.success)
     }
     .scaleEffect(shown || reduceMotion ? 1 : 0.96)
     .opacity(shown ? 1 : 0)
@@ -460,35 +482,35 @@ struct PermissionRowView: View {
     HStack(spacing: 12) {
       ZStack {
         Circle()
-          .fill(row.granted ? Palette.positive.opacity(0.14) : Color.white.opacity(0.07))
+          .fill(row.granted ? TourBrand.success.opacity(0.14) : TourBrand.paper)
         Image(systemName: info.symbol)
           .font(.system(size: 14, weight: .medium))
-          .foregroundStyle(row.granted ? Palette.positive : Palette.text)
+          .foregroundStyle(row.granted ? TourBrand.success : TourBrand.carbon)
       }
       .frame(width: 32, height: 32)
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
           Text(info.name)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Palette.text)
+            .font(.custom("HostGrotesk_700wght", size: 18))
+            .foregroundStyle(TourBrand.carbon)
           if showOptional && !row.required {
             Text("Optional")
-              .font(.system(size: 10, weight: .semibold))
-              .foregroundStyle(Palette.muted)
+              .font(.custom("HostGrotesk_500wght", size: 16))
+              .foregroundStyle(TourBrand.carbon)
               .padding(.horizontal, 6)
               .padding(.vertical, 1.5)
-              .background(Capsule().fill(Color.white.opacity(0.07)))
+              .background(TourBrand.paper)
           }
         }
         Text(row.granted ? detail ?? info.why : info.why)
-          .font(.system(size: 12))
-          .foregroundStyle(Palette.muted)
+          .font(.custom("HostGrotesk_400wght", size: 18))
+          .foregroundStyle(TourBrand.carbon)
       }
       Spacer(minLength: 8)
       trailing
     }
     .padding(.horizontal, 14)
-    .frame(height: 58)
+    .frame(height: 76)
   }
 
   @ViewBuilder private var trailing: some View {
@@ -496,15 +518,15 @@ struct PermissionRowView: View {
       if row.granted && row.reopening {
         HStack(spacing: 6) {
           Spinner()
-          Text("Reopening Apparent")
+          Text("Reopening apparent")
         }
         .transition(Motion.swap)
       } else if row.granted && row.relaunch {
-        RowButton(title: "Reopen Apparent", prominent: true, action: grant)
+        RowButton(title: "Reopen apparent", prominent: true, action: grant)
           .transition(Motion.swap)
       } else if row.granted {
         HStack(spacing: 5) {
-          Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.positive)
+          Image(systemName: "checkmark.circle.fill").foregroundStyle(TourBrand.success)
           Text("Allowed")
         }
         .transition(Motion.swap)
@@ -523,8 +545,8 @@ struct PermissionRowView: View {
         .transition(Motion.swap)
       }
     }
-    .font(.system(size: 12, weight: .medium))
-    .foregroundStyle(Palette.soft)
+    .font(.custom("HostGrotesk_500wght", size: 18))
+    .foregroundStyle(TourBrand.carbon)
   }
 }
 
@@ -537,8 +559,7 @@ struct OnboardingView: View {
 
   var body: some View {
     ZStack {
-      Palette.canvas
-      RadialGradient(colors: [Palette.ink.opacity(0.10), .clear], center: .top, startRadius: 0, endRadius: 360)
+      TourBrand.paper
       VStack(spacing: 0) {
         page
           .id(state.step)
@@ -554,7 +575,6 @@ struct OnboardingView: View {
     .animation(Motion.state, value: state.ready)
     .animation(Motion.state, value: state.tutorialSeen)
     .frame(width: 620, height: state.height)
-    .preferredColorScheme(.dark)
   }
 
   @ViewBuilder private var page: some View {
@@ -569,9 +589,9 @@ struct OnboardingView: View {
   private var centered: some View {
     let s = model.shortcut
     let (title, body): (String, String) = switch state.step {
-    case "try-it": ("Make your first Apparent", "Tap \(s) now. Talk, point at something, then tap \(s) again.")
-    case "done": ("It's on your clipboard", "Press ⌘V in your agent. Apparent stays in the menu bar; tap \(s) whenever you want to show something.")
-    default: ("Welcome to Apparent", "Record your screen and your voice, draw on what matters, and paste it all into your agent.")
+    case "try-it": ("Make your first capture", "Tap \(s) now. Talk, point at something, then tap \(s) again.")
+    case "done": ("It's on your clipboard", "Press ⌘V in your agent. apparent stays in the menu bar; tap \(s) whenever you want to show something.")
+    default: ("Welcome to apparent", "Record your screen and voice. Mark what matters, then paste the capture into your agent.")
     }
     return VStack(spacing: 0) {
       Spacer().frame(height: 34)
@@ -579,19 +599,19 @@ struct OnboardingView: View {
         switch state.step {
         case "try-it": TryArt(shortcut: s)
         case "done": DoneArt()
-        default: WelcomeArt(icon: model.icon)
+        default: brandWordmark
         }
       }
       .frame(height: 200)
       Text(title)
-        .font(.system(size: 22, weight: .semibold))
-        .foregroundStyle(Palette.text)
+        .font(.custom("HostGrotesk_700wght", size: 36))
+        .foregroundStyle(TourBrand.carbon)
         .multilineTextAlignment(.center)
         .padding(.top, 18)
       Text(body)
-        .font(.system(size: 13.5))
+        .font(.custom("HostGrotesk_400wght", size: 18))
         .lineSpacing(3)
-        .foregroundStyle(Palette.soft.opacity(0.85))
+        .foregroundStyle(TourBrand.carbon)
         .multilineTextAlignment(.center)
         .frame(maxWidth: 440)
         .fixedSize(horizontal: false, vertical: true)
@@ -602,7 +622,7 @@ struct OnboardingView: View {
         }
         if state.speech?.notReady == true, let line = state.speech?.line {
           note((state.speech?.state == "downloading" || state.speech?.state == "checking") && state.speech?.engine != "SFSpeechRecognizer"
-            ? "The speech model is still downloading\(state.speech?.percentInParens ?? ""). If it isn't done when you finish, Apparent adds the transcript to your capture afterwards."
+            ? "The speech model is still downloading\(state.speech?.percentInParens ?? ""). If it isn't done when you finish, apparent adds the transcript to your capture afterwards."
             : line)
             .padding(.top, 12)
         }
@@ -610,17 +630,29 @@ struct OnboardingView: View {
     }
   }
 
+  private var brandWordmark: some View {
+    let url = Bundle.main.url(forResource: "apparent-wordmark", withExtension: "png")
+      ?? URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "assets/brand/apparent-wordmark.png")
+    return Group {
+      if let image = NSImage(contentsOf: url) {
+        Image(nsImage: image).resizable().frame(width: 208, height: 48)
+      }
+    }
+    .accessibilityLabel("apparent")
+  }
+
   private func heading(_ title: String, _ body: String?) -> some View {
     VStack(spacing: 0) {
       Text(title)
-        .font(.system(size: 22, weight: .semibold))
-        .foregroundStyle(Palette.text)
+        .font(.custom("HostGrotesk_700wght", size: 36))
+        .foregroundStyle(TourBrand.carbon)
         .multilineTextAlignment(.center)
       if let body {
         Text(body)
-          .font(.system(size: 13))
+          .font(.custom("HostGrotesk_400wght", size: 18))
           .lineSpacing(3)
-          .foregroundStyle(Palette.soft.opacity(0.85))
+          .foregroundStyle(TourBrand.carbon)
           .multilineTextAlignment(.center)
           .frame(maxWidth: 480)
           .fixedSize(horizontal: false, vertical: true)
@@ -632,19 +664,19 @@ struct OnboardingView: View {
 
   private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     VStack(spacing: 0, content: content)
-      .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.surface))
-      .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.line, lineWidth: 1))
+      .background(TourBrand.stock)
+      .overlay(Rectangle().strokeBorder(TourBrand.line, lineWidth: 1))
   }
 
   private var divider: some View {
-    Rectangle().fill(Palette.line).frame(height: 1).padding(.leading, 16)
+    Rectangle().fill(TourBrand.line).frame(height: 1).padding(.leading, 16)
   }
 
   private var howItWorks: some View {
     VStack(spacing: 0) {
-      Text("How Apparent works")
-        .font(.system(size: 22, weight: .semibold))
-        .foregroundStyle(Palette.text)
+      Text("How apparent works")
+        .font(.custom("HostGrotesk_700wght", size: 36))
+        .foregroundStyle(TourBrand.carbon)
         .padding(.top, 34)
       HowItWorksDemo(shortcut: model.shortcut, paste: model.paste, tutorial: state.tutorial, send: model.send)
         .padding(.top, 16)
@@ -654,13 +686,13 @@ struct OnboardingView: View {
   private var permissionsCopy: (title: String, body: String?) {
     let required = state.rows.filter(\.required).count
     if state.fix, state.rows.count == 1, state.rows.first?.permission == "camera" {
-      return ("Camera, for your iPhone", "macOS treats a cabled iPhone's screen as a camera, so Apparent needs Camera access to show and record it. Pick iPhone again once it's on.")
+      return ("Camera, for your iPhone", "macOS treats a cabled iPhone's screen as a camera, so apparent needs Camera access to show and record it. Pick iPhone again once it's on.")
     }
     if state.fix {
-      return ("Apparent can't record yet", "Turn these on, then press \(model.shortcut) again.")
+      return ("apparent can't record yet", "Turn these on, then press \(model.shortcut) again.")
     }
     let count = ["zero", "one", "two", "three", "four", "five"][min(required, 5)]
-    return ("Apparent needs \(count) permissions", nil)
+    return ("apparent needs \(count) permissions", nil)
   }
 
   private var permissions: some View {
@@ -695,14 +727,14 @@ struct OnboardingView: View {
   }
 
   private var pickerNoteText: String {
-    "macOS may also ask whether Apparent can bypass its private window picker. Choose Allow, so Apparent can record the screen you're showing."
+    "macOS may also ask whether apparent can bypass its private window picker. Choose Allow, so apparent can record the screen you're showing."
   }
 
   private func note(_ text: String) -> some View {
     Text(text)
-      .font(.system(size: 12))
+      .font(.custom("HostGrotesk_400wght", size: 16))
       .lineSpacing(2)
-      .foregroundStyle(Palette.muted)
+      .foregroundStyle(TourBrand.carbon)
       .multilineTextAlignment(.center)
       .frame(maxWidth: 480)
       .fixedSize(horizontal: false, vertical: true)
@@ -746,7 +778,7 @@ struct OnboardingView: View {
           HStack(spacing: 6) {
             ForEach(0..<max(state.count, 1), id: \.self) { i in
               Capsule()
-                .fill(i == state.index ? Palette.ink : Color.white.opacity(0.18))
+                .fill(i == state.index ? TourBrand.signal : TourBrand.carbon.opacity(0.2))
                 .frame(width: i == state.index ? 16 : 6, height: 6)
             }
           }
@@ -818,6 +850,10 @@ final class HelperWindowKeys {
 
 final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
   static func run(arguments: [String]) -> Never {
+    let font = Bundle.main.url(forResource: "HostGrotesk-Variable", withExtension: "ttf")
+      ?? URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "assets/fonts/HostGrotesk-Variable.ttf")
+    CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
     let model = OnboardingModel(
       shortcut: option("--shortcut", in: arguments) ?? "⌥⇧S",
       paste: option("--paste", in: arguments) ?? "⌥⇧V",
@@ -825,10 +861,13 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
     )
     if let dir = option("--render", in: arguments) {
       MainActor.assumeIsolated {
+        // Preview both appearances without changing the tester's system preference.
+        let scheme: ColorScheme = arguments.contains("--dark") ? .dark : .light
+        NSApplication.shared.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         if let fps = option("--demo-frames", in: arguments).flatMap(Double.init) {
-          renderDemo(model: model, fps: fps, to: URL(filePath: dir))
+          renderDemo(model: model, fps: fps, to: URL(filePath: dir), scheme: scheme)
         } else {
-          render(model: model, to: URL(filePath: dir))
+          render(model: model, to: URL(filePath: dir), scheme: scheme)
         }
       }
       exit(0)
@@ -866,10 +905,10 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
     )
     window.titlebarAppearsTransparent = true
     window.titleVisibility = .hidden
-    window.title = "Welcome to Apparent"
+    window.title = "Welcome to apparent"
     window.isMovableByWindowBackground = true
-    window.appearance = NSAppearance(named: .darkAqua)
-    window.backgroundColor = NSColor(calibratedWhite: 0x16 / 255, alpha: 1)
+    // The native first frame and SwiftUI canvas resolve against the same live appearance.
+    window.backgroundColor = TourBrand.paperNS
     window.isReleasedWhenClosed = false
     // An ordinary window: System Settings and macOS's prompts always come up above it.
     window.level = .normal
@@ -901,6 +940,9 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let wasOff = Set(model.state.rows.filter { !$0.granted }.map(\.permission))
     if state.rows.contains(where: { $0.granted && wasOff.contains($0.permission) }) {
       returnAfterGrant()
+    }
+    if let window, abs((window.contentView?.frame.height ?? 0) - state.height) > 0.5 {
+      window.setContentSize(NSSize(width: 620, height: state.height))
     }
     let old = stepOrder.firstIndex(of: model.state.step) ?? 0
     let new = stepOrder.firstIndex(of: state.step) ?? 0
@@ -1014,14 +1056,14 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 
   /// One loop of the how-it-works demo as `demo-NNNN.png` at `fps`, for a video of it.
-  @MainActor static func renderDemo(model: OnboardingModel, fps: Double, to dir: URL) {
+  @MainActor static func renderDemo(model: OnboardingModel, fps: Double, to dir: URL, scheme: ColorScheme) {
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let frames = Int(DemoScript.loop * fps)
     for i in 0..<frames {
       let t = Double(i) / fps
       onboardingFixedPhase = t / DemoScript.loop
       model.state = OnboardingState(step: "how-it-works", index: 1, tutorial: t >= DemoScript.end ? "watched" : nil)
-      let renderer = ImageRenderer(content: OnboardingView(model: model))
+      let renderer = ImageRenderer(content: OnboardingView(model: model).environment(\.colorScheme, scheme))
       renderer.scale = 2
       guard let image = renderer.cgImage else { continue }
       let url = dir.appending(path: String(format: "demo-%04d.png", i))
@@ -1030,7 +1072,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 
   /// Every step as `NN-step.png`, for review without running the app.
-  @MainActor static func render(model: OnboardingModel, to dir: URL) {
+  @MainActor static func render(model: OnboardingModel, to dir: URL, scheme: ColorScheme) {
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     func row(_ permission: String, _ status: String = "not-determined", requested: Bool = false, reopening: Bool = false, relaunch: Bool = false) -> PermissionRow {
       PermissionRow(permission: permission, status: status, requested: requested, required: ["screen-recording", "microphone", "accessibility"].contains(permission), reopening: reopening, relaunch: relaunch)
@@ -1066,6 +1108,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
       ("permissions-reopen-fallback", OnboardingState(step: "permissions", index: 2, rows: fallback), 0),
       ("permissions-picker-note", OnboardingState(step: "permissions", index: 2, rows: some, pickerNote: true, speech: SpeechStatus(state: "downloading", locale: "en_US", progress: 0.42)), 0.3),
       ("permissions-macos15", OnboardingState(step: "permissions", index: 2, rows: sequoia, speech: SpeechStatus(state: "needsPermission", engine: "SFSpeechRecognizer", locale: "en_US")), 0),
+      ("permissions-macos15-picker-note", OnboardingState(step: "permissions", index: 2, rows: sequoia, pickerNote: true, speech: SpeechStatus(state: "needsPermission", engine: "SFSpeechRecognizer", locale: "en_US")), 0),
       ("permissions-macos15-no-dictation", OnboardingState(step: "permissions", index: 2, rows: sequoiaNoDictation, ready: true, speech: noDictation), 0),
       ("try-it", OnboardingState(step: "try-it", index: 2, count: 3), 0.3),
       ("try-it-downloading", OnboardingState(step: "try-it", index: 2, count: 3, pickerNote: true, speech: SpeechStatus(state: "downloading", locale: "en_US", progress: 0.42)), 0.3),
@@ -1100,7 +1143,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
       setup()
       onboardingFixedPhase = phase
       model.state = state
-      let renderer = ImageRenderer(content: OnboardingView(model: model))
+      let renderer = ImageRenderer(content: OnboardingView(model: model).environment(\.colorScheme, scheme))
       renderer.scale = 2
       guard let image = renderer.cgImage else { continue }
       let rep = NSBitmapImageRep(cgImage: image)

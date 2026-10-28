@@ -4067,6 +4067,8 @@ kbd {
 .agent-install-label { display: block; margin-bottom: 8px; color: #524a55; font-size: 13px; font-weight: 650; }
 .agent-install-prompt { display: flex; align-items: center; gap: 16px; padding: 15px 16px; border: 1px solid #b7a5d8; background: #f5f0e8; }
 .agent-install-prompt p { flex: 1; margin: 0; font-size: 14px; line-height: 1.45; }
+.agent-install-prompt p a { color: #6844b9; text-decoration: underline; text-underline-offset: 2px; }
+.agent-install-prompt p a:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
 .agent-install-prompt .copy { flex: none; min-width: 64px; height: 36px; border: 1px solid #7a58c7; border-radius: 0; background: #fff; color: #342d40; }
 .agent-install-prompt .copy:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
 .agent-install-prompt .copy:hover { background: #e7e0ee; }

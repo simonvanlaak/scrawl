@@ -3,7 +3,7 @@ import { Copy } from "./Copy"
 
 const REPO = "https://github.com/tryapparent/apparent"
 const RELEASES = `${REPO}/releases`
-const INSTALL_PROMPT = `Install the Apparent desktop app from ${RELEASES}, then launch it.`
+const INSTALL_PROMPT = `Install the Apparent desktop app from [Apparent releases](${RELEASES}), then launch it.`
 
 export function App() {
   return (
@@ -27,7 +27,7 @@ export function App() {
             <div className="agent-install">
               <span className="agent-install-label">Or send this to your agent</span>
               <div className="agent-install-prompt">
-                <p>{INSTALL_PROMPT}</p>
+                <p>Install the Apparent desktop app from <a href={RELEASES}>Apparent releases</a>, then launch it.</p>
                 <Copy text={INSTALL_PROMPT} />
               </div>
             </div>

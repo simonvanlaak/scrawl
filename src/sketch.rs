@@ -823,10 +823,18 @@ pub(crate) fn summary_markdown_with_visual_policy(
             crop.label, crop.full_frames
         ));
     }
-    if let Some(missing) = &bundle.transcript.missing
-        && bundle.transcript.text.trim().is_empty()
-    {
-        out.push_str(&format!("No transcript: {}\n", missing.reason));
+    if bundle.source.as_deref() != Some("iphone") {
+        if !bundle.has_microphone_samples(bundle_dir) {
+            out.push_str("No microphone audio was saved. Check the microphone and try again.\n");
+        } else if bundle.transcript.text.trim().is_empty() && (bundle.transcript.missing.is_some() || bundle.transcript.source == "none") {
+            if let Some(missing) = &bundle.transcript.missing {
+                out.push_str(&format!("No transcript: {}\n", missing.reason));
+            } else {
+                out.push_str("No transcript: Recognition did not run. The audio is saved.\n");
+            }
+        } else if bundle.transcript.text.trim().is_empty() {
+            out.push_str("No words transcribed. Your audio was saved—check it or try again closer to the microphone.\n");
+        }
     }
     // App events and context changes nest under the keyframe on screen when they happened.
     let mut app_events: Vec<(u64, String)> = bundle
@@ -2134,15 +2142,97 @@ mod tests {
         assert!(!summary.contains("No transcript"));
 
         // Audio but no speech model yet: the summary says so instead of staying quiet.
+        let audio_dir = std::env::temp_dir().join(format!(
+            "apparent-summary-audio-{}-{}",
+            std::process::id(), crate::now_epoch_ms()
+        ));
+        std::fs::create_dir_all(&audio_dir).unwrap();
+        std::fs::write(audio_dir.join("audio.wav"), crate::audio::encode_wav_16k(&[0.0; 1280]).unwrap()).unwrap();
         let mut silent = bundle.clone();
+        silent.audio = Some("audio.wav".into());
         silent.transcript = TranscriptData {
             source: "offline".into(),
             missing: Some(crate::speech_model::missing("downloading", "en_US", None)),
             ..Default::default()
         };
-        let summary = summary_markdown(&silent, std::path::Path::new("/recordings/test"));
+        let summary = summary_markdown(&silent, &audio_dir);
         assert!(summary.contains("No transcript: "));
         assert!(summary.contains("(en_US) was still downloading. The audio is saved"));
+
+        // The handoff itself must distinguish absent audio from saved audio with no words.
+        let mut no_audio = silent.clone();
+        no_audio.audio = None;
+        no_audio.transcript = TranscriptData { source: "none".into(), ..Default::default() };
+        let summary = summary_markdown(&no_audio, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("No words transcribed"));
+
+        let mut missing_and_no_audio = silent.clone();
+        missing_and_no_audio.audio = None;
+        let summary = summary_markdown(&missing_and_no_audio, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("The audio is saved"));
+
+        let mut missing_file = silent.clone();
+        missing_file.audio = Some("removed.wav".into());
+        let summary = summary_markdown(&missing_file, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("The audio is saved"));
+
+        let mut recognized_but_file_removed = missing_file.clone();
+        recognized_but_file_removed.transcript = TranscriptData {
+            source: "command:test".into(),
+            text: "heard before the file was removed".into(),
+            ..Default::default()
+        };
+        let summary = summary_markdown(&recognized_but_file_removed, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("No words transcribed"));
+
+        let mut skipped = silent.clone();
+        skipped.transcript = TranscriptData { source: "none".into(), ..Default::default() };
+        let summary = summary_markdown(&skipped, &audio_dir);
+        assert!(summary.contains("Recognition did not run"));
+        assert!(!summary.contains("No words transcribed"));
+
+        let empty_wav = crate::audio::encode_wav_16k(&[]).unwrap();
+        std::fs::write(audio_dir.join("audio.wav"), &empty_wav).unwrap();
+        let stopped_without_samples = crate::audio::RecordedAudio {
+            sample_count: 0,
+            duration_ms: 0,
+            wav_bytes: empty_wav,
+            live: Default::default(),
+            #[cfg(target_os = "linux")]
+            pause: Default::default(),
+        };
+        skipped.transcript = crate::transcribe::transcribe(
+            Some(&audio_dir.join("audio.wav")),
+            Some(&stopped_without_samples),
+        );
+        assert_eq!(skipped.transcript.source, "none");
+        let summary = summary_markdown(&skipped, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("No words transcribed"));
+        let truncated_wav = crate::audio::encode_wav_16k(&[0.0; 1280]).unwrap();
+        std::fs::write(audio_dir.join("audio.wav"), &truncated_wav[..44]).unwrap();
+        let summary = summary_markdown(&skipped, &audio_dir);
+        assert!(summary.contains("No microphone audio was saved"));
+        assert!(!summary.contains("No words transcribed"));
+        std::fs::write(audio_dir.join("audio.wav"), crate::audio::encode_wav_16k(&[0.0; 1280]).unwrap()).unwrap();
+
+        let mut no_words = silent.clone();
+        no_words.audio = Some("audio.wav".into());
+        no_words.transcript = TranscriptData { source: "command:test".into(), ..Default::default() };
+        let summary = summary_markdown(&no_words, &audio_dir);
+        assert!(summary.contains("No words transcribed"));
+        assert!(!summary.contains("No microphone audio was saved"));
+
+        let mut failure = silent.clone();
+        failure.audio = Some("audio.wav".into());
+        let summary = summary_markdown(&failure, &audio_dir);
+        assert!(summary.contains("No transcript: "));
+        assert!(!summary.contains("No words transcribed"));
+        std::fs::remove_dir_all(&audio_dir).unwrap();
 
         // A phone bundle: device header, a flagged keyframe, and app events under the keyframe
         // that was on screen when they happened.
@@ -2156,6 +2246,11 @@ mod tests {
             ..Default::default()
         });
         phone.source = Some("iphone".into());
+        let mut phone_without_words = phone.clone();
+        phone_without_words.transcript = TranscriptData::default();
+        let phone_summary = summary_markdown(&phone_without_words, std::path::Path::new("/recordings/phone"));
+        assert!(!phone_summary.contains("No microphone audio was saved"));
+        assert!(!phone_summary.contains("No words transcribed"));
         phone.marks.push(Mark {
             id: "f1".into(),
             strokes: Vec::new(),

@@ -15,7 +15,7 @@ use gpui::{
     MouseButton, ParentElement, Pixels, Point, Render, Rgba, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowBounds,
     WindowControlArea, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient,
-    point, prelude::*, px, rgb, rgba, size, svg,
+    point, prelude::*, px, relative, rgb, rgba, size, svg,
 };
 use serde::Deserialize;
 
@@ -28,12 +28,12 @@ use crate::settings::{Action, Event, Pane, Pressed};
 const WIDTH: f32 = 720.0;
 const HEIGHT: f32 = 530.0;
 const SIDEBAR: f32 = 210.0;
-/// The content pane's width: what the window keeps after the sidebar and the
-/// hairline between them. Giving the pane an explicit width (rather than `flex_1`) makes the
-/// space it hands its children definite, which GPUI requires to wrap text: with an indefinite
-/// width a caption measures as one full line, inflates the column and pushes trailing controls
-/// (the permission rows' buttons) past the window's edge.
-const CONTENT: f32 = WIDTH - SIDEBAR - 1.0;
+/// GPUI needs a definite content width to wrap captions, but a window manager can give us
+/// less than the requested window width (notably XWayland under Hyprland).
+fn column_widths(viewport: f32) -> (f32, f32) {
+    let sidebar = if viewport < 650.0 { 150.0 } else { SIDEBAR };
+    (sidebar, (viewport - sidebar - 1.0).max(0.0))
+}
 const TITLEBAR: f32 = 52.0;
 const INSET: f32 = 30.0;
 const ROW: f32 = 42.0;
@@ -125,6 +125,23 @@ struct Transcriber {
     speech: Speech,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+struct Microphone {
+    selected: String,
+    value: String,
+    options: Vec<MicrophoneOption>,
+    note: Option<String>,
+    meter: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct MicrophoneOption {
+    id: String,
+    title: String,
+    enabled: bool,
+}
+
 /// `speech_model::Status`: the local model's download.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -164,9 +181,9 @@ struct ViewState {
     version: String,
     login: Login,
     agent_demo_video: bool,
-    remote_phone_ingest: bool,
     shortcuts: Vec<Shortcut>,
     transcriber: Transcriber,
+    microphone: Microphone,
     video_export: bool,
     retention: Retention,
     captures_size: Option<String>,
@@ -313,6 +330,7 @@ pub struct SettingsWindow {
     /// Modifiers held while a recorder listens, so their keycaps light as they go down.
     live: gpui::Modifiers,
     menu: Option<Menu>,
+    meter: Option<(String, crate::mic::Meter)>,
     icon: Arc<Image>,
     wordmark: Arc<Image>,
     /// The skill command was just copied (the button says Copied for a moment).
@@ -390,7 +408,7 @@ fn open(request: Request, cx: &mut App) {
                                     window.remove_window();
                                     return false;
                                 }
-                                if changed {
+                                if changed || view.pane == Pane::Recording && view.meter.is_some() {
                                     cx.notify();
                                 }
                                 true
@@ -409,6 +427,7 @@ fn open(request: Request, cx: &mut App) {
                     focus,
                     live: gpui::Modifiers::default(),
                     menu: None,
+                    meter: None,
                     icon: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
                         include_bytes!("../assets/app-icon.png").to_vec(),
@@ -437,6 +456,7 @@ impl SettingsWindow {
                         self.live = gpui::Modifiers::default();
                     }
                     self.state = Some(next);
+                    self.sync_meter();
                 }
             }
             "show" => {
@@ -445,6 +465,7 @@ impl SettingsWindow {
                     .and_then(|p| serde_json::from_value(p.into()).ok())
                 {
                     self.pane = pane;
+                    self.sync_meter();
                 }
                 window.activate_window();
             }
@@ -786,10 +807,20 @@ fn keycap(theme: Theme, glyph: &str, name: Option<&str>, lit: bool, center: bool
 // MARK: Panes
 
 impl SettingsWindow {
-    fn sidebar(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+    fn sync_meter(&mut self) {
+        let wanted = (self.pane == Pane::Recording)
+            .then(|| self.state.as_ref()?.microphone.meter.clone())
+            .flatten();
+        if self.meter.as_ref().map(|(id, _)| id) == wanted.as_ref() {
+            return;
+        }
+        self.meter = wanted.map(|id| (id.clone(), crate::mic::Meter::start(id)));
+    }
+
+    fn sidebar(&self, theme: Theme, width: f32, cx: &mut Context<Self>) -> Div {
         div()
             .flex_none()
-            .w(px(SIDEBAR))
+            .w(px(width))
             .h_full()
             .bg(theme.sidebar())
             .flex()
@@ -800,7 +831,7 @@ impl SettingsWindow {
                     .px(px(20.0))
                     .pt(px(8.0))
                     .pb(px(28.0))
-                    .child(img(Arc::clone(&self.wordmark)).w(px(150.0)).h(px(35.0)))
+                    .child(img(Arc::clone(&self.wordmark)).w(px((width - 40.0).min(150.0))).h(px(35.0)))
                     .child(div().pt(px(12.0)).text_size(px(10.0))
                         .text_color(rgb(0xb7a5d8)).child("CAPTURE SETTINGS")),
             )
@@ -840,22 +871,23 @@ impl SettingsWindow {
                 }
                 view.menu = None;
                 view.pane = pane;
+                view.sync_meter();
                 cx.notify();
             }))
     }
 
-    fn content(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn content(&self, theme: Theme, state: &ViewState, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let body = match self.pane {
             Pane::General => self.general(theme, state, cx),
             Pane::Recording => self.recording_pane(theme, state, cx),
             Pane::Storage => self.storage(theme, state, cx),
             Pane::Permissions => self.permissions(theme, state, cx),
             Pane::Agents => self.agents(theme, state, cx),
-            Pane::About => self.about(theme, state, cx),
+            Pane::About => self.about(theme, state, width < 500.0, cx),
         };
         div()
             .id("settings-content")
-            .w(px(CONTENT))
+            .w(px(width))
             .h_full()
             .bg(theme.window())
             .relative()
@@ -885,12 +917,22 @@ impl SettingsWindow {
                     .child(drag_strip("settings-drag-title").absolute().top_0().left_0()),
             )
             .child(div().w_full().h(px(1.0)).bg(theme.group_line()))
-            .child(div().w_full().px(px(INSET)).flex().flex_col().child(body))
+            .child(
+                div()
+                    .id("settings-pane-scroll")
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(px(INSET))
+                    .flex()
+                    .flex_col()
+                    .child(body),
+            )
     }
 
     fn general(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
         let login_on = state.login.on;
-        let remote_phone_ingest = state.remote_phone_ingest;
         let mut column = div().flex().flex_col().child(group(
             theme,
             vec![
@@ -906,16 +948,6 @@ impl SettingsWindow {
                             }))
                         },
                     ),
-                )
-                .into_any_element(),
-                row(
-                    theme,
-                    "Allow phone uploads from other devices",
-                    true,
-                    switch(theme, "settings-remote-phone-ingest", remote_phone_ingest, true)
-                        .on_click(cx.listener(move |view, _, _, _| {
-                            view.set("remotePhoneIngest", (!remote_phone_ingest).into());
-                        })),
                 )
                 .into_any_element(),
             ],
@@ -1083,6 +1115,14 @@ impl SettingsWindow {
     }
 
     fn recording_pane(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
+        let mic = &state.microphone;
+        let inputs: Vec<(String, String, bool)> = mic
+            .options
+            .iter()
+            .map(|option| (option.id.clone(), option.title.clone(), option.enabled))
+            .collect();
+        let selected = mic.selected.clone();
+        let level = self.meter.as_ref().map_or(0.0, |(_, meter)| meter.level());
         let t = &state.transcriber;
         let hex = t.engine == "hex";
         let command = t.engine == "command";
@@ -1193,6 +1233,26 @@ impl SettingsWindow {
         div()
             .flex()
             .flex_col()
+            .child(header(theme, "Microphone"))
+            .child(group(theme, vec![row(
+                theme, "Input", true,
+                popup(theme, "settings-microphone", &mic.value).on_click(cx.listener(
+                    move |view, event: &ClickEvent, _, cx| {
+                        view.open_menu("microphone", inputs.clone(), Some(selected.clone()), event);
+                        cx.notify();
+                    },
+                )),
+            ).into_any_element()]))
+            .when_some(mic.note.clone(), |pane, note| pane.child(caption(theme, &note, true)))
+            .when(mic.meter.is_some(), |pane| pane.child(
+                div().mx(px(8.0)).mt(px(8.0)).w_full().max_w(px(260.0)).h(px(7.0))
+                    .rounded_full().bg(theme.track()).child(
+                        div().w(relative(level.clamp(0.0, 1.0))).h(px(7.0))
+                            .rounded_full().bg(theme.accent())
+                    ),
+            ))
+            .child(caption(theme, "If the chosen input cannot open, recording uses the system default. The level shows input, not speech clarity.", false))
+            .child(header(theme, "Transcription"))
             .child(group(theme, rows))
             .child(caption(theme, &note, false))
             .when_some(decoder_warning, |pane, warning| {
@@ -1529,13 +1589,19 @@ impl SettingsWindow {
             ))
     }
 
-    fn about(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
+    fn about(&self, theme: Theme, state: &ViewState, compact: bool, cx: &mut Context<Self>) -> Div {
         let link = |id: &'static str, title: &str, shown: &str, url: &'static str| {
             div()
                 .id(id)
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.ink(0.03)))
-                .child(row(
+                .child(if compact {
+                    div().min_h(px(62.0)).px(px(12.0)).py(px(8.0))
+                        .flex().flex_col().justify_center()
+                        .child(div().text_size(px(14.0)).text_color(theme.text()).child(title.to_owned()))
+                        .child(div().text_size(px(12.0)).text_color(theme.secondary()).child(shown.to_owned()))
+                } else {
+                    row(
                     theme,
                     title,
                     true,
@@ -1550,7 +1616,8 @@ impl SettingsWindow {
                                 .child(shown.to_owned()),
                         )
                         .child(icon(crate::icons::ARROW_UP_RIGHT, 10.0, theme.tertiary())),
-                ))
+                    )
+                })
                 .on_click(move |_, _, _| {
                     let _ = crate::handoff::open_path(std::path::Path::new(url));
                 })
@@ -1559,9 +1626,10 @@ impl SettingsWindow {
             theme,
             vec![
                 div()
-                    .h(px(64.0))
+                    .min_h(px(if compact { 100.0 } else { 64.0 }))
                     .px(px(12.0))
                     .flex()
+                    .when(compact, |d| d.flex_wrap())
                     .items_center()
                     .gap(px(12.0))
                     .child(
@@ -1569,7 +1637,7 @@ impl SettingsWindow {
                     )
                     .child(
                         div()
-                            .flex_1()
+                            .flex_1().min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(1.0))
@@ -1645,7 +1713,7 @@ impl SettingsWindow {
                     link(
                         "settings-source",
                         "Source",
-                        "github.com/tryapparent/apparent",
+                        if compact { "tryapparent/apparent" } else { "github.com/tryapparent/apparent" },
                         "https://github.com/tryapparent/apparent",
                     )
                     .into_any_element(),
@@ -1893,9 +1961,10 @@ impl Render for SettingsWindow {
             return root.children(caption_buttons(theme));
         };
         let viewport = window.viewport_size();
-        root.child(self.sidebar(theme, cx))
+        let (sidebar, content) = column_widths(f32::from(viewport.width));
+        root.child(self.sidebar(theme, sidebar, cx))
             .child(div().w(px(1.0)).h_full().flex_none().bg(theme.separator()))
-            .child(self.content(theme, &state, cx))
+            .child(self.content(theme, &state, content, cx))
             .children(caption_buttons(theme))
             .children(self.menu_layer(theme, viewport, cx))
             .children(self.update_result_layer(theme, &state, cx))
@@ -1907,12 +1976,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn settings_columns_fit_the_actual_narrow_viewport() {
+        // XWayland can give the window less space than its requested size.
+        for viewport in [440.0, 560.0, WIDTH] {
+            let (sidebar, content) = column_widths(viewport);
+            assert!(sidebar + 1.0 + content <= viewport);
+            assert!(content > 0.0);
+        }
+    }
+
+    #[test]
     fn the_command_transcriber_is_read_from_the_view() {
         let t: Transcriber =
             serde_json::from_str(r#"{"engine":"command","command":"whisper-apparent"}"#).unwrap();
         assert_eq!(t.engine, "command");
         assert_eq!(t.command.as_deref(), Some("whisper-apparent"));
         assert_eq!(Transcriber::default().command, None);
+    }
+
+    #[test]
+    fn microphone_selection_and_fallback_reach_the_gpui_window() {
+        let state: ViewState = serde_json::from_str(r#"{"microphone":{"selected":"usb-1","value":"USB mic","options":[{"id":"default","title":"System default (Built-in)","enabled":true},{"id":"usb-1","title":"USB mic (not connected)","enabled":false}],"note":"USB mic isn't connected. Using Built-in.","meter":"built-in"}}"#).unwrap();
+        assert_eq!(state.microphone.selected, "usb-1");
+        assert_eq!(
+            state.microphone.note.as_deref(),
+            Some("USB mic isn't connected. Using Built-in.")
+        );
+        assert_eq!(state.microphone.meter.as_deref(), Some("built-in"));
+        assert!(!state.microphone.options[1].enabled);
     }
 
     #[test]

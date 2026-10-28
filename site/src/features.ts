@@ -3,7 +3,7 @@
 // experiments the Rust code reads.
 import data from "./features.json" with { type: "json" }
 
-export const PLATFORMS = ["mac", "windows", "linux"] as const
+export const PLATFORMS = ["mac", "linux"] as const
 export type Platform = (typeof PLATFORMS)[number]
 
 export type Status =

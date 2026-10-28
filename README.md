@@ -7,10 +7,9 @@ Press a shortcut (`⌥⇧S`) and Apparent starts recording the screen. Talk, cli
 ## Install
 
 No branded installers, Homebrew cask, or signed update have been published yet. Build from source
-in this checkout; see [macOS packaging](docs/release.md), [Windows](docs/windows.md), or
-[Linux](docs/linux.md). The Mac build needs an Apple silicon Mac on macOS 15 or later (live
-transcription and Liquid Glass need macOS 26). The Windows preview targets Windows 10 (2004)
-or later on x64. Linux builds target Ubuntu 24.04+ on x86_64 or ARM64.
+in this checkout; see [macOS packaging](docs/release.md) or [Linux](docs/linux.md). Apparent supports
+macOS and Linux, not Windows. The Mac build needs an Apple silicon Mac on macOS 15 or later (live
+transcription and Liquid Glass need macOS 26). Linux builds target Ubuntu 24.04+ on x86_64 or ARM64.
 
 When a Linux AppImage is published, make it executable and launch it with:
 
@@ -47,6 +46,16 @@ inspect --marks` lists them) makes a dense sheet of frames around a moment, `app
 frames` pulls a range, `apparent copy` puts a capture on the clipboard, and `apparent export`
 makes a shareable `.mp4`. `apparent skill` prints the skill without installing anything.
 
+The repository also ships [`make-it-apparent`](skills/make-it-apparent/SKILL.md), a separate
+agent skill for showing a finished change in a short, checked Apparent video. It covers the
+visible before/action/after, privacy before recording, playback review and honest limits of the
+demo. The capture-reading skill above is still for understanding feedback someone sends you;
+the walkthrough skill is for demonstrating what you built.
+
+```sh
+bunx skills add tryapparent/apparent --skill make-it-apparent
+```
+
 ## Usage
 
 ```sh
@@ -72,10 +81,6 @@ cargo run -- copy /tmp/demo.apparent
 # Capture a cabled iPhone for 8 seconds from the terminal (mirror window + native video)
 cargo run -- record --iphone --duration 8
 cargo run -- devices
-
-# Build a bundle from a ApparentKit in-app recording (newest pair in ~/Downloads by default)
-cargo run -- import
-cargo run -- import ~/Downloads/20261013T164000.mp4 --timeline ~/Downloads/20261013T164000.json
 
 # Rebuild an existing bundle with the current transcriber and keyframe rules
 cargo run -- reprocess latest --out /tmp/again.apparent
@@ -159,7 +164,7 @@ granted and each on-demand sheet: `target/debug/apparent-helper onboarding --ren
 
 **Settings…** in the menu bar (⌘, while the menu is open) opens a small window with six panes:
 
-- **General**: Launch at login, phone uploads, and the two shortcuts, Record
+- **General**: Launch at login and the two shortcuts, Record
   (`⌥⇧S`) and Paste last capture (`⌥⇧V`, which can be turned off).
 - **Recording**: the microphone, with its input level, the transcriber (Apple Speech with its
   language, Hex while it runs, with its model and language, or Command when it's configured) and,
@@ -317,239 +322,9 @@ phone on the right of the screen and starts recording:
 - Finish from the island as usual. Unplugging the phone finishes the capture with what was recorded.
 
 Phone bundles are ordinary bundles: `apparent.json` adds `"source": "iphone"` and a `device` object
-(name, capture `mirror` or `apparentkit`, id, native size, screen points and scale, app and version
-for SDK recordings), and the target's `mode` is `device`. Keyframes fit a 1600 px long edge
+(name, capture `mirror`, id, native size, screen points and scale), and the target's `mode` is `device`. Keyframes fit a 1600 px long edge
 (736×1600 for a 1320×2868 phone); `apparent frames` and `apparent zoom` extract more frames from the
 video when you need them.
-
-### ApparentKit (iOS)
-
-`ApparentKit` (`Sources/ApparentKit`) is a Swift package (iOS 18+) for recording inside your own iOS app:
-video of the app with narration, touches and freehand red strokes, markers, and app events on the
-same clock, sent straight to Apparent on your Mac.
-
-Add this repo as a Swift package dependency (product `ApparentKit`) and attach `.apparent()` to your root
-view:
-
-```swift
-import ApparentKit
-
-WindowGroup { ContentView().apparent() }   // three-finger long press starts and stops
-Apparent.event("Done tapped")              // optional: what the app did, on the timeline
-```
-
-The host app needs `NSMicrophoneUsageDescription` in its Info.plist for narration (both capture
-methods use the microphone). Set `Apparent.shared.narration = false` to record without it.
-
-`Apparent.shared.captureMethod` picks how the video is made:
-
-- **`.appFrames`** (default): ApparentKit draws the app's own windows into an H.264 `.mp4` at 30 fps
-  and 2× (880×1912 on a 440×956-point phone), with the microphone recorded alongside. There is no
-  screen-recording prompt; the microphone asks once and iOS remembers the answer. If it's denied, the
-  recording is video only and the timeline says `"audio": false`. The strip and ink are left out of
-  the video (Apparent on the Mac draws touches and strokes from the timeline), but so is
-  anything the app doesn't draw itself: system alerts and permission prompts, and some layers (video
-  players, camera previews, some Metal or backdrop effects) may be blank or look different. The
-  system keyboard is drawn by another process, so its keys can't be captured: a plain panel labelled
-  "Keyboard" stands in for it, following it as it slides (taps on the keyboard never reach the app,
-  so they aren't on the timeline either). Sending the app to the background finishes and sends the
-  recording.
-- **`.replayKit`**: ReplayKit's in-app screen recording, the exact pixels on screen with the strip
-  and the keyboard in them. iOS asks "Record screen and microphone?" unless you allowed it in the
-  last ~8 minutes, and again after every reinstall.
-
-The timeline records which was used (`"capture": "appFrames"` or `"replayKit"`). With either, the
-context records the keyboard: `keyboard: visible` if it was up at the start, and
-`keyboard → visible` / `keyboard → hidden` when it comes and goes.
-
-On paired devices, the three-finger trigger turns off iOS's three-finger text-editing gestures in
-the app (UIKit's `editingInteractionConfiguration` answers `.none` for the app's windows), because
-the same press would otherwise open the Undo · Cut · Copy · Redo bar when a text field is focused.
-The cost is that three-finger undo, redo, cut, copy, and paste don't work in that app on a paired
-phone. Set `Apparent.shared.suppressesSystemEditingGestures = false` to keep them. Unpaired devices
-are unaffected.
-
-While recording, a slim strip sits on the right edge (drag its dot to move it up or down or over to
-the left edge; it remembers where you left it). From top to bottom: the recording dot (hold it to see
-the elapsed time), Draw (tap to turn drawing red strokes on or off), Discard (with a few seconds to
-Undo), and Send. Doing the three-finger trigger again also sends. The strip moves like liquid (the
-"Liquid morph" variant of `site/public/prototype/strip`): it stretches out of a droplet, pours into
-the button you tap to become a status circle, buds the "Sent to …", "Discarded · Undo" or "Mac didn't
-answer · Share" bubble off on a neck, and stretches as you throw it. On iOS 26 it's Liquid Glass and
-the neck is the glass itself blending; Reduce Motion cross-fades instead.
-
-Drawn strokes are smooth and fade on their own:
-
-- **Sampling.** Every coalesced touch is a sample, at the touch's own timestamp, so a busy main
-  thread doesn't make strokes jagged. A one-euro filter (one cutoff from the 2D speed) takes out
-  jitter as they come in, and a centered smoothing takes out the rest behind the tip without lag.
-- **Look.** The line is a centripetal Catmull-Rom curve, 4.6 pt wide when drawn slowly and down to
-  55% when fast (from speed, never pressure, like the Mac's ink), with tapered ends.
-- **Drawing.** Finished stretches go into layers that never change, so each touch redraws only the
-  live tip, which runs ahead through iOS's predicted touches. Predicted points are dropped on the
-  next touch and never recorded.
-- **Fading.** A stroke fades out (300 ms, ease-out) 1.5 s after the pen last lifted. Putting the pen
-  down again before then holds every stroke on screen, so a circle and then an arrow fade together.
-- **Timeline.** It gets the smoothed, unpredicted points, plus `fadeAt` (when the stroke began
-  fading) on each stroke that faded during the recording. On keyframes the Mac draws a stroke from
-  when it began until 1.2 s after it ended, or with the rest of its mark.
-
-Touches aren't drawn on screen in either capture method. Each touch goes on the timeline (position,
-phase, and the label of the element under it) and Apparent on the Mac draws taps and swipes from it.
-
-ApparentKit stays completely inert on devices that haven't been configured (no gesture recognizers,
-overlay window, network calls, files, or background `URLSession`). To pair your iPhone with this Mac, print a setup link (and
-terminal QR code) and open it on the phone:
-
-```sh
-apparent link --scheme updown
-# updown://apparent?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=…
-```
-
-`apparent link` reads (or generates with mode `0600`) `ingestToken` in
-`~/.config/apparent/config.json` and defaults to this Mac's Tailscale and LAN IPs on port `47777`.
-In Settings › General, enable **Allow phone uploads from other devices** before using the LAN or
-Tailscale URLs. It is off by default: the GUI keeps port 47777 on loopback,
-and switching it off again closes the all-interfaces listener without a restart. The cabled
-iPhone mirror and USB fallback still work. `apparent serve` is an explicit remote listener and does
-not follow this GUI setting.
-Opening `<scheme>://apparent?reset=1` on the phone clears its Keychain config (`dev.kitlangton.apparent`).
-For cabled USB fallback via `devicectl` (`Documents/Apparent`), list the app bundle IDs in
-`~/.config/apparent/config.json` under `"usbApps": ["com.kitlangton.UpDown"]`.
-
-The Mac answers an upload once it has built the bundle (or after up to 45 s), so the strip says what happened:
-
-| On the Mac | Reply | The strip |
-| --- | --- | --- |
-| Bundle saved | `delivered: false, state: "saved"` | Saved on your Mac |
-| Still building when the wait ran out | `delivered: false, state: "processing"` | On your Mac · Processing… |
-| Bundle couldn't be built | HTTP 500 | Mac didn't answer · Share |
-
-The phone does not upload a saved bundle again. Over USB the Mac writes the same reply to
-`<stamp>.delivery` before `<stamp>.sent`.
-
-You can also AirDrop the `.mp4` and `.json` pair to the Mac and run `apparent import`:
-
-- Touches become taps and swipes, drawn on keyframes as ripples and finger trails and listed in the
-  review timeline. Each tap or swipe is a keyframe candidate, like a click.
-- Markers become flags.
-- App events (`Apparent.event("Done tapped")`) appear in `summary.md` under the keyframe that was on
-  screen when they happened (`  · 0:12 app: Done tapped`).
-
-#### Recorded session metadata
-
-An imported `timeline.json` can still name a session in its top-level `session` field, while
-`context.session` names the session visible on screen. Apparent preserves these facts in the bundle
-but does not use them to forward the capture.
-
-#### Sending to an HTTPS endpoint
-
-A setup link can point at a hosted endpoint instead of a Mac, for phones that aren't on your LAN or
-tailnet (for example `ledger://apparent?url=https%3A%2F%2Fproblems.example.com%2Fapi%2Fapparent%2Fledger&token=pbcap_…`).
-It speaks the same protocol as the Mac: `GET {url}/health` and `POST {url}/ingest` with a bearer
-token, where the body is a 4-byte big-endian timeline length, the timeline JSON, then the MP4. When
-any configured URL is `https`, recordings go through a durable outbox instead of the LAN path
-(plain `http` URLs keep the direct POST plus USB fallback):
-
-- **Saved before sending.** On Send, the framed payload and a small metadata file (target,
-  `recordedAt`, attempts, last error) are written to `Application Support/ApparentOutbox`. They're
-  protected until the phone's first unlock, so uploads can run while it's locked, and excluded from
-  backup. The recording never goes to `Documents/Apparent` (it's staged in `tmp`) and isn't added to
-  `Apparent.shared.recordings`. An entry is deleted only after a 2xx.
-- **Background upload.** Uploads are file uploads on a background `URLSession`
-  (`dev.kitlangton.apparent.outbox.<bundle ID>`), so they survive the app being suspended or killed
-  and never load the movie into memory. The session is recreated whenever the app is configured, and
-  it picks up uploads still in flight from an earlier launch.
-- **Retries.** A 401 or 403 (the link was revoked), a 413 (too large) and any other 4xx except 408
-  and 429 (the server rejected these exact bytes) are permanent: the entry stays on disk, marked
-  failed, with Share. Anything else (offline, timeouts, 408, 429, 5xx) is retried
-  with backoff (15 s, doubling up to 30 min), and immediately when the network comes back, the app
-  comes to the foreground, or it launches. An entry never uploads twice at once. The server dedupes
-  on person and `recordedAt`, so resending after a lost reply is safe. Opening a new setup link
-  retries the entries that failed with the old one.
-- **Strip.** While the upload runs on a working network (`NWPathMonitor` says `.satisfied`), the
-  strip stays up as a small status circle with a progress ring, saying "Sending…" however long it
-  takes. Touches on it reach the app. With no bytes going out for 30 seconds it says "Still
-  sending…", never "Queued". When the upload lands it turns into "Sent to …" with a success haptic.
-  "Queued · sends when online" (with a success haptic, since the recording is safe on the phone) is
-  only for no network or a failed attempt waiting to retry; it leaves after a few seconds, and if a
-  retry starts while it's up it goes back to "Sending…". If the upload lands after the strip has
-  gone (a new recording took over, it was queued, or the app was in the background), the strip comes
-  back briefly with "Sent to …", as soon as the app is in front. Permanent failures say "Apparent link
-  expired · Ask Kit for a new one", "Too large to send" or "Couldn't send", with Share, which shares
-  copies of the recording and leaves the entry queued.
-- **Revoked links.** The `/health` check at the start of a recording also goes to the HTTPS
-  endpoint. A 401 there shows "Apparent link expired" beside the strip, but the recording carries on
-  and is kept in the outbox, marked failed, until the link is renewed.
-
-The endpoint rejects bodies over 95 MB, so HTTPS recordings are smaller and capped:
-
-| Capture | Video | Audio | Per second | Cap | At the cap |
-| --- | --- | --- | --- | --- | --- |
-| `.appFrames` to a Mac | 6 Mbps | 96 kbps | ≈ 0.76 MB | none | — |
-| `.appFrames` to HTTPS | 3 Mbps | 96 kbps | ≈ 0.39 MB | 3:00 | ≈ 70 MB |
-| `.replayKit` to HTTPS | not settable (est. 8–12 Mbps) | | ≈ 1–1.5 MB | 0:45 | ≈ 45–68 MB |
-
-3 Mbps at 880×1912 and 30 fps is about 0.06 bits per pixel. That's plenty for app UI, which is mostly
-static between scrolls and transitions, and the 25 MB of headroom covers the encoder overshooting its
-average. Ten seconds before the cap, the strip shows "Length limit · Sending in 10 s" with a warning
-haptic, then sends. A payload that's still over the limit is never uploaded: it's marked "Too large
-to send" and kept for Share.
-
-Apps with an app delegate can optionally forward background session events, so iOS can relaunch a
-killed app to finish reporting uploads. Without this, finished uploads are picked up at the next
-launch:
-
-```swift
-func application(_: UIApplication, handleEventsForBackgroundURLSession identifier: String,
-                 completionHandler: @escaping () -> Void) {
-  Apparent.handleBackgroundURLSessionEvents(identifier: identifier, completionHandler: completionHandler)
-}
-```
-
-#### App context
-
-The app can say which screen it's on and add its own key/values, so the agent doesn't have to guess
-from pixels. ApparentKit sends only what the app passes in, plus its bundle ID, name, version, and build.
-
-```swift
-SettingsView().apparentScreen("Settings › Experimental")   // while visible; restores the previous on disappear
-SessionView().apparentContext("session", session.id)       // follows the value; nil leaves it to enclosing views
-Apparent.screen("Onboarding")                              // or set either one directly (nil clears)
-Apparent.context("server", "studio")
-```
-
-The most recently appeared screen that is still visible wins, so pushed screens, sheets, and tabs
-work. The timeline gets `shortVersion`, `context` (values at the start), `contextChanges`
-(`[{"t", "key", "value"}]`, `null` when cleared), and `screens` (`[{"t", "name"}]`, the first at `0`).
-The bundle keeps them as `context`, `contextChanges`, and `screens` spans (`{t0, t1, name}`), and
-`summary.md` shows them:
-
-```
-[apparent 0:25 · iPhone · OpenCode 1.4 (354) · /…/20261014-101500.apparent]
-Open contact-sheet.png and frames/ in that folder before changing anything: the marks and words only make sense on the images, which can show more than the text does.
-Screen: Sessions · server: studio · session: ses_3f…
-- #1 (0:01) “So here.”
-- #3 (0:08) ⟨Settings › Experimental⟩ [tapped “Back”] “Go back.”
-  · 0:09 server → mini
-```
-
-### Headless ingest server (`apparent serve`)
-
-On an always-on Mac (such as a Mac Studio reachable over Tailscale), run `apparent serve` to accept
-authenticated ApparentKit uploads and build `.apparent` bundles without running the GUI app:
-
-```sh
-apparent serve [--port 47777] [--usb]
-```
-
-To run `apparent serve` under `launchd`, copy `scripts/apparent-serve.plist` into `~/Library/LaunchAgents`
-and load it:
-
-```sh
-cp scripts/apparent-serve.plist ~/Library/LaunchAgents/dev.kitlangton.apparent.serve.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kitlangton.apparent.serve.plist
-```
 
 ## Export as video
 
@@ -663,17 +438,15 @@ and ignore the hint.
   `"estimated": true`; because those times are approximate, spoken cues ("now", "here") don't cut
   keyframes from a Hex transcript. Marks, clicks, laser and scene changes still do.
 - `apparent hex status` shows whether Hex is connected, its ready models and what the next recording
-  will use. `apparent reprocess <bundle> --out … --transcriber hex|apple|command` (also
-  `apparent import`) picks an engine for one run.
+  will use. `apparent reprocess <bundle> --out … --transcriber hex|apple|command` picks an engine for one run.
 
 ### Your own model (command)
 
 Any other local model (whisper.cpp, MLX Whisper, faster-whisper, Parakeet, a Core ML model…) can
 transcribe through a small wrapper program. Apparent runs it on the recording's audio and reads a
 JSON transcript from its stdout; it knows nothing about the model, adds no network requests and
-doesn't sandbox the program. It runs on macOS only for now; on Windows recordings keep the local
-engine. In `~/.config/apparent/config.json` (Settings shows **Command** once it is set; editing it
-stays in the file):
+doesn't sandbox the program. It runs on macOS only. In `~/.config/apparent/config.json` (Settings
+shows **Command** once it is set; editing it stays in the file):
 
 ```json
 {
@@ -763,61 +536,6 @@ then `granted` or `cancelled` with a `reason` (`back`, `settings-closed`, `no-se
 X,Y,W,H --visible X,Y,W,H` prints where the card would dock (`below`, `inside`, `right`, `left` or
 `clamped`); `scripts/check-permission-panel-dock.sh` checks the cases.
 
-## Windows
-
-Apparent runs on Windows 10 (2004) and later as the same app: the same capsule, picker, overlay,
-review window, welcome tour and Settings, from the same GPUI code. Only the parts the operating
-system owns differ:
-
-| | macOS | Windows |
-|---|---|---|
-| Shortcut | `⌥⇧S`, `⌥⇧V` | `Alt+Shift+S`, `Alt+Shift+V` |
-| Menu | Menu bar item | Notification area icon (left or right click) |
-| Screen and window capture | ScreenCaptureKit | Windows.Graphics.Capture, H.264 through Media Foundation |
-| Clicks, keys, Shift ink | Mouse monitor, Accessibility key tap, modifier state | Low-level hooks and key state |
-| Ink overlay | Metal panel | Click-through GPUI window, left out of recordings |
-| Transcription | SpeechAnalyzer, or Hex | Parakeet on device (`transcribe.cpp`), Hex's model or Apparent's own copy |
-| Movie decoding | `apparent-helper` (AVFoundation) | Media Foundation, in process |
-| Paste | `⌘V` | `Ctrl+V` |
-| Settings and welcome tour | SwiftUI (`apparent-helper`) | GPUI windows in process, same panes and protocol |
-| Recording capsule | Native AppKit + Metal pill (or GPUI) | GPUI capsule |
-| Launch at login | `SMAppService` | The user's `Run` key (Settings › Apps › Startup) |
-| Captures | `~/Library/Application Support/apparent/captures` | `%LOCALAPPDATA%\apparent\captures` |
-| Log | `~/Library/Logs/Apparent/apparent.log` | `%LOCALAPPDATA%\Apparent\Logs\apparent.log` |
-
-- **Permissions:** none, apart from the microphone switch in Settings › Privacy & security, which
-  the welcome tour and Apparent's Settings › Permissions check. Screen capture, input hooks and
-  pasting need no grant on Windows.
-- **Shortcuts:** both are recorded in Settings › General like on macOS, as `Ctrl`, `Alt`, `Win` and
-  `Shift` combinations. Apparent turns down `Ctrl` with one key (apps use those), `Win` with a key
-  (Windows uses those), and `Alt+Tab`, `Alt+F4` and `Alt+Space`.
-- **Transcription:** Parakeet runs on device with measured word timings, so spoken cues ("look
-  here") cut keyframes as on macOS. If [Hex](https://github.com/anomalyco/hex) has installed a
-  model (`%APPDATA%\voice-control\models`), Apparent uses it. Otherwise the first launch downloads
-  Hex's Parakeet Unified English (730 MB, checked against its SHA-256) into
-  `%LOCALAPPDATA%\Apparent\models` in the background; Settings › Recording shows the progress, and
-  captures made before it finishes get their transcript once it lands.
-- **Command-line tool:** **Install** in Settings › Agents writes a `apparent.cmd` shim into
-  `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on every user's PATH, so agents and terminals
-  can run `apparent`.
-- **agentContext:** what clicks and marks land on comes from UI Automation, as it does from the
-  Accessibility tree on macOS.
-- **Not on Windows:** the cabled iPhone (it needs AVFoundation's screen capture devices), video
-  export, Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL
-  (`/sdk.js` registrations still route).
-- **Releases:** manually dispatch `.github/workflows/release-windows.yml` on `main` with
-  `tag=v<version>` to build `Apparent-<version>-windows-x64.zip` and attach it to the release.
-  It isn't code-signed yet; signing and automatic updates are planned.
-
-Build with the MSVC toolchain, CMake and the Windows SDK (Visual Studio Build Tools with the C++
-workload). Release builds also need GPUI's shader compiler: set `GPUI_FXC_PATH` to the SDK's
-`fxc.exe` (for example `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe`).
-
-```powershell
-cargo build --release
-.\target\release\apparent.exe app
-```
-
 ## Linux
 
 Apparent runs on Linux desktops (GNOME and KDE Plasma, on Wayland or X11) as the same app, from
@@ -852,19 +570,13 @@ taskpolicy -c utility cargo test -j 3 --offline -- --test-threads=2
 ./scripts/install-app.sh
 ```
 
-On Windows, `cargo test`; then run `apparent.exe app` and record with `Alt+Shift+S`. On Linux,
-`cargo test`; then run `apparent app` in a desktop session and record with `Alt+Shift+S`.
+On Linux, run `cargo test`; then run `apparent app` in a desktop session and record with `Alt+Shift+S`.
 `APPARENT_SHOW_OWN_WINDOWS=1` keeps Apparent's own windows (capsule, overlay, picker) in screenshots,
 which normally leave them out.
 
 - **iPhone:** connect a phone, press `⌥⇧S`, click the iPhone chip, talk, draw over the mirror, press M,
   Finish. Inspect the bundle's `summary.md`, `apparent.json` (`source`, `device`), contact sheet, and
   frames.
-- **ApparentKit:** `apparent import` on a recording and its timeline (or hand-write a timeline for any
-  phone video), then check the ripples and trails on frames and the app-event lines in the summary.
-  `swift test` runs the outbox tests on the Mac against a `URLProtocol` stub of the ingest endpoint
-  (persisting, retry classification, resends, deletion only on 2xx, and what the strip says through
-  slow uploads, no network, and retries).
 - **Transcription:** `apparent-helper transcribe <wav or movie>` prints words with timings;
   `apparent reprocess <bundle> --out …` reruns transcription and keyframe selection on a real bundle.
 

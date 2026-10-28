@@ -512,6 +512,13 @@ fn event_text(event: &InteractionEvent) -> Option<String> {
                 text.push(' ');
                 text.push_str(&quote_label(label));
             }
+            #[cfg(target_os = "linux")]
+            if button.as_deref() != Some("touch")
+                && role.as_deref().is_none_or(str::is_empty)
+                && label.as_deref().is_none_or(str::is_empty)
+            {
+                text.push_str(" (element unavailable)");
+            }
             Some(text)
         }
         InteractionEvent::Point { label, .. } => label
@@ -1228,8 +1235,44 @@ mod tests {
             click(9_000, 0.2),
         ];
         let texts = keyframe_texts(&b);
-        assert_eq!(texts[0].lines, vec!["· 0:01 clicked ×3".to_owned()]);
-        assert_eq!(texts[1].lines, vec!["· 0:09 clicked".to_owned()]);
+        let fallback = if cfg!(target_os = "linux") {
+            " (element unavailable)"
+        } else {
+            ""
+        };
+        assert_eq!(texts[0].lines, vec![format!("· 0:01 clicked{fallback} ×3")]);
+        assert_eq!(texts[1].lines, vec![format!("· 0:09 clicked{fallback}")]);
         assert_eq!(texts[1].head, "");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_unidentified_clicks_have_a_fallback_without_hiding_page_labels_or_touch() {
+        let click = |role: Option<&str>, label: Option<&str>, button: Option<&str>| {
+            InteractionEvent::Click {
+                t: 0,
+                x: 0.0,
+                y: 0.0,
+                role: role.map(str::to_owned),
+                label: label.map(str::to_owned),
+                button: button.map(str::to_owned),
+            }
+        };
+        assert_eq!(
+            event_text(&click(None, None, None)).as_deref(),
+            Some("clicked (element unavailable)")
+        );
+        assert_eq!(
+            event_text(&click(Some(""), Some(""), None)).as_deref(),
+            Some("clicked (element unavailable)")
+        );
+        assert_eq!(
+            event_text(&click(Some("button"), Some("Area"), None)).as_deref(),
+            Some("clicked button “Area”")
+        );
+        assert_eq!(
+            event_text(&click(None, None, Some("touch"))).as_deref(),
+            Some("tapped")
+        );
     }
 }

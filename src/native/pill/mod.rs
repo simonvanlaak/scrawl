@@ -31,17 +31,44 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, NSObjectProtocol};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusWindowLevel,
-    NSView, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusWindowLevel, NSView,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATransaction};
 
 use self::atlas::{GlyphAtlas, IconKind};
-use self::model::{
-    CHIP_H, CHIP_PX, ElemId, FrameState, PANEL_H, PANEL_W, PillModel, Pres,
-};
+use self::model::{CHIP_H, CHIP_PX, ElemId, FrameState, PANEL_H, PANEL_W, PillModel, Pres};
+use crate::ui::pill_theme::{PillTheme, SIGNAL, SIGNAL_HOVER, WARNING};
 use crate::ui::{SelectionMode, motion};
+
+fn color(rgb: u32, alpha: f32) -> [f32; 4] {
+    [
+        ((rgb >> 16) & 255) as f32 / 255.0,
+        ((rgb >> 8) & 255) as f32 / 255.0,
+        (rgb & 255) as f32 / 255.0,
+        alpha,
+    ]
+}
+
+// The Metal panel is not a GPUI window, so it reads AppKit's effective appearance.
+pub(crate) fn system_theme() -> PillTheme {
+    let dark = AnyClass::get(c"NSApplication")
+        .and_then(|cls| unsafe {
+            let app: *mut AnyObject = msg_send![cls, sharedApplication];
+            if app.is_null() {
+                return None;
+            }
+            let appearance: *mut AnyObject = msg_send![app, effectiveAppearance];
+            if appearance.is_null() {
+                return None;
+            }
+            let name: Retained<NSString> = msg_send![appearance, name];
+            Some(name.to_string().contains("Dark"))
+        })
+        .unwrap_or(true);
+    PillTheme { dark }
+}
 
 const OFFSCREEN_W_PT: f32 = 960.0;
 const OFFSCREEN_H_PT: f32 = 256.0;
@@ -69,6 +96,8 @@ struct PillUniforms {
     shape_meta: [f32; 4],
     ghost_rect: [f32; 4],
     ghost_meta: [f32; 4],
+    surface_color: [f32; 4],
+    border_color: [f32; 4],
 }
 
 #[repr(C)]
@@ -176,7 +205,11 @@ define_class!(
 );
 
 impl ApparentPillView {
-    fn new(mtm: MainThreadMarker, frame: NSRect, action_tx: flume::Sender<PillAction>) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        action_tx: flume::Sender<PillAction>,
+    ) -> Retained<Self> {
         let this = mtm.alloc::<Self>().set_ivars(PillViewIvars {
             action_tx,
             mic_status: Mutex::new((None, false)),
@@ -208,7 +241,10 @@ impl MetalPipelines {
             .new_library_with_data(metallib_bytes)
             .map_err(|e| format!("Failed to load pill.metallib: {e}"))?;
 
-        let make_pipeline = |vs_name: &str, fs_name: &str, premul_blend: bool| -> Result<RenderPipelineState, String> {
+        let make_pipeline = |vs_name: &str,
+                             fs_name: &str,
+                             premul_blend: bool|
+         -> Result<RenderPipelineState, String> {
             let vs = library
                 .get_function(vs_name, None)
                 .map_err(|e| format!("Missing vertex shader {vs_name}: {e}"))?;
@@ -241,7 +277,8 @@ impl MetalPipelines {
 
         let tile_pipeline = make_pipeline("pill_tile_vertex", "pill_tile_fragment", true)?;
         let blur_h_pipeline = make_pipeline("pill_blur_h_vertex", "pill_blur_h_fragment", false)?;
-        let composite_pipeline = make_pipeline("pill_screen_vertex", "pill_composite_fragment", false)?;
+        let composite_pipeline =
+            make_pipeline("pill_screen_vertex", "pill_composite_fragment", false)?;
 
         let make_offscreen = || {
             let desc = TextureDescriptor::new();
@@ -289,6 +326,7 @@ struct PillRuntimeState {
     glass_view: Option<Retained<NSView>>,
     screen_origin_top_left: [f32; 2],
     style: PillStyle,
+    theme: PillTheme,
     last_tick_now: f64,
     dirty: bool,
     ignores_mouse: bool,
@@ -405,6 +443,7 @@ impl NativePill {
                 glass_view,
                 screen_origin_top_left: [top_left_x, top_left_y],
                 style: PillStyle::current(),
+                theme: system_theme(),
                 last_tick_now: motion::now(),
                 dirty: true,
                 ignores_mouse: true,
@@ -425,10 +464,7 @@ impl NativePill {
         if let Ok(dl) = CVDisplayLink::from_active_cg_displays() {
             let ctx = Arc::into_raw(shared.clone());
             if unsafe {
-                dl.set_output_callback(
-                    pill_display_link_cb,
-                    ctx.cast_mut().cast::<c_void>(),
-                )
+                dl.set_output_callback(pill_display_link_cb, ctx.cast_mut().cast::<c_void>())
             }
             .is_ok()
             {
@@ -653,17 +689,12 @@ extern "C" fn pill_display_link_cb(
 ) -> CVReturn {
     if !context.is_null() {
         let shared = unsafe { &*context.cast::<SharedNativePill>() };
-        if shared.alive.load(Ordering::Relaxed)
-            && !shared.tick_queued.swap(true, Ordering::AcqRel)
+        if shared.alive.load(Ordering::Relaxed) && !shared.tick_queued.swap(true, Ordering::AcqRel)
         {
             // Retain an Arc reference for the main-queue callback.
             unsafe {
                 Arc::increment_strong_count(context.cast::<SharedNativePill>());
-                dispatch_async_f(
-                    &_dispatch_main_q,
-                    context,
-                    pill_main_queue_trampoline,
-                );
+                dispatch_async_f(&_dispatch_main_q, context, pill_main_queue_trampoline);
             }
         }
     }
@@ -691,6 +722,11 @@ impl SharedNativePill {
         };
 
         let live_style = PillStyle::current();
+        let live_theme = system_theme();
+        if st.theme != live_theme {
+            st.theme = live_theme;
+            st.dirty = true;
+        }
         if st.style != live_style {
             st.style = live_style;
             st.dirty = true;
@@ -708,8 +744,7 @@ impl SharedNativePill {
         st.last_tick_now = now;
         let dt = raw_dt.min(0.025 * motion::time_scale());
 
-        let animating = !st.model.is_at_rest()
-            || matches!(st.model.pres, Pres::Processing);
+        let animating = !st.model.is_at_rest() || matches!(st.model.pres, Pres::Processing);
         if !animating && !st.dirty {
             if motion::tracing() && !st.model.is_fully_hidden() {
                 let frame = st.model.frame();
@@ -869,15 +904,13 @@ impl PillRuntimeState {
 
         for elem in &frame.elems {
             let [ex, ey, ew, eh] = elem.rect;
-            let screen_rect = if matches!(elem.id, ElemId::DividerLead | ElemId::DividerClose | ElemId::DividerWarning) {
+            let screen_rect = if matches!(
+                elem.id,
+                ElemId::DividerLead | ElemId::DividerClose | ElemId::DividerWarning
+            ) {
                 let dw = 1.0 * elem.scale;
                 let dh = 16.0 * elem.scale;
-                [
-                    ox + ex + (ew - dw) * 0.5,
-                    oy + ey + (eh - dh) * 0.5,
-                    dw,
-                    dh,
-                ]
+                [ox + ex + (ew - dw) * 0.5, oy + ey + (eh - dh) * 0.5, dw, dh]
             } else {
                 [ox + ex, oy + ey, ew, eh]
             };
@@ -893,11 +926,14 @@ impl PillRuntimeState {
     }
 
     fn render_frame(&mut self, frame: &FrameState) {
-        let use_glass = self.style == PillStyle::Glass && self.glass_view.is_some();
+        let use_glass =
+            self.style == PillStyle::Glass && self.theme.dark && self.glass_view.is_some();
         let Some(drawable) = self.pipelines.layer.next_drawable() else {
             return;
         };
-        let cmd = self.pipelines.encode(frame, use_glass, drawable.texture());
+        let cmd = self
+            .pipelines
+            .encode(frame, use_glass, self.theme, drawable.texture());
 
         // Synchronize `NSGlassEffectView` geometry and Metal drawable presentation in one CATransaction.
         CATransaction::begin();
@@ -938,7 +974,6 @@ impl PillRuntimeState {
         drawable.present();
         CATransaction::commit();
     }
-
 }
 
 impl MetalPipelines {
@@ -948,6 +983,7 @@ impl MetalPipelines {
         &self,
         frame: &FrameState,
         use_glass: bool,
+        theme: PillTheme,
         target: &metal::TextureRef,
     ) -> metal::CommandBuffer {
         let mut prims: Vec<TilePrim> = Vec::with_capacity(frame.elems.len() * 3);
@@ -978,6 +1014,13 @@ impl MetalPipelines {
                 frame.t,
                 frame.mic_warning,
                 frame.completed_warning,
+                theme,
+                frame
+                    .elems
+                    .iter()
+                    .any(|item| item.id == ElemId::LiveWarning)
+                    || frame.mic_warning.is_some(),
+                !frame.elems.iter().any(|item| item.id == ElemId::Record),
                 &mut prims,
             );
 
@@ -1036,6 +1079,8 @@ impl MetalPipelines {
             ],
             ghost_rect,
             ghost_meta,
+            surface_color: color(theme.surface(), 1.0),
+            border_color: color(theme.line(), 1.0),
         };
 
         let prim_count = prims.len() as u64;
@@ -1153,6 +1198,9 @@ fn emit_elem_prims(
     t: f32,
     mic_warning: Option<crate::audio::InputWarning>,
     completed_warning: bool,
+    theme: PillTheme,
+    recording_warning: bool,
+    accent_mode: bool,
     out: &mut Vec<TilePrim>,
 ) {
     let [bw, bh] = elem.base_size;
@@ -1196,29 +1244,34 @@ fn emit_elem_prims(
                 ElemId::ChipIphone => SelectionMode::Iphone,
                 _ => unreachable!(),
             };
-            if is_glass {
-                let smoke_a = 0.20 + 0.18 * elem.active + 0.10 * elem.hover;
-                push_shape(out, [ox, oy, bw, bh], bh * 0.5, [0.06, 0.07, 0.10, smoke_a]);
-            } else {
-                let bg_a = 0.16 * elem.active
-                    + 0.08 * elem.hover * (1.0 - elem.active)
-                    + 0.06 * elem.press;
-                if bg_a > 0.002 {
-                    push_shape(out, [ox, oy, bw, bh], bh * 0.5, [1.0, 1.0, 1.0, bg_a]);
-                }
+            let selected = elem.active > 0.01;
+            let accent = accent_mode && !recording_warning;
+            if selected || elem.hover > 0.01 {
+                push_shape(
+                    out,
+                    [ox, oy, bw, bh],
+                    bh * 0.5,
+                    color(
+                        if accent { SIGNAL } else { theme.neutral() },
+                        elem.active.max(elem.hover * 0.35),
+                    ),
+                );
             }
             let ic = atlas.icon(IconKind::from_mode(mode));
             let tx = atlas.label(mode.label());
-            let fg = if is_glass {
-                0.90 + 0.10 * elem.active.max(elem.hover)
-            } else {
-                0.608 + 0.353 * elem.active.max(elem.hover * 0.65)
-            };
+            let fg = color(
+                if selected && accent {
+                    theme.active_text()
+                } else {
+                    theme.text()
+                },
+                0.75 + 0.25 * elem.active.max(elem.hover),
+            );
             push_sprite(
                 out,
                 [ox + CHIP_PX, oy + (CHIP_H - 14.0) * 0.5, 14.0, 14.0],
                 ic.uv,
-                [fg, fg, fg, 1.0],
+                fg,
             );
             push_sprite(
                 out,
@@ -1229,7 +1282,7 @@ fn emit_elem_prims(
                     tx.size_pt[1],
                 ],
                 tx.uv,
-                [fg, fg, fg, 1.0],
+                fg,
             );
         }
         ElemId::Record | ElemId::Finish | ElemId::Paste => {
@@ -1240,17 +1293,67 @@ fn emit_elem_prims(
                 _ => unreachable!(),
             };
             let tx = atlas.label(label);
-            // `ACCENT_COLOR = 0x3b5cf6`, `ACCENT_HOVER = 0x4b6bff`
-            let r = (0.231 + 0.063 * elem.hover - 0.03 * elem.press).clamp(0.0, 1.0);
-            let g = (0.361 + 0.059 * elem.hover - 0.04 * elem.press).clamp(0.0, 1.0);
-            let b = (0.965 + 0.035 * elem.hover - 0.04 * elem.press).clamp(0.0, 1.0);
-            push_shape(out, [ox, oy, bw, bh], bh * 0.5, [r, g, b, 1.0]);
-            push_sprite(out, center_text(tx), tx.uv, [0.95, 0.95, 0.96, 1.0]);
+            let outlined = (recording_warning && elem.id == ElemId::Finish)
+                || (completed_warning && elem.id == ElemId::Paste);
+            if outlined {
+                push_shape(out, [ox, oy, bw, bh], bh * 0.5, color(theme.text(), 1.0));
+                push_shape(
+                    out,
+                    [ox + 1.0, oy + 1.0, bw - 2.0, bh - 2.0],
+                    (bh - 2.0) * 0.5,
+                    color(
+                        if elem.hover > 0.01 {
+                            theme.hover()
+                        } else {
+                            theme.surface()
+                        },
+                        1.0,
+                    ),
+                );
+            } else {
+                push_shape(
+                    out,
+                    [ox, oy, bw, bh],
+                    bh * 0.5,
+                    color(
+                        if elem.hover > 0.01 {
+                            SIGNAL_HOVER
+                        } else {
+                            SIGNAL
+                        },
+                        1.0,
+                    ),
+                );
+            }
+            push_sprite(
+                out,
+                center_text(tx),
+                tx.uv,
+                color(
+                    if outlined {
+                        theme.text()
+                    } else {
+                        theme.active_text()
+                    },
+                    1.0,
+                ),
+            );
         }
         ElemId::MicWarning => {
             if let Some(warning) = mic_warning {
                 let tx = atlas.label(warning.label());
-                push_sprite(out, center_text(tx), tx.uv, [1.0, 0.79, 0.44, 1.0]);
+                push_shape(
+                    out,
+                    [ox, oy + 4.0, bw, bh - 8.0],
+                    4.0,
+                    color(if theme.dark { 0x4a360e } else { 0xf5d98a }, 1.0),
+                );
+                push_sprite(
+                    out,
+                    center_text(tx),
+                    tx.uv,
+                    color(theme.warning_text(), 1.0),
+                );
             }
         }
         ElemId::Lead => {
@@ -1289,7 +1392,7 @@ fn emit_elem_prims(
                     tx.size_pt[1],
                 ],
                 tx.uv,
-                [0.961, 0.961, 0.969, 1.0],
+                color(theme.text(), 1.0),
             );
         }
         ElemId::Route0 | ElemId::Route1 => {
@@ -1304,7 +1407,7 @@ fn emit_elem_prims(
             } else {
                 let bg_a = rest + 0.08 * elem.hover + 0.06 * elem.press;
                 if bg_a > 0.002 {
-                    push_shape(out, [ox, oy, bw, bh], bh * 0.5, [1.0, 1.0, 1.0, bg_a]);
+                    push_shape(out, [ox, oy, bw, bh], bh * 0.5, color(theme.text(), bg_a));
                 }
             }
             let tx = atlas.route_sprites[index];
@@ -1315,7 +1418,7 @@ fn emit_elem_prims(
             } else {
                 0.74 + 0.22 * elem.hover
             };
-            push_sprite(out, center_text(tx), tx.uv, [fg, fg, fg, 1.0]);
+            push_sprite(out, center_text(tx), tx.uv, color(theme.text(), fg));
         }
         ElemId::Cancel | ElemId::Whiteboard | ElemId::Inspect => {
             let label = match elem.id {
@@ -1328,7 +1431,7 @@ fn emit_elem_prims(
                 push_shape(out, [ox, oy, bw, bh], bh * 0.5, [0.06, 0.07, 0.10, smoke_a]);
             } else if elem.hover > 0.01 || elem.press > 0.01 {
                 let bg_a = 0.08 * elem.hover + 0.06 * elem.press;
-                push_shape(out, [ox, oy, bw, bh], bh * 0.5, [1.0, 1.0, 1.0, bg_a]);
+                push_shape(out, [ox, oy, bw, bh], bh * 0.5, color(theme.text(), bg_a));
             }
             let tx = atlas.label(label);
             let fg = if is_glass {
@@ -1336,7 +1439,7 @@ fn emit_elem_prims(
             } else {
                 0.74 + 0.22 * elem.hover
             };
-            push_sprite(out, center_text(tx), tx.uv, [fg, fg, fg, 1.0]);
+            push_sprite(out, center_text(tx), tx.uv, color(theme.text(), fg));
         }
         ElemId::Close => {
             if is_glass {
@@ -1353,7 +1456,7 @@ fn emit_elem_prims(
                     out,
                     [ox + 2.0, oy + 2.0, bh - 4.0, bh - 4.0],
                     (bh - 4.0) * 0.5,
-                    [1.0, 1.0, 1.0, bg_a],
+                    color(theme.text(), bg_a),
                 );
             }
             let ic = atlas.icon(IconKind::Close);
@@ -1371,7 +1474,7 @@ fn emit_elem_prims(
                     12.0,
                 ],
                 ic.uv,
-                [fg, fg, fg, 1.0],
+                color(theme.text(), fg),
             );
         }
         ElemId::DividerLead | ElemId::DividerClose | ElemId::DividerWarning => {
@@ -1379,17 +1482,36 @@ fn emit_elem_prims(
                 out,
                 [ox + (bw - 1.0) * 0.5, oy + (bh - 16.0) * 0.5, 1.0, 16.0],
                 0.5,
-                [1.0, 1.0, 1.0, 0.11],
+                color(theme.text(), 0.22),
             );
         }
         ElemId::LiveWarning => {
-            push_shape(out, [ox, oy + 8.0, 1.0, bh - 16.0], 0.5, [1.0, 1.0, 1.0, 0.11]);
+            push_shape(
+                out,
+                [ox, oy + 8.0, 1.0, bh - 16.0],
+                0.5,
+                color(theme.text(), 0.22),
+            );
             let icon = atlas.icon(IconKind::Warning);
             let text = atlas.label("No words yet");
-            let amber = [0.961, 0.710, 0.267, 1.0];
-            push_sprite(out, [ox + 8.0, oy + (bh - 13.0) * 0.5, 13.0, 13.0], icon.uv, amber);
-            push_sprite(out, [ox + 26.0, oy + (bh - text.size_pt[1]) * 0.5,
-                text.size_pt[0], text.size_pt[1]], text.uv, amber);
+            let amber = color(theme.warning_text(), 1.0);
+            push_sprite(
+                out,
+                [ox + 8.0, oy + (bh - 13.0) * 0.5, 13.0, 13.0],
+                icon.uv,
+                amber,
+            );
+            push_sprite(
+                out,
+                [
+                    ox + 26.0,
+                    oy + (bh - text.size_pt[1]) * 0.5,
+                    text.size_pt[0],
+                    text.size_pt[1],
+                ],
+                text.uv,
+                amber,
+            );
         }
         ElemId::Processing => {
             let head = (t * 8.0) % 8.0;
@@ -1403,7 +1525,7 @@ fn emit_elem_prims(
                     out,
                     [dcx - 1.35, dcy - 1.35, 2.7, 2.7],
                     1.35,
-                    [0.961, 0.961, 0.969, da],
+                    color(theme.text(), da),
                 );
             }
             let tx = atlas.label("Processing…");
@@ -1416,29 +1538,24 @@ fn emit_elem_prims(
                     tx.size_pt[1],
                 ],
                 tx.uv,
-                [0.961, 0.961, 0.969, 1.0],
+                color(theme.text(), 1.0),
             );
         }
         ElemId::DoneLead => {
-            let (icon, color, background) = if completed_warning {
+            let (icon, icon_color, background) = if completed_warning {
                 (
                     IconKind::Warning,
-                    [0.961, 0.710, 0.267, 1.0],
-                    [0.961, 0.647, 0.137, 0.18],
+                    color(if theme.dark { WARNING } else { 0x744900 }, 1.0),
+                    color(if theme.dark { 0x4a360e } else { 0xf5d98a }, 1.0),
                 )
             } else {
                 (
                     IconKind::Check,
-                    [0.412, 0.847, 0.624, 1.0],
-                    [0.412, 0.847, 0.624, 0.22],
+                    color(theme.text(), 1.0),
+                    color(theme.neutral(), 1.0),
                 )
             };
-            push_shape(
-                out,
-                [ox + 5.0, oy + 5.0, 22.0, 22.0],
-                11.0,
-                background,
-            );
+            push_shape(out, [ox + 5.0, oy + 5.0, 22.0, 22.0], 11.0, background);
             let ic = atlas.icon(icon);
             push_sprite(
                 out,
@@ -1449,7 +1566,7 @@ fn emit_elem_prims(
                     13.0,
                 ],
                 ic.uv,
-                color,
+                icon_color,
             );
             let tx = atlas.completed_sprite;
             push_sprite(
@@ -1461,7 +1578,7 @@ fn emit_elem_prims(
                     tx.size_pt[1],
                 ],
                 tx.uv,
-                [0.961, 0.961, 0.969, 1.0],
+                color(theme.text(), 1.0),
             );
         }
     }
@@ -1484,6 +1601,16 @@ mod tests {
         model: &mut PillModel,
         pres: &Pres,
         seconds: f32,
+    ) -> crate::model::RgbaFrame {
+        still_with_theme(pipelines, model, pres, seconds, PillTheme { dark: true })
+    }
+
+    fn still_with_theme(
+        pipelines: &mut MetalPipelines,
+        model: &mut PillModel,
+        pres: &Pres,
+        seconds: f32,
+        theme: PillTheme,
     ) -> crate::model::RgbaFrame {
         if let Pres::Completed { label, routes, .. } = pres {
             let mut labels = model.labels;
@@ -1512,7 +1639,7 @@ mod tests {
         desc.set_storage_mode(metal::MTLStorageMode::Shared);
         desc.set_usage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
         let target = pipelines._device.new_texture(&desc);
-        let cmd = pipelines.encode(&frame, false, &target);
+        let cmd = pipelines.encode(&frame, false, theme, &target);
         cmd.commit();
         cmd.wait_until_completed();
         let mut bgra = vec![0_u8; (w * h * 4) as usize];
@@ -1544,7 +1671,39 @@ mod tests {
             width: w as u32,
             height: h as u32,
             rgba,
-            badge_top_right: false,
+            badge_bottom_left: false,
+        }
+    }
+
+    #[test]
+    fn all_pill_states_render_in_both_appearances() {
+        let mut pipelines = MetalPipelines::new(2.0).expect("MetalPipelines::new failed");
+        let mut model = PillModel::new(atlas::measure_metrics());
+        let states = [
+            ("selecting", Pres::Selecting { mode: SelectionMode::Screen, has_iphone: false }),
+            ("recording", Pres::Recording { chips: false, has_iphone: false }),
+            ("recording-warning", Pres::RecordingWarning { chips: false, has_iphone: false }),
+            ("processing", Pres::Processing),
+            ("completed", Pres::Completed { label: "Copied".into(), routes: vec![], warning: false }),
+            ("completed-warning", Pres::Completed { label: "No words found".into(), routes: vec![], warning: true }),
+        ];
+        for (name, pres) in &states {
+            let mut dark_frame = None;
+            for dark in [true, false] {
+                let frame = still_with_theme(&mut pipelines, &mut model, pres, 1.5, PillTheme { dark });
+                assert!(model.is_at_rest(), "{name} did not settle");
+                assert!(frame.rgba.chunks_exact(4).any(|px| px[0] != 0x5a), "{name} drew nothing");
+                if dark {
+                    dark_frame = Some(frame.rgba.clone());
+                } else {
+                    assert_ne!(dark_frame.as_ref().unwrap(), &frame.rgba, "{name} ignored appearance");
+                }
+                if let Some(dir) = std::env::var_os("APPARENT_PILL_STILLS") {
+                    let dir = std::path::PathBuf::from(dir);
+                    std::fs::create_dir_all(&dir).unwrap();
+                    crate::render::save_png(&frame, &dir.join(format!("{name}-{}.png", if dark { "dark" } else { "light" }))).unwrap();
+                }
+            }
         }
     }
 

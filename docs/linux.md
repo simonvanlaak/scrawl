@@ -1,6 +1,6 @@
 # Linux
 
-Read this before changing `src/capture/linux.rs`, `src/ui/linux.rs`, `src/linux/`, `src/ink_view.rs`, `src/speech.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`. `docs/windows.md` explains the shared shape (one GPUI UI, per-OS shells); Linux is the third shell beside macOS and Windows.
+Read this before changing `src/capture/linux.rs`, `src/ui/linux.rs`, `src/linux/`, `src/ink_view.rs`, `src/speech.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`. The shared GPUI UI uses platform adapters for the macOS and Linux shells. Windows code is retained but unsupported.
 
 ## X11 everywhere, Wayland around it
 
@@ -8,7 +8,7 @@ GPUI is built with its `x11` feature only, and `linux::prepare_process` (the fir
 
 GPUI 0.2.2's X11 window panics on `HasWindowHandle`, so `x11::window_id` finds a GPUI window's X id itself (the newest `_NET_WM_PID` window it hasn't seen, cached per `WindowId`).
 
-Global coordinates are root-window pixels; X11 has one scale for the screen (`x11::ui_scale`), so `MAX_CAPTURE_SCALE` is 1 as on Windows.
+Global coordinates are root-window pixels; X11 has one scale for the screen (`x11::ui_scale`), so `MAX_CAPTURE_SCALE` is 1.
 
 ## What each session can do
 
@@ -90,11 +90,40 @@ Not done: a click's position still comes from XWayland (see above; `j/cursorpos`
 
 Neither X11 nor GNOME's or KDE's screencasts let an app leave its windows out, so the pill and the ink are in `recording.mp4` and the keyframes. The ink is drawn again at the same place on the keyframes, so it doesn't double. The candidate frames used to pick keyframes paint over the pill (`linux::media::own_window_masks`), so its ticking clock never counts as activity.
 
+This is a capture-source limitation, not a missing mask in the keyframe selector. On
+X11, `ximagesrc` records the already-composited root image; GNOME's `RecordArea`
+and the ScreenCast portal return already-composited monitor streams. The portal's
+`SelectSources` can select a monitor or a window, but cannot subtract a set of
+windows from a monitor stream. The GStreamer `tee` sends the same source to the
+MP4 encoder and candidate-frame sink. `own_window_masks` changes only the
+candidate copies used to detect activity; full-quality keyframes are decoded
+again from the MP4, so they can contain the controls too. Hiding the picker,
+capsule or ink from that stream while keeping the user-opened whiteboard and
+click-through/⇧ ink behavior requires compositor-side exclusion or an equivalent
+source that supplies the uncovered pixels. Painting rectangles over the movie
+would destroy the content beneath the controls, not exclude the controls.
+
+Hyprland's `noscreenshare` rule draws **black rectangles** in place of matching
+windows, including when another window is above them; it is not a transparent
+exclusion mechanism and must not be applied to Apparent windows as a purported
+fix. A separately scoped fallback could record an explicitly selected window
+instead of the monitor where the backend supports it, but it would omit other
+windows such as the user's whiteboard and is not equivalent to Screen/Area
+capture. Keep the existing controls and mark this as unsupported until a
+specific compositor/backend can produce a movie that retains the uncovered
+screen and whiteboard; verify the actual MP4 and decoded full-quality frames,
+not just candidate-frame selection, before changing the feature map.
+
+Sources: [ScreenCast portal interface](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html)
+(`SelectSources` source types and options),
+[Hyprland `noscreenshare`](https://wiki.hypr.land/0.50.0/Configuring/Window-Rules/)
+(black rectangles).
+
 ## Movies, transcription, the rest
 
 - **Movies:** GStreamer (`linux::media`): the source above, `videorate` to 30 fps, the first encoder installed of `x264enc`, `openh264enc` and VA-API's, `mp4mux`. Candidate frames come off a `tee` through an `appsink`; `Recorder::finish` drains it, but a stalled candidate branch must not make Apparent delete an MP4 whose file sink has already reported EOS. An unfinished encoder or mux still fails after the eight-second deadline. Compositors send frames only when the screen changes, so the last frame is reused until a new one comes. Without an encoder Apparent records no movie and keeps sharper candidates instead.
 - **H.264 decoder:** Apparent checks its own GStreamer registry at launch and in Settings › Recording. If no usable H.264 decoder factory exists, it warns with the host distribution's installation command (Arch/Omarchy: `sudo pacman -S gst-libav`; Debian/Ubuntu: `sudo apt install gstreamer1.0-libav`; Fedora: `sudo dnf install gstreamer1-plugin-libav`). Apparent never runs the command. A capture whose MP4 decode fails keeps candidate frames and writes an `Image quality:` explanation in `summary.md`; the Linux GUI also notifies. A decoder factory does not guarantee that a particular stream can be decoded, so the packaging check actually decodes a small H.264 MP4 inside the AppImage.
-- **Transcription:** Parakeet through `transcribe.cpp` (`speech.rs`, shared with Windows). As on Windows, Apparent downloads the model once at launch through `speech_model::ensure` (731 MB with `curl` or `wget`, pinned Hugging Face revision, checked against its SHA-256, into `~/.local/share/apparent/models`) unless Hex already has one; Settings › Recording shows its progress. A capture made before it lands says so in `summary.md` and is marked `.transcript-pending`, and is transcribed again in place when the download finishes.
+- **Transcription:** Parakeet through `transcribe.cpp` (`speech.rs`). Apparent downloads the model once at launch through `speech_model::ensure` (731 MB with `curl` or `wget`, pinned Hugging Face revision, checked against its SHA-256, into `~/.local/share/apparent/models`) unless Hex already has one; Settings › Recording shows its progress. A capture made before it lands says so in `summary.md` and is marked `.transcript-pending`, and is transcribed again in place when the download finishes.
 - **Tray:** a StatusNotifierItem (`ksni`); left click starts a recording, the menu is the macOS menu bar menu. GNOME shows it with the AppIndicator extension (on by default on Ubuntu). Without a tray, Apparent says so in a notification, and launching it again opens Settings (`linux::ipc`, a socket at `$XDG_RUNTIME_DIR/apparent.sock`).
 - **Clipboard:** text and PNG through the X clipboard (`linux::clipboard`) on X11 and GNOME; KDE Wayland uses `wl-copy` (bundled in the AppImage) because KWin does not reliably bridge background XWayland selections to native apps.
 - **Launch at login:** `~/.config/autostart/apparent.desktop`; an explicit `launchAtLogin: true` in config refreshes a stale `Exec=` path when the AppImage moves, but respects a desktop-disabled entry. **Trash:** the freedesktop trash. **Captures:** `~/.local/share/apparent/captures`; **log:** `~/.local/share/apparent/Logs/apparent.log`.
@@ -126,7 +155,7 @@ left untouched rather than replaced when changing the channel or recording a lau
 
 ## Not on Linux
 
-The cabled iPhone, video export, `agentContext` lookups (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route).
+The cabled iPhone, video export, OS element lookups for `agentContext` (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route). With `agentContext` on, an unnamed Linux click says `clicked (element unavailable)` and a mark receives no OS-derived element label. AT-SPI cannot securely join an accessible top-level to the X11 window where the action occurred; matching PID, title and bounds do not rule out a stale window. Registered dev pages can still supply their own context. See `docs/keyframes-and-text.md`.
 
 ## Packaging
 

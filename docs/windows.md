@@ -1,6 +1,11 @@
-# Windows
+# Windows (unsupported historical implementation)
 
-Read this before changing `src/capture/windows.rs`, `src/ui/windows.rs`, `src/win/`, `src/onboarding_window.rs`, `src/settings_window.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`.
+Apparent no longer supports Windows. This page records the retained implementation for historical
+reference only; it is not a build, test or release guide for current work. Do not dispatch the
+Windows release workflow or publish Windows assets. Current development targets macOS and Linux.
+
+Retained code lives in `src/capture/windows.rs`, `src/ui/windows.rs`, `src/win/`,
+`src/onboarding_window.rs` and `src/settings_window.rs`. Do not infer current support from it.
 
 ## One app, one UI
 
@@ -29,9 +34,11 @@ Shortcuts are `RegisterHotKey` plus low-level hooks and a key-state poller (inje
 
 The cabled iPhone, video export, Sparkle (**Check for Updates…** opens the releases page) and reading the browser tab URL (the `sdk.js` page bridge still works).
 
-## Building and testing
+## Retained build notes (historical)
 
-Dispatch `.github/workflows/release-windows.yml` manually on `main` with `tag=v<version>` to build and attach the Windows zip. The job runs a `--release` build, `apparent --help`, copies the Visual C++ runtime DLLs it imports beside it (transcribe.cpp's CMake build uses the DLL runtime, so `crt-static` doesn't link), downloads and runs the real model (`cargo test speech -- --ignored`), repeats that run under Intel SDE as a Lunar Lake CPU (no AVX-512), and produces `Apparent-<version>-windows-x64.zip` (unsigned `apparent.exe`, transcribe.cpp's DLLs, those runtime DLLs, README, LICENSE) attached to the tag's GitHub release.
+Windows releases have ended. The implementation and packaging recipe remain as historical records; do not dispatch the disabled workflow or publish new zips. Earlier unsigned zips are not supported downloads. A headless build and model test are not a native GUI test.
+
+If re-enabled, the retained `.github/workflows/release-windows.yml` job would run a `--release` build and `apparent --help`, copy the Visual C++ runtime DLLs beside it (transcribe.cpp's CMake build uses the DLL runtime, so `crt-static` doesn't link), download and run the real model (`cargo test speech -- --ignored`), repeat that run under Intel SDE as a Lunar Lake CPU (no AVX-512), and produce `Apparent-<version>-windows-x64.zip` (unsigned `apparent.exe`, transcribe.cpp's DLLs, those runtime DLLs, README, LICENSE) for the tag's GitHub release.
 
 transcribe.cpp is built with `dynamic-backends`: `transcribe.dll`, `ggml.dll`, `ggml-base.dll` and one `ggml-cpu-<tier>.dll` per x86 tier (x64 … haswell, alderlake, skylakex, icelake) sit beside `apparent.exe`, and ggml loads the best tier the CPU has. A static build compiles ggml for the build machine's CPU (`GGML_NATIVE`), which put AVX-512 into every Windows build and crashed the first transcription on CPUs without it (#58). `scripts/check-windows-cpu-tiers.ps1` (the release workflow) fails if AVX-512 appears in `transcribe.dll`, `ggml*.dll` outside the AVX-512 tiers, or if `apparent.exe` stops importing `transcribe.dll`.
 

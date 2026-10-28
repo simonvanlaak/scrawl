@@ -14,7 +14,7 @@
     { "id": "platforms", "title": "Platforms" }
   ],
   "flow": [
-    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone or ApparentKit", "group": "start" },
+    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone", "group": "start" },
     { "title": "Record", "detail": "Screen, voice, clicks and ⇧ ink on one clock", "group": "record" },
     { "title": "Bundle", "detail": "Keyframes, contact sheet, summary.md, apparent.json", "group": "agent" },
     { "title": "Deliver", "detail": "Clipboard and ⌥⇧V; no automatic session send", "group": "delivery" },
@@ -36,8 +36,8 @@
       "name": "Record the screen",
       "says": "Press the shortcut and Apparent records the display under the pointer once the keys come up, with a red edge glow as the cue.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
-      "shortcuts": [{ "keys": "⌥⇧S", "does": "Start or finish a capture (Alt+Shift+S on Windows and Linux)" }],
+      "platforms": ["mac", "linux"],
+      "shortcuts": [{ "keys": "⌥⇧S", "does": "Start or finish a capture (Alt+Shift+S on Linux)" }],
       "docs": ["README.md#capture-controls", "docs/capture.md"]
     },
     {
@@ -46,7 +46,7 @@
       "name": "Switch target as it starts",
       "says": "The capsule opens onto Area · Window · Screen · iPhone for 3.5 s; a chip restarts the capture on that target.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "The iPhone chip is Mac only.",
       "docs": ["docs/capture.md"]
     },
@@ -56,7 +56,7 @@
       "name": "Choose What to Record…",
       "says": "The menu's picker opens on the pointer's display: drag an area, click a window, or pick Screen or iPhone.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "The Linux preview's Window mode lists X11 windows only.",
       "shortcuts": [
         { "keys": "1–4", "does": "Picker: jump to a mode" },
@@ -72,7 +72,7 @@
       "name": "Auto-crop",
       "says": "Screen captures crop each keyframe to the window or region you worked in; uncropped frames stay in frames-full/.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "config": [{ "key": "autocrop", "value": "false | {\"padding\": 24, …}", "does": "Turn auto-crop off or change its settings" }],
       "docs": ["README.md#auto-crop-screen-captures"]
     },
@@ -82,8 +82,8 @@
       "name": "More than one display",
       "says": "The picker, overlay and capsule follow the pointer between displays; each capture belongs to one display.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows"],
-      "docs": ["docs/capture.md", "docs/windows.md"]
+      "platforms": ["mac"],
+      "docs": ["docs/capture.md"]
     },
     {
       "id": "recent-area",
@@ -91,7 +91,7 @@
       "name": "What to record and Recent Area",
       "says": "A Recording setting picks what the shortcut records, including the last area drawn, reused without another drag.",
       "status": "review:#69",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-21",
       "pr": 69,
       "config": [
@@ -117,7 +117,7 @@
       "name": "Draw with ⇧",
       "says": "Hold ⇧ and move to draw red ink over any app; it fades after release and is redrawn on the keyframes.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "On Wayland the Linux preview needs the input group for ink outside its own windows.",
       "shortcuts": [{ "keys": "⇧ + move", "does": "Draw" }],
       "docs": ["README.md#capture-controls"]
@@ -148,7 +148,7 @@
       "name": "Pins",
       "says": "⇧-click drops a numbered pin: a brief pulse on screen, a mark on the keyframe.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "shortcuts": [{ "keys": "⇧ click", "does": "Drop a numbered pin" }],
       "docs": ["README.md#capture-controls"]
     },
@@ -158,9 +158,9 @@
       "name": "Undo and cancel",
       "says": "Undo removes the last stroke; Esc cancels the selection or the capture.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "shortcuts": [
-        { "keys": "⌘Z", "does": "Undo the last stroke (Ctrl+Z on Windows)" },
+        { "keys": "⌘Z", "does": "Undo the last stroke (Ctrl+Z on Linux)" },
         { "keys": "Esc", "does": "Cancel the selection or capture" }
       ],
       "docs": ["README.md#capture-controls"]
@@ -171,7 +171,7 @@
       "name": "Clicks pass through",
       "says": "Clicks, drags and scrolls reach the app underneath and are recorded; keyframes show a ripple.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "Over Wayland apps the Linux preview's click positions can be stale.",
       "docs": ["README.md#capture-controls"]
     },
@@ -181,8 +181,8 @@
       "name": "Capsule",
       "says": "The capsule shows the time with Finish and Cancel on the display in use; on a Mac it's a native Metal panel, black or glass.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
-      "note": "Windows and Linux draw the GPUI capsule; glass needs macOS 26.",
+      "platforms": ["mac", "linux"],
+      "note": "Linux draws the GPUI capsule; glass needs macOS 26.",
       "config": [
         { "key": "nativePill", "value": "false", "does": "Draw the GPUI capsule instead of the Metal one (Mac)" },
         { "key": "pillStyle", "value": "\"black\" | \"glass\"", "does": "The Metal capsule's look" }
@@ -195,9 +195,22 @@
       "name": "Microphone input warning",
       "says": "During a screen recording, the capsule says Mic unavailable, Mic stopped, or Mic very quiet when input fails, samples stop, or captured sound stays near silent. Screen recording continues; the warning does not replace recording controls.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "Near-silence is not a diagnosis of microphone failure; the warning does not depend on an audio animation.",
       "docs": ["docs/capture.md"]
+    },
+    {
+      "id": "microphone-selection",
+      "group": "record",
+      "name": "Select microphone input",
+      "says": "Choose an input in Recording Settings or with apparent mic set; a live input meter shows its level. Keep a disconnected choice saved, explain the fallback, and use the current system default for new captures until it returns.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
+      "note": "On PipeWire/PulseAudio Linux desktops this requires pactl and the GStreamer pulsesrc plugin. Other Linux audio servers may expose only a shared CPAL input. Windows is unsupported.",
+      "config": [
+        { "key": "microphone", "value": "{\"id\": string, \"name\": string}", "does": "Save the chosen input; absent follows the system default" }
+      ],
+      "docs": ["docs/onboarding-and-settings.md"]
     },
     {
       "id": "hidden-windows",
@@ -205,7 +218,7 @@
       "name": "Own windows left out",
       "says": "Apparent's capsule, picker and overlay, and macOS prompts over a Screen or Area capture, stay out of the recording.",
       "status": "stable@0.3.6",
-      "platforms": ["mac", "windows"],
+      "platforms": ["mac"],
       "note": "Prompts are a macOS case. The Linux preview records its own windows and masks the capsule from keyframe picking.",
       "docs": ["docs/capture.md"]
     },
@@ -270,7 +283,7 @@
       "name": "Finish",
       "says": "Press the shortcut again or Finish; a press within 0.4 s of the start is ignored.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#capture-controls"]
     },
     {
@@ -279,7 +292,7 @@
       "name": "Local finish timing trace",
       "says": "Saves per-stage finish durations next to each completed bundle for debugging and performance comparisons. No transcript or screen content is added to the trace.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
@@ -288,7 +301,7 @@
       "name": "Copied, with a Paste chip",
       "says": "The summary text goes to the clipboard and the capsule shows Copied with a Paste chip; drag the chip onto a window to paste there.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#capture-controls"]
     },
     {
@@ -297,8 +310,8 @@
       "name": "Paste the latest capture",
       "says": "⌥⇧V pastes the contact sheet and then the summary into the app in front.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
-      "shortcuts": [{ "keys": "⌥⇧V", "does": "Paste the latest capture (Alt+Shift+V on Windows and Linux)" }],
+      "platforms": ["mac", "linux"],
+      "shortcuts": [{ "keys": "⌥⇧V", "does": "Paste the latest capture (Alt+Shift+V on Linux)" }],
       "docs": ["README.md#capture-controls"]
     },
     {
@@ -307,7 +320,7 @@
       "name": "Attach visuals after a click",
       "says": "The old automatic attachment rule is inactive; recorded visuals remain available through apparent zoom.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
@@ -316,16 +329,16 @@
       "name": "Ask the agent for an Apparent video",
       "says": "When enabled, a copied or pasted capture asks an agent to demonstrate complex changes in a short Apparent video if it can access the screen.",
       "status": "experiment:agentDemoVideo",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md", "docs/onboarding-and-settings.md"]
     },
     {
       "id": "clipboard-image",
       "group": "finish",
       "name": "Image and text on one clipboard",
-      "says": "Copies the contact sheet with the text, so one Ctrl+V attaches the image in a browser or Electron composer.",
+      "says": "Off by default: offers contact-sheet PNG and summary text together on Mac and KDE/Hyprland Wayland. Other Linux sessions copy text only. The receiver may paste only one format; inspect the unsent draft or use the explicit Paste chip and manual attachment fallback.",
       "status": "experiment:clipboardImage",
-      "platforms": ["windows"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-20",
       "pr": 68,
       "docs": ["docs/keyframes-and-text.md"]
@@ -351,10 +364,10 @@
     {
       "id": "missing-transcript-warning",
       "group": "finish",
-      "name": "Warn when saved audio has no transcribed words",
-      "says": "After Stop, the completed capsule and Review distinguish an empty recognized transcript from a speech-model failure without guessing the cause.",
+      "name": "Explain missing audio or transcription",
+      "says": "After Stop, the completed capsule and Review distinguish missing microphone audio, saved audio with no recognized words, and a transcription failure. The handoff text reports the outcome too, without treating input level as intelligibility.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
@@ -363,16 +376,16 @@
       "name": "Warn when live recognition finds no words",
       "says": "After bounded chunks of processed audio recognize no words, warn inside the recording capsule. Check the final transcript again after Stop.",
       "status": "experiment:liveWordWarning",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
       "id": "review-window",
       "group": "finish",
       "name": "Review window",
-      "says": "Open Latest Capture shows the bundle's keyframes and timeline in a window.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "says": "Open Latest Capture pairs the selected frame with its words and offers the full contact sheet, transcript and timeline in the same window.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#usage"]
     },
     {
@@ -381,7 +394,7 @@
       "name": "Browse older captures",
       "says": "The review window steps through completed captures from newest to oldest without leaving the window.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/capture.md"]
     },
     {
@@ -390,8 +403,8 @@
       "name": "Recover unbuilt captures",
       "says": "A capture whose bundle never got built (the app died first) is built at the next launch.",
       "status": "stable@0.3.12",
-      "platforms": ["mac", "windows", "linux"],
-      "docs": ["docs/windows.md"]
+      "platforms": ["mac", "linux"],
+      "docs": ["README.md#usage"]
     },
     {
       "id": "capture-stack",
@@ -409,7 +422,7 @@
       "name": "Run a command per capture",
       "says": "Runs your own command once each bundle is written, so any agent or script can receive captures.",
       "status": "review:#43",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-20",
       "pr": 43,
       "config": [
@@ -424,7 +437,7 @@
       "name": "The bundle",
       "says": "A .apparent folder with contact-sheet.png, frames/, summary.md, apparent.json, the recording and audio.wav.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md"]
     },
     {
@@ -433,7 +446,7 @@
       "name": "Contact sheet and frames",
       "says": "Keyframes in time order, each with a number chip, the ink and click ripples drawn on, and no captions.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
@@ -442,7 +455,7 @@
       "name": "Keyframe selection",
       "says": "Keyframes are cut on marks, clicks, flags and settled screen changes, never on speech pauses: 6 up to 40 s, at most 12.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
@@ -451,7 +464,7 @@
       "name": "summary.md",
       "says": "Each keyframe line gives what was done and the words said while it was on screen, split at clause boundaries.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md", "docs/keyframes-and-text.md"]
     },
     {
@@ -460,7 +473,7 @@
       "name": "Spoken cues",
       "says": "Saying “now”, “here”, “look” or “watch” cuts a keyframe when that screen differs from the ones already chosen.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "note": "Needs measured word times, so not from a Hex transcript.",
       "docs": ["README.md#transcription"]
     },
@@ -470,18 +483,27 @@
       "name": "Numbered marks",
       "says": "Several marks on one keyframe are numbered ①② in the text, never on the image; apparent zoom --mark finds one.",
       "status": "stable@0.3.7",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
       "id": "agent-context",
       "group": "agent",
       "name": "Agent context",
-      "says": "The summary names what clicks and marks land on, from Accessibility (UI Automation on Windows) and dev-page events.",
+      "says": "The summary names what clicks and marks land on, from Accessibility and dev-page events.",
       "status": "experiment:agentContext",
-      "platforms": ["mac", "windows"],
+      "platforms": ["mac"],
       "added": "2026-10-19",
       "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
+      "id": "linux-element-fallback",
+      "group": "agent",
+      "name": "Linux element fallback",
+      "says": "With agent context enabled, unnamed Linux clicks say element unavailable; marks keep their ink but get no OS-derived element name. Registered dev pages can supply their own context.",
+      "status": "experiment:agentContext",
+      "platforms": ["linux"],
+      "docs": ["docs/linux.md", "docs/keyframes-and-text.md"]
     },
     {
       "id": "screen-text",
@@ -500,7 +522,7 @@
       "says": "On-device transcription with word times: SpeechAnalyzer on macOS 26, SFSpeechRecognizer on macOS 15.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Windows and Linux use Parakeet on device.",
+      "note": "Linux uses Parakeet on device.",
       "config": [
         { "key": "transcriber", "value": "\"apple\" | \"hex\" | \"command\"", "does": "Which engine transcribes" },
         { "key": "appleLocale", "value": "\"zh-TW\"", "does": "Apple Speech language; absent follows the Mac" }
@@ -513,8 +535,8 @@
       "name": "Parakeet on device",
       "says": "Transcribes with Hex's Parakeet model, or downloads Apparent's own copy (730 MB) at first launch.",
       "status": "stable@0.3.6",
-      "platforms": ["windows", "linux"],
-      "docs": ["docs/windows.md"]
+      "platforms": ["linux"],
+      "docs": ["docs/linux.md"]
     },
     {
       "id": "hex",
@@ -537,7 +559,6 @@
       "says": "Runs your own program on the audio and reads a JSON transcript from it.",
       "status": "stable@0.3.13",
       "platforms": ["mac"],
-      "note": "Windows keeps the local engine for now.",
       "config": [
         { "key": "transcribeCommand", "value": "[\"/abs/cmd\", \"{audio}\"]", "does": "Program to run" },
         { "key": "transcribeTimeoutSeconds", "value": "600", "does": "Its time limit" }
@@ -560,11 +581,11 @@
     {
       "id": "sdk-js",
       "group": "delivery",
-      "name": "Legacy /sdk.js registration (inactive)",
-      "says": "The script can still register a dev page, but captures no longer use its session or project folder.",
+      "name": "Dev-page event context (local)",
+      "says": "The script supplies click, mark and page-error context for local captures. Its legacy session and project registration does not route captures.",
       "status": "main",
       "added": "2026-10-28",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/iphone-and-routing.md"]
     },
     {
@@ -585,7 +606,7 @@
       "says": "Capture processing does not queue new OpenCode deliveries. Old retry markers are not processed on startup.",
       "status": "main",
       "added": "2026-10-28",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["docs/iphone-and-routing.md"]
     },
     {
@@ -594,7 +615,7 @@
       "name": "Agent on another Mac",
       "says": "Sends captures to the OpenCode server on another Mac over SSH, copying the bundle there first.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows"],
+      "platforms": ["mac"],
       "config": [
         { "key": "agentHost", "value": "\"studio\"", "does": "SSH host whose OpenCode holds the sessions" },
         { "key": "agentOpencode", "value": "\"opencode2\"", "does": "The opencode command on that host" }
@@ -611,16 +632,6 @@
       "pr": 65,
       "config": [{ "key": "agentPath", "value": "path", "does": "Where captures go on the remote host" }]
     },
-    {
-      "id": "security-defaults",
-      "group": "delivery",
-      "name": "Safer delivery defaults",
-      "says": "Ingest listens on loopback only, automatic delivery becomes opt-in, and pairing changes ask first.",
-      "status": "review:#27",
-      "platforms": ["mac", "windows", "linux"],
-      "added": "2026-10-20",
-      "pr": 27
-    },
 
     {
       "id": "cabled-iphone",
@@ -634,100 +645,12 @@
       "docs": ["README.md#iphone", "docs/iphone-and-routing.md"]
     },
     {
-      "id": "apparentkit",
-      "group": "iphone",
-      "name": "ApparentKit",
-      "says": "A Swift package for your iOS app: a three-finger long press records the app with narration, touches, strokes and events.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "iOS 18+; recordings go to Apparent on a Mac.",
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "apparentkit-https",
-      "group": "iphone",
-      "name": "HTTPS endpoint and outbox",
-      "says": "A setup link can point at an HTTPS endpoint; recordings queue on the phone and upload in the background with retries.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "Phone side; no Mac needed.",
-      "docs": ["README.md#sending-to-an-https-endpoint"]
-    },
-    {
-      "id": "apparentkit-context",
-      "group": "iphone",
-      "name": "App context",
-      "says": "The app names its screen and adds key/values, which the summary shows beside each keyframe.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "Phone side.",
-      "docs": ["README.md#app-context"]
-    },
-    {
-      "id": "apparentkit-hooks",
-      "group": "iphone",
-      "name": "Host app hooks",
-      "says": "A team endpoint, a timeline supplement and a submit hook let a host app handle recordings itself.",
-      "status": "main",
-      "platforms": ["mac"],
-      "added": "2026-10-21",
-      "note": "Phone side.",
-      "pr": 83
-    },
-    {
-      "id": "pairing",
-      "group": "iphone",
-      "name": "Pairing link",
-      "says": "apparent link prints a setup link and QR code with this Mac's Tailscale and LAN addresses; usbApps adds a cabled fallback.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "config": [
-        { "key": "ingestToken", "value": "generated", "does": "Bearer token for phone uploads" },
-        { "key": "usbApps", "value": "[\"com.example.App\"]", "does": "Apps whose recordings come over USB" }
-      ],
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "remote-phone-ingest",
-      "group": "iphone",
-      "name": "Remote phone uploads",
-      "says": "A Settings switch lets other devices reach the GUI ingest listener; off keeps local dev-page routing on loopback.",
-      "status": "main",
-      "platforms": ["mac", "linux", "windows"],
-      "config": [
-        { "key": "remotePhoneIngest", "value": "false", "does": "Allow the GUI ingest listener on other IPv4 interfaces; off binds loopback only" }
-      ],
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "import",
-      "group": "iphone",
-      "name": "Import a recording",
-      "says": "apparent import builds a bundle from an AirDropped .mp4 and its timeline.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "serve",
-      "group": "iphone",
-      "name": "Headless ingest",
-      "says": "apparent serve takes ApparentKit uploads on an always-on Mac without the app running.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#headless-ingest-server-apparent-serve"]
-    },
-
-    {
       "id": "settings-window",
       "group": "settings",
       "name": "Settings window",
       "says": "General, Recording, Storage, Permissions, Agents and About, from the menu's Settings….",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#settings", "docs/onboarding-and-settings.md"]
     },
     {
@@ -736,7 +659,7 @@
       "name": "Custom shortcuts",
       "says": "Record new keys for Record and Paste; Apparent turns down combinations the system or another app uses, and Paste can be turned off.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "config": [{ "key": "shortcuts", "value": "{\"record\": …, \"paste\": null}", "does": "Both shortcuts; paste null turns it off" }],
       "docs": ["README.md#settings"]
     },
@@ -746,7 +669,7 @@
       "name": "Launch at login",
       "says": "A switch in General; the preference is stored in config.json and applied to OS login registration.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "config": [{ "key": "launchAtLogin", "value": "true | false", "does": "Register or unregister Apparent at login; absent leaves the OS choice alone" }],
       "docs": ["README.md#settings"]
     },
@@ -757,7 +680,6 @@
       "says": "Pick an input with a live level meter; a missing device falls back to the default and says so.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Windows and Linux record from the default input.",
       "config": [{ "key": "microphone", "value": "{\"id\", \"name\"}", "does": "Chosen input; absent follows the system" }],
       "docs": ["README.md#settings"]
     },
@@ -768,7 +690,7 @@
       "name": "Keep recordings",
       "says": "Video and audio go to the Trash after 7 days and whole bundles after 30; Settings › Storage picks 7, 30 days or Forever.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "config": [{ "key": "retention", "value": "{\"mediaDays\": 7, \"bundleDays\": 30}", "does": "How long to keep media and bundles; null keeps forever" }],
       "docs": ["README.md#keeping-captures-small", "docs/export-and-retention.md"]
     },
@@ -778,7 +700,7 @@
       "name": "Hourly cleanup",
       "says": "Cleanup passes run hourly instead of daily and take zoom/ sheets with the media.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-21",
       "pr": 79,
       "docs": ["docs/export-and-retention.md"]
@@ -789,7 +711,7 @@
       "name": "Pin a capture",
       "says": "apparent pin keeps a capture out of cleanup; apparent clean --dry-run shows what a pass would do.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#keeping-captures-small"]
     },
     {
@@ -808,7 +730,7 @@
       "name": "Choose the captures folder",
       "says": "Settings › Storage picks where new captures go instead of Application Support; an unusable folder falls back to the built-in one.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-22",
       "note": "The Change… button is Mac only; elsewhere set capturesDir.",
       "pr": 86,
@@ -822,8 +744,8 @@
       "name": "Command-line tool",
       "says": "Settings › Agents installs apparent on PATH without replacing another program.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
-      "note": "Windows gets an apparent.cmd shim. Unrelated or package-manager-owned commands are not deleted.",
+      "platforms": ["mac", "linux"],
+      "note": "Unrelated or package-manager-owned commands are not deleted.",
       "docs": ["README.md#agents"]
     },
     {
@@ -832,7 +754,7 @@
       "name": "Agent skill",
       "says": "bunx skills add tryapparent/apparent teaches an agent to read a paste and use the CLI; apparent skill prints it.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md"]
     },
     {
@@ -841,7 +763,7 @@
       "name": "apparent zoom",
       "says": "A dense sheet of frames around a time, a phrase that was said, or a numbered mark.",
       "status": "main",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md"]
     },
     {
@@ -850,7 +772,7 @@
       "name": "inspect and frames",
       "says": "Print summary.md, apparent.json or the marks; pull plain PNGs of a time range.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md"]
     },
     {
@@ -860,7 +782,7 @@
       "says": "Copy a saved capture to the clipboard without selecting or contacting an agent session.",
       "status": "main",
       "added": "2026-10-28",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md", "README.md#usage"]
     },
     {
@@ -869,7 +791,7 @@
       "name": "reprocess",
       "says": "Rebuild a bundle with the current rules, another transcriber, or an experiment turned on.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#usage"]
     },
     {
@@ -878,7 +800,7 @@
       "name": "Auto-crop playground",
       "says": "apparent autocrop --serve opens sliders that run the real crop on a capture and copy the settings as JSON.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "docs": ["README.md#auto-crop-screen-captures"]
     },
 
@@ -922,7 +844,7 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
+      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
     },
     {
@@ -937,15 +859,6 @@
         { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with apparent update status" }
       ],
       "docs": ["docs/linux.md"]
-    },
-    {
-      "id": "windows-zip",
-      "group": "install",
-      "name": "Windows zip",
-      "says": "apparent.exe for Windows 10 (2004) and later on x64, unsigned, without automatic updates.",
-      "status": "stable@0.3.6",
-      "platforms": ["windows"],
-      "docs": ["README.md#windows", "docs/windows.md"]
     },
     {
       "id": "linux-appimage",
@@ -973,7 +886,7 @@
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo of ⌥⇧S, one permissions checklist and a first capture; it resumes where any quit left it.",
       "status": "stable@0.3.4",
-      "platforms": ["mac", "windows", "linux"],
+      "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]
     },
@@ -984,7 +897,7 @@
       "says": "For Screen Recording and Accessibility, a card flies to System Settings so you drag Apparent into the list.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Windows only asks for the microphone switch; Linux Wayland asks for the input group.",
+      "note": "Linux Wayland asks for the input group.",
       "docs": ["README.md#welcome-and-permissions"]
     },
     {
@@ -1008,19 +921,10 @@
       "docs": ["README.md#install"]
     },
     {
-      "id": "windows",
-      "group": "platforms",
-      "name": "Windows",
-      "says": "Windows 10 (2004) and later on x64: the same app, without the iPhone, export, Sparkle or the tab URL.",
-      "status": "stable@0.3.6",
-      "platforms": ["windows"],
-      "docs": ["README.md#windows", "docs/windows.md"]
-    },
-    {
       "id": "linux",
       "group": "platforms",
       "name": "Linux preview",
-      "says": "X11, and GNOME, KDE and Hyprland on Wayland through XWayland; without the iPhone, export, agent context, Sparkle or the tab URL.",
+      "says": "X11, and GNOME, KDE and Hyprland on Wayland through XWayland; without the iPhone, export, OS element names, Sparkle or the tab URL. Agent context has an unnamed-click fallback.",
       "status": "main",
       "platforms": ["linux"],
       "added": "2026-10-26",

@@ -1,5 +1,5 @@
-//! Where a Mac capture of a browser tab goes. When the capture ends on a browser showing a dev
-//! site, the bundle is sent to that project's OpenCode session instead of only the clipboard:
+//! Legacy routing implementation, no longer called by capture delivery. Captures stay local and
+//! are copied for manual handoff. Previously a browser capture could target an OpenCode session:
 //!
 //! 1. The page registered itself through Apparent's `/sdk.js` (`web`): its session, or the session
 //!    for the directory it named.
@@ -7,8 +7,8 @@
 //!    that directory's git root, and the most recently active root session in it.
 //! 3. Otherwise nothing: the capture stays on the clipboard.
 //!
-//! With `"experiments": {"smartRouting": true}`, [`smart`] decides instead, from clues
-//! [`look`] gathers (`docs/routing.md`).
+//! [`smart`] holds the old clue-based decision code (`docs/routing.md`). The `smartRouting`
+//! setting no longer enables automatic delivery.
 
 pub mod look;
 pub mod served;

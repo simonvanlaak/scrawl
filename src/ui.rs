@@ -29,17 +29,17 @@ pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 
 use crate::audio::{AudioRecorder, InputWarning};
 use crate::capture::{
-    LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, current_mouse_screen,
-    discover_target, install_global_hotkeys, list_selectable_windows,
-    record_external_frontmost_app, region_target, apparent_log, selectable_window_at,
-    shortcut_from_key_and_mods, start_global_input_tap, update_global_shortcut,
+    LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, apparent_log,
+    current_mouse_screen, discover_target, install_global_hotkeys, list_selectable_windows,
+    record_external_frontmost_app, region_target, selectable_window_at, shortcut_from_key_and_mods,
+    start_global_input_tap, update_global_shortcut,
 };
 use crate::helper::PhoneDevice;
 #[cfg(target_os = "macos")]
 use crate::laser_overlay::MetalLaserOverlay as LaserOverlay;
 #[cfg(target_os = "linux")]
 use crate::linux::overlay::InkOverlay as LaserOverlay;
-use crate::model::{CaptureMode, ApparentBundle, TargetFrame, TargetInfo, format_clock};
+use crate::model::{ApparentBundle, CaptureMode, TargetFrame, TargetInfo, format_clock};
 use crate::phone::PhoneSession;
 use crate::sketch::timeline;
 #[cfg(target_os = "windows")]
@@ -57,7 +57,6 @@ const MUTED_COLOR: u32 = 0x969696;
 const ACCENT_COLOR: u32 = 0x3b5cf6;
 const ACCENT_HOVER: u32 = 0x4b6bff;
 const INK_RED: u32 = 0xff3b30;
-const POSITIVE_COLOR: u32 = 0x69d89f;
 
 // Dynamic Island capsule geometry. GPUI boxes are border-box, so the hairline border is part of
 // the inset: R_outer (20) = R_chip (16) + border (1) + pad (3), on every side.
@@ -91,6 +90,8 @@ const PILL_WINDOW_H: f32 = 84.0;
 
 mod lab;
 pub(crate) mod motion;
+pub(crate) mod pill_theme;
+use pill_theme::{PillTheme, SIGNAL, SIGNAL_HOVER, WARNING};
 
 pub use lab::{Options as LabOptions, Scene as LabScene, run as run_lab};
 pub(crate) use motion::{TuneAction, tune_command};
@@ -243,32 +244,66 @@ fn completed_label(inbox_count: usize, note: Option<&str>) -> String {
     }
 }
 
-fn no_words_warning(
-    transcript: &crate::model::TranscriptData,
-    audio_saved: bool,
-) -> bool {
-    audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletedAudioIssue {
+    NoAudio,
+    NoWords,
+    TranscriptionUnavailable,
 }
 
-fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ApparentBundle) -> bool {
-    no_words_warning(
+impl CompletedAudioIssue {
+    fn label(self) -> &'static str {
+        match self {
+            Self::NoAudio => "No audio",
+            Self::NoWords => "No words",
+            Self::TranscriptionUnavailable => "Transcript unavailable",
+        }
+    }
+}
+
+fn completed_audio_issue(
+    source: Option<&str>,
+    transcript: &crate::model::TranscriptData,
+    audio_saved: bool,
+) -> Option<CompletedAudioIssue> {
+    if source == Some("iphone") {
+        return None;
+    }
+    if !audio_saved {
+        return Some(CompletedAudioIssue::NoAudio);
+    }
+    if !transcript.text.trim().is_empty() {
+        return None;
+    }
+    if transcript.missing.is_some() || transcript.source == "none" {
+        return Some(CompletedAudioIssue::TranscriptionUnavailable);
+    }
+    Some(CompletedAudioIssue::NoWords)
+}
+
+fn bundle_audio_issue(
+    dir: &std::path::Path,
+    bundle: &ApparentBundle,
+) -> Option<CompletedAudioIssue> {
+    completed_audio_issue(
+        bundle.source.as_deref(),
         &bundle.transcript,
-        bundle
-            .audio
-            .as_ref()
-            .is_some_and(|file| dir.join(file).is_file()),
+        bundle.has_microphone_samples(dir),
     )
 }
 
-fn completed_status_label(inbox_count: usize, note: Option<&str>, no_words: bool) -> String {
+fn completed_status_label(
+    inbox_count: usize,
+    note: Option<&str>,
+    issue: Option<CompletedAudioIssue>,
+) -> String {
     let label = completed_label(inbox_count, note);
-    if no_words {
-        format!("{label} · No words")
+    if let Some(issue) = issue {
+        format!("{label} · {}", issue.label())
     } else {
         label
     }
 }
-
 
 /// Inner width of the Selecting row: mode segments, an optional Record chip, divider, and ✕.
 fn selecting_row_width(label_widths: &[f32], record_width: Option<f32>) -> f32 {
@@ -390,7 +425,7 @@ fn island_content_width(
     chips: bool,
     warning: Option<InputWarning>,
     completed_note: Option<&str>,
-    no_words: bool,
+    completed_issue: Option<CompletedAudioIssue>,
     live_no_words: bool,
 ) -> f32 {
     let divider = 1.0 + 2.0 * DIVIDER_MX;
@@ -409,12 +444,16 @@ fn island_content_width(
             let trail = recording_trail_widths(window, chips, iphone);
             let warning_w = warning.map_or(0.0, |warning| {
                 measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
-                    + 2.0 * CHIP_PX + divider + 2.0 * CHIP_GAP
+                    + 2.0 * CHIP_PX
+                    + divider
+                    + 2.0 * CHIP_GAP
             });
             #[cfg(target_os = "linux")]
             let meter_w = if recording_equalizer_enabled() {
                 EQUALIZER_W + CHIP_GAP
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             #[cfg(not(target_os = "linux"))]
             let meter_w = 0.0;
             CHIP_H
@@ -431,7 +470,9 @@ fn island_content_width(
                 + trail.iter().sum::<f32>()
                 + (trail.len() + 1) as f32 * CHIP_GAP
                 + if live_no_words {
-                    divider + CHIP_GAP + measure_text(window, "⚠ No words yet", HUD_TEXT, FontWeight::SEMIBOLD)
+                    divider
+                        + CHIP_GAP
+                        + measure_text(window, "⚠ No words yet", HUD_TEXT, FontWeight::SEMIBOLD)
                         + LIVE_WARNING_END_PAD
                 } else {
                     0.0
@@ -448,7 +489,7 @@ fn island_content_width(
                 + 8.0
                 + measure_text(
                     window,
-                    &completed_status_label(inbox_count, completed_note, no_words),
+                    &completed_status_label(inbox_count, completed_note, completed_issue),
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 )
@@ -695,7 +736,9 @@ struct ActiveRecording {
 impl ActiveRecording {
     fn mic_warning(&self) -> Option<InputWarning> {
         match &self.source {
-            CaptureSource::Screen { audio: Some(audio), .. } => audio.warning(),
+            CaptureSource::Screen {
+                audio: Some(audio), ..
+            } => audio.warning(),
             CaptureSource::Screen { audio: None, .. } => Some(InputWarning::Unavailable),
             CaptureSource::Phone(_) | CaptureSource::Lab => None,
         }
@@ -770,6 +813,8 @@ pub struct ApparentCoordinator {
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
     review_bundle: Option<(PathBuf, ApparentBundle)>,
+    /// Read the WAV once when selecting a bundle, never on the capsule's animation tick.
+    review_audio_issue: Option<CompletedAudioIssue>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
@@ -859,9 +904,12 @@ impl ApparentCoordinator {
             display_rect: [0.0, 0.0, 1440.0, 900.0],
             paste_drag_start: None,
             recording_shortcut_key: false,
+            review_audio_issue: initial_bundle
+                .as_ref()
+                .and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
-            selected_tab: ReviewTab::ContactSheet,
+            selected_tab: ReviewTab::Keyframes,
             selected_keyframe: 0,
             iphone: None,
             completed_dir: None,
@@ -886,19 +934,6 @@ impl ApparentCoordinator {
             self.last_mode = mode;
             mode.save_last_used();
         }
-    }
-
-    /// Records a capture received from elsewhere; returns the unhandled count.
-    fn add_to_inbox(&mut self, dir: &std::path::Path, bundle: &ApparentBundle) -> usize {
-        let source = bundle.source.as_deref().unwrap_or("iphone");
-        self.inbox.add(crate::inbox::InboxEntry::new(
-            dir,
-            bundle,
-            source,
-            crate::now_epoch_ms(),
-        ));
-        set_status_inbox_count(self.inbox.len());
-        self.inbox.len()
     }
 
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
@@ -1435,9 +1470,10 @@ impl ApparentCoordinator {
     }
 
     pub fn set_review_bundle(&mut self, bundle: (PathBuf, ApparentBundle), status: Option<String>) {
+        self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
-        self.selected_tab = ReviewTab::ContactSheet;
+        self.selected_tab = ReviewTab::Keyframes;
         self.selected_keyframe = 0;
     }
 
@@ -1909,12 +1945,10 @@ impl ApparentCoordinator {
         }
     }
 
-    fn completed_has_no_words(&self) -> bool {
+    fn completed_audio_issue(&self) -> Option<CompletedAudioIssue> {
         match (&self.completed_dir, &self.review_bundle) {
-            (Some(dir), Some((review_dir, bundle))) if dir == review_dir => {
-                bundle_no_words_warning(dir, bundle)
-            }
-            _ => false,
+            (Some(dir), Some((review_dir, _))) if dir == review_dir => self.review_audio_issue,
+            _ => None,
         }
     }
 
@@ -1940,27 +1974,36 @@ impl ApparentCoordinator {
             IslandPhase::Hidden | IslandPhase::Dismissing => Pres::Hidden,
             IslandPhase::Selecting { mode } => Pres::Selecting { mode, has_iphone },
             IslandPhase::Recording if self.recording_has_no_words() && !self.reveal.is_open() => {
-                Pres::RecordingWarning { chips: false, has_iphone }
+                Pres::RecordingWarning {
+                    chips: false,
+                    has_iphone,
+                }
             }
             IslandPhase::Recording => Pres::Recording {
                 chips: self.reveal.is_open(),
                 has_iphone,
             },
             IslandPhase::Processing => Pres::Processing,
-            IslandPhase::Completed { inbox_count, .. } => Pres::Completed {
-                warning: self.completed_has_no_words(),
-                label: completed_status_label(
-                    inbox_count,
-                    self.completed_note.as_deref(),
-                    self.completed_has_no_words(),
-                ),
-                routes: Vec::new(),
-            },
+            IslandPhase::Completed { inbox_count, .. } => {
+                let issue = self.completed_audio_issue();
+                Pres::Completed {
+                    warning: issue.is_some(),
+                    label: completed_status_label(
+                        inbox_count,
+                        self.completed_note.as_deref(),
+                        issue,
+                    ),
+                    routes: Vec::new(),
+                }
+            }
         };
         PillSnapshot {
             pres,
             clock,
-            mic_warning: self.active_recording.as_ref().and_then(ActiveRecording::mic_warning),
+            mic_warning: self
+                .active_recording
+                .as_ref()
+                .and_then(ActiveRecording::mic_warning),
             reduced_motion: self.reduced_motion,
             style: PillStyle::current(),
         }
@@ -2074,7 +2117,6 @@ impl ApparentCoordinator {
             }
         });
     }
-
 
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
@@ -2862,7 +2904,6 @@ impl ApparentCoordinator {
     }
 }
 
-
 pub struct HudPillWindow {
     coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
@@ -2892,7 +2933,13 @@ impl InputEqualizer {
             _ => 0.0,
         };
         self.last_count = input.map_or(0, |(count, _)| count);
-        let alpha = if reduced_motion { 1.0 } else if target > self.level { 0.24 } else { 0.12 };
+        let alpha = if reduced_motion {
+            1.0
+        } else if target > self.level {
+            0.24
+        } else {
+            0.12
+        };
         self.level += (target - self.level) * alpha;
     }
 }
@@ -2946,7 +2993,10 @@ impl Render for HudPillWindow {
             .as_ref()
             .map(ActiveRecording::elapsed_ms);
         let mic_warning = if matches!(phase, IslandPhase::Recording) {
-            coord.active_recording.as_ref().and_then(ActiveRecording::mic_warning)
+            coord
+                .active_recording
+                .as_ref()
+                .and_then(ActiveRecording::mic_warning)
         } else {
             None
         };
@@ -2954,10 +3004,16 @@ impl Render for HudPillWindow {
         let equalizer_enabled = recording_equalizer_enabled();
         #[cfg(target_os = "linux")]
         if matches!(phase, IslandPhase::Recording) && equalizer_enabled {
-            let input = coord.active_recording.as_ref().and_then(|recording| match &recording.source {
-                CaptureSource::Screen { audio: Some(audio), .. } => audio.input_activity(),
-                _ => None,
-            });
+            let input =
+                coord
+                    .active_recording
+                    .as_ref()
+                    .and_then(|recording| match &recording.source {
+                        CaptureSource::Screen {
+                            audio: Some(audio), ..
+                        } => audio.input_activity(),
+                        _ => None,
+                    });
             self.equalizer.step(input, coord.reduced_motion);
         }
         let elapsed_ms = recording_ms.unwrap_or(coord.last_elapsed_ms);
@@ -2970,8 +3026,12 @@ impl Render for HudPillWindow {
         let clock = format_clock(elapsed_ms);
         let has_iphone = coord.iphone.is_some();
         let completed_note = coord.completed_note.clone();
-        let completed_no_words = coord.completed_has_no_words();
+        let completed_issue = coord.completed_audio_issue();
+        let completed_warning = completed_issue.is_some();
         let live_no_words = coord.recording_has_no_words() && !coord.reveal.is_open();
+        let pill_theme = PillTheme::for_window(window);
+        let recording_warning = mic_warning.is_some() || live_no_words;
+        let warning_focus = recording_warning || completed_warning;
         // The Recording capsule's trailing group: switch chips or controls, and the swap between.
         let chips = if matches!(phase, IslandPhase::Recording) {
             coord.reveal.is_open()
@@ -2998,7 +3058,7 @@ impl Render for HudPillWindow {
             chips,
             mic_warning,
             completed_note.as_deref(),
-            completed_no_words,
+            completed_issue,
             live_no_words,
         );
         let snap_initial_width =
@@ -3196,7 +3256,7 @@ impl Render for HudPillWindow {
                                 .child(clock.clone()),
                         ),
                 )
-                .child(island_divider().opacity(pieces[2]))
+                .child(island_divider(pill_theme).opacity(pieces[2]))
         });
         let ghost = match (ghost, trace_xf) {
             (Some(g), Some(xf)) => {
@@ -3238,7 +3298,7 @@ impl Render for HudPillWindow {
                 .children(SelectionMode::available(has_iphone).iter().enumerate().map(
                     |(i, &segment)| {
                         let c_segment = self.coordinator.clone();
-                        mode_segment_level(segment, highlight(segment, mode))
+                        mode_segment_level(segment, highlight(segment, mode), pill_theme, !record)
                             .opacity(alpha(i))
                             .on_click(move |_, _, cx| {
                                 c_segment.update(cx, |coord, cx| {
@@ -3249,16 +3309,16 @@ impl Render for HudPillWindow {
                 ))
                 .when(record, |row| {
                     row.child(
-                        primary_chip("sel-record", "Record")
+                        primary_chip("sel-record", "Record", pill_theme, false)
                             .opacity(alpha(n_modes))
                             .on_click(move |_, _, cx| {
                                 c_record.update(cx, |coord, cx| coord.record_selected_mode(cx));
                             }),
                     )
                 })
-                .child(island_divider().opacity(alpha(after)))
+                .child(island_divider(pill_theme).opacity(alpha(after)))
                 .child(
-                    icon_circle_chip("sel-cancel", "✕")
+                    icon_circle_chip("sel-cancel", "✕", pill_theme)
                         .opacity(alpha(after + 1))
                         .on_click(move |_, _, cx| {
                             c_sel_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
@@ -3284,35 +3344,35 @@ impl Render for HudPillWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(rgba(if completed_no_words {
-                                0xf5a6232e
+                            .bg(rgb(if completed_warning {
+                                WARNING
                             } else {
-                                0x34c7592e
+                                pill_theme.neutral()
                             }))
-                            .text_color(rgb(if completed_no_words {
-                                0xf5b544
+                            .text_color(rgb(if completed_warning {
+                                pill_theme::CARBON
                             } else {
-                                POSITIVE_COLOR
+                                pill_theme.text()
                             }))
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .child(if completed_no_words { "!" } else { "✓" }),
+                            .child(if completed_warning { "!" } else { "✓" }),
                     )
                     .child(
                         div()
                             .ml(px(8.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT_COLOR))
+                            .text_color(rgb(pill_theme.text()))
                             .child(completed_status_label(
                                 inbox_count,
                                 completed_note.as_deref(),
-                                completed_no_words,
+                                completed_issue,
                             )),
                     ),
             )
-            .child(island_divider())
+            .child(island_divider(pill_theme))
             .child(
-                primary_chip("hud-paste", "Paste")
+                primary_chip("hud-paste", "Paste", pill_theme, completed_warning)
                     .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                         let start = current_mouse_screen();
                         c_paste_down.update(cx, |coord, _| {
@@ -3340,19 +3400,23 @@ impl Render for HudPillWindow {
                     }),
             )
             .child(
-                pill_chip("hud-inspect", "Inspect").on_click(move |_, _, cx| {
+                pill_chip("hud-inspect", "Inspect", pill_theme).on_click(move |_, _, cx| {
                     c_inspect.update(cx, |coord, cx| coord.inspect_completed_bundle(cx));
                 }),
             )
             .child(
-                icon_circle_chip("hud-dismiss", "✕").on_click(move |_, _, cx| {
+                icon_circle_chip("hud-dismiss", "✕", pill_theme).on_click(move |_, _, cx| {
                     c_dismiss.update(cx, |coord, cx| coord.dismiss_completed_bundle(cx));
                 }),
             ),
             IslandPhase::Recording => {
                 // A soft ripple leaves the dot every 1.6s while the dot itself breathes.
                 #[cfg(target_os = "linux")]
-                let meter_w = if equalizer_enabled { EQUALIZER_W + CHIP_GAP } else { 0.0 };
+                let meter_w = if equalizer_enabled {
+                    EQUALIZER_W + CHIP_GAP
+                } else {
+                    0.0
+                };
                 #[cfg(not(target_os = "linux"))]
                 let meter_w = 0.0;
                 #[cfg(target_os = "linux")]
@@ -3425,7 +3489,7 @@ impl Render for HudPillWindow {
                                 .child(clock),
                         ),
                 )
-                .child(island_divider())
+                .child(island_divider(pill_theme))
                 .when_some(meter, |row, meter| row.child(meter))
                 .when_some(mic_warning, |row, warning| {
                     row.child(
@@ -3433,10 +3497,12 @@ impl Render for HudPillWindow {
                             .flex_none()
                             .px(px(CHIP_PX))
                             .text_size(px(HUD_TEXT))
-                            .text_color(rgb(0xffca70))
+                            .text_color(rgb(pill_theme.warning_text()))
+                            .bg(rgb(if pill_theme.dark { 0x4a360e } else { 0xf5d98a }))
+                            .rounded(px(4.0))
                             .child(warning.label()),
                     )
-                    .child(island_divider())
+                    .child(island_divider(pill_theme))
                 })
                 .child({
                     // The trailing slot: switch chips or controls. The lead is pinned to the
@@ -3450,7 +3516,9 @@ impl Render for HudPillWindow {
                         + CHIP_GAP
                         + mic_warning.map_or(0.0, |warning| {
                             measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
-                                + 2.0 * CHIP_PX + (1.0 + 2.0 * DIVIDER_MX) + 2.0 * CHIP_GAP
+                                + 2.0 * CHIP_PX
+                                + (1.0 + 2.0 * DIVIDER_MX)
+                                + 2.0 * CHIP_GAP
                         })
                         + meter_w;
                     let inner_now = render_width - 2.0 * ISLAND_INSET;
@@ -3472,7 +3540,14 @@ impl Render for HudPillWindow {
                         (fade > 0.002).then(|| {
                             let (out_alphas, _) = alphas(out_chips, fade);
                             traced(
-                                self.recording_trail(out_chips, has_iphone, &out_alphas, false),
+                                self.recording_trail(
+                                    out_chips,
+                                    has_iphone,
+                                    &out_alphas,
+                                    false,
+                                    pill_theme,
+                                    recording_warning,
+                                ),
                                 trail_keys(out_chips, has_iphone, &out_alphas, "out:"),
                             )
                         })
@@ -3488,15 +3563,22 @@ impl Render for HudPillWindow {
                             slot.child(div().absolute().left(px(0.0)).top(px(0.0)).child(group))
                         })
                         .child(traced(
-                            self.recording_trail(chips, has_iphone, &in_alphas, true),
+                            self.recording_trail(
+                                chips,
+                                has_iphone,
+                                &in_alphas,
+                                true,
+                                pill_theme,
+                                recording_warning,
+                            ),
                             trail_keys(chips, has_iphone, &in_alphas, ""),
                         ))
                 })
                 .when(live_no_words, |row| {
-                    row.child(island_divider()).child(
+                    row.child(island_divider(pill_theme)).child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xf5b544))
+                            .text_color(rgb(pill_theme.warning_text()))
                             .pr(px(LIVE_WARNING_END_PAD))
                             .child("⚠ No words yet"),
                     )
@@ -3518,7 +3600,7 @@ impl Render for HudPillWindow {
                         .top(px(cy_dot))
                         .size(px(dot_r * 2.0))
                         .rounded_full()
-                        .bg(with_alpha(TEXT_COLOR, 0.20 + 0.80 * intensity))
+                        .bg(with_alpha(pill_theme.text(), 0.20 + 0.80 * intensity))
                 });
                 traced(row, named(&["processing"])).child(
                     div()
@@ -3532,7 +3614,7 @@ impl Render for HudPillWindow {
                             div()
                                 .ml(px(6.0))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(TEXT_COLOR))
+                                .text_color(rgb(pill_theme.text()))
                                 .child("Processing…"),
                         ),
                 )
@@ -3594,17 +3676,14 @@ impl Render for HudPillWindow {
                     .when(pin_lead, |d| d.justify_start())
                     .when(!pin_lead, |d| d.justify_center())
                     .when(!has_shell, |d| {
-                        d.bg(rgba(0x141416f5))
+                        d.bg(rgb(pill_theme.surface()))
                             .border_1()
-                            .border_color(if is_completed && completed_no_words {
-                                rgba(0xf5b54480)
-                            } else if is_completed {
-                                rgba(0x69d89f4d)
-                            } else {
-                                rgba(0xffffff1a)
-                            })
+                            .border_color(with_alpha(
+                                pill_theme.line(),
+                                if warning_focus { 0.40 } else { 0.24 },
+                            ))
                     })
-                    .text_color(rgb(TEXT_COLOR))
+                    .text_color(rgb(pill_theme.text()))
                     .text_size(px(HUD_TEXT))
                     .whitespace_nowrap()
                     .relative()
@@ -3688,6 +3767,8 @@ impl HudPillWindow {
         has_iphone: bool,
         alphas: &[f32],
         interactive: bool,
+        theme: PillTheme,
+        warning: bool,
     ) -> Div {
         let alpha = |i: usize| alphas.get(i).copied().unwrap_or(1.0);
         let group = div().flex().flex_none().items_center().gap(px(CHIP_GAP));
@@ -3695,7 +3776,7 @@ impl HudPillWindow {
             return group.children(SelectionMode::available(has_iphone).iter().enumerate().map(
                 |(i, &mode)| {
                     let c_switch = self.coordinator.clone();
-                    mode_segment(mode, mode == SelectionMode::Screen)
+                    mode_segment(mode, mode == SelectionMode::Screen, theme, true)
                         .opacity(alpha(i))
                         .when(interactive, |d| {
                             d.on_click(move |_, _, cx| {
@@ -3707,18 +3788,19 @@ impl HudPillWindow {
         }
         let c_cancel = self.coordinator.clone();
         let c_finish = self.coordinator.clone();
-        let group = group.child(pill_chip("hud-cancel", "Cancel").opacity(alpha(0)).when(
-            interactive,
-            |d| {
-                d.on_click(move |_, _, cx| {
-                    c_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
-                })
-            },
-        ));
+        let group = group.child(
+            pill_chip("hud-cancel", "Cancel", theme)
+                .opacity(alpha(0))
+                .when(interactive, |d| {
+                    d.on_click(move |_, _, cx| {
+                        c_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
+                    })
+                }),
+        );
         let group = group.when(whiteboard_enabled(), |group| {
             let c_board = self.coordinator.clone();
             group.child(
-                pill_chip("hud-whiteboard", "Whiteboard")
+                pill_chip("hud-whiteboard", "Whiteboard", theme)
                     .opacity(alpha(1))
                     .when(interactive, |d| {
                         d.on_click(move |_, _, cx| {
@@ -3729,7 +3811,7 @@ impl HudPillWindow {
             )
         });
         group.child(
-            primary_chip("hud-done", "Finish")
+            primary_chip("hud-done", "Finish", theme, warning)
                 .opacity(alpha(if whiteboard_enabled() { 2 } else { 1 }))
                 .when(interactive, |d| {
                     d.on_click(move |_, _, cx| {
@@ -3752,13 +3834,13 @@ fn island_lead() -> Div {
         .map(platform::window_drag_region)
 }
 
-fn island_divider() -> Div {
+fn island_divider(theme: PillTheme) -> Div {
     div()
         .w(px(1.0))
         .h(px(16.0))
         .mx(px(DIVIDER_MX))
         .flex_none()
-        .bg(rgba(0xffffff1a))
+        .bg(with_alpha(theme.text(), 0.24))
 }
 
 fn hud_chip(id: impl Into<gpui::ElementId>) -> gpui::Stateful<Div> {
@@ -3777,26 +3859,37 @@ fn hud_chip(id: impl Into<gpui::ElementId>) -> gpui::Stateful<Div> {
 fn pill_chip(
     id: impl Into<gpui::ElementId>,
     label: impl Into<gpui::SharedString>,
+    theme: PillTheme,
 ) -> gpui::Stateful<Div> {
     hud_chip(id)
         .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(TEXT_SOFT))
+        .text_color(rgb(theme.soft()))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(0xffffff14)).text_color(rgb(TEXT_COLOR)))
+        .hover(move |s| s.bg(rgb(theme.hover())).text_color(rgb(theme.text())))
         .child(label.into())
 }
 
-fn primary_chip(id: &'static str, label: &'static str) -> gpui::Stateful<Div> {
+fn primary_chip(
+    id: &'static str,
+    label: &'static str,
+    theme: PillTheme,
+    warning: bool,
+) -> gpui::Stateful<Div> {
     hud_chip(id)
-        .bg(rgb(ACCENT_COLOR))
-        .text_color(rgb(TEXT_COLOR))
+        .bg(rgb(if warning { theme.surface() } else { SIGNAL }))
+        .when(warning, |d| d.border_1().border_color(rgb(theme.text())))
+        .text_color(rgb(if warning {
+            theme.text()
+        } else {
+            theme.active_text()
+        }))
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
-        .hover(|s| s.bg(rgb(ACCENT_HOVER)))
+        .hover(move |s| s.bg(rgb(if warning { theme.hover() } else { SIGNAL_HOVER })))
         .child(label)
 }
 
-fn icon_circle_chip(id: &'static str, icon: &'static str) -> gpui::Stateful<Div> {
+fn icon_circle_chip(id: &'static str, icon: &'static str, theme: PillTheme) -> gpui::Stateful<Div> {
     div()
         .id(id)
         .size(px(CHIP_H))
@@ -3806,16 +3899,21 @@ fn icon_circle_chip(id: &'static str, icon: &'static str) -> gpui::Stateful<Div>
         .items_center()
         .justify_center()
         .text_size(px(12.0))
-        .text_color(rgb(MUTED_COLOR))
+        .text_color(rgb(theme.muted()))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(0xffffff14)).text_color(rgb(TEXT_COLOR)))
+        .hover(move |s| s.bg(rgb(theme.hover())).text_color(rgb(theme.text())))
         .child(icon)
 }
 
 /// One segment of the selection-mode control: line icon + label. Weight stays constant across
 /// states so switching never shifts the measured capsule width (`selecting_row_width`).
-fn mode_segment(mode: SelectionMode, active: bool) -> gpui::Stateful<Div> {
-    mode_segment_level(mode, f32::from(u8::from(active)))
+fn mode_segment(
+    mode: SelectionMode,
+    active: bool,
+    theme: PillTheme,
+    accent: bool,
+) -> gpui::Stateful<Div> {
+    mode_segment_level(mode, f32::from(u8::from(active)), theme, accent)
 }
 
 fn mix_rgb(from: u32, to: u32, t: f32) -> gpui::Rgba {
@@ -3829,7 +3927,12 @@ fn mix_rgb(from: u32, to: u32, t: f32) -> gpui::Rgba {
 }
 
 /// A mode chip `level` of the way to selected, so the highlight can cross-fade between chips.
-fn mode_segment_level(mode: SelectionMode, level: f32) -> gpui::Stateful<Div> {
+fn mode_segment_level(
+    mode: SelectionMode,
+    level: f32,
+    theme: PillTheme,
+    accent: bool,
+) -> gpui::Stateful<Div> {
     let group = mode.chip_id();
     let level = level.clamp(0.0, 1.0);
     let active = level > 0.5;
@@ -3838,16 +3941,31 @@ fn mode_segment_level(mode: SelectionMode, level: f32) -> gpui::Stateful<Div> {
         .px(px(SEG_PX))
         .gap(px(SEG_ICON_GAP))
         .font_weight(FontWeight::MEDIUM)
-        .bg(with_alpha(0xffffff, 0x26 as f32 / 255.0 * level))
-        .text_color(mix_rgb(TEXT_SOFT, TEXT_COLOR, level))
+        .bg(with_alpha(
+            if accent { SIGNAL } else { theme.neutral() },
+            level,
+        ))
+        .text_color(mix_rgb(
+            theme.soft(),
+            if accent {
+                theme.active_text()
+            } else {
+                theme.text()
+            },
+            level,
+        ))
         .cursor_pointer()
         .hover(move |s| {
-            s.bg(if active {
-                rgba(0xffffff2e)
+            s.bg(rgb(if active && accent {
+                SIGNAL_HOVER
             } else {
-                rgba(0xffffff14)
-            })
-            .text_color(rgb(TEXT_COLOR))
+                theme.hover()
+            }))
+            .text_color(rgb(if active && accent {
+                theme.active_text()
+            } else {
+                theme.text()
+            }))
         })
         // `svg()` tints with its own text colour, so hover is mirrored through the group.
         .child(
@@ -3855,8 +3973,22 @@ fn mode_segment_level(mode: SelectionMode, level: f32) -> gpui::Stateful<Div> {
                 .path(mode.icon())
                 .size(px(SEG_ICON))
                 .flex_none()
-                .text_color(mix_rgb(MUTED_COLOR, TEXT_COLOR, level))
-                .group_hover(group, |s| s.text_color(rgb(TEXT_COLOR))),
+                .text_color(mix_rgb(
+                    theme.muted(),
+                    if accent {
+                        theme.active_text()
+                    } else {
+                        theme.text()
+                    },
+                    level,
+                ))
+                .group_hover(group, move |s| {
+                    s.text_color(rgb(if active && accent {
+                        theme.active_text()
+                    } else {
+                        theme.text()
+                    }))
+                }),
         )
         .child(mode.label())
 }
@@ -4240,6 +4372,34 @@ fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<St
         .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
 }
 
+/// Pair the frame with its words; stack them when the window cannot fit both.
+fn review_workspace_widths(window_width: f32) -> (f32, f32) {
+    if window_width < 800.0 {
+        ((window_width - 40.0).max(1.0), window_width)
+    } else {
+        let words = (window_width * 0.4).clamp(320.0, 520.0);
+        ((window_width - words - 40.0).max(1.0), words)
+    }
+}
+
+fn review_frame_speech<'a>(frames: &[Option<&'a str>], selected: usize) -> &'a str {
+    frames
+        .get(selected)
+        .and_then(|said| *said)
+        .filter(|said| !said.trim().is_empty())
+        .unwrap_or("No words at this moment.")
+}
+
+fn review_speech_status(no_words: bool, missing_reason: Option<&str>) -> Option<String> {
+    if let Some(reason) = missing_reason {
+        Some(format!("Transcription unavailable: {reason}"))
+    } else if no_words {
+        Some("No words transcribed. Your audio was saved—check it or try again closer to the microphone.".into())
+    } else {
+        None
+    }
+}
+
 /// A point dragged past the picker's display (global points), pulled back onto its edge: an
 /// area belongs to the display the drag started on, which the picker stays on while dragging.
 fn clamp_point([x, y]: [f32; 2], [dx, dy, dw, dh]: [f32; 4]) -> [f32; 2] {
@@ -4352,9 +4512,13 @@ impl BundleReviewWindow {
 
 impl Render for BundleReviewWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stage_w = (f32::from(window.bounds().size.width) - 320.0 - 44.0).max(320.0);
+        let (stage_w, words_w) = review_workspace_widths(f32::from(window.bounds().size.width));
+        let narrow = f32::from(window.bounds().size.width) < 800.0;
+        let compact = f32::from(window.bounds().size.width) < 600.0;
+        let narrow_stage_height = (f32::from(window.bounds().size.height) * 0.46).max(220.0);
         let coord_read = self.coordinator.read(cx);
         let state = coord_read.review_bundle.clone();
+        let audio_issue = coord_read.review_audio_issue;
         let status = coord_read.review_status.clone();
         let tab = coord_read.selected_tab;
         let selected_kf = coord_read.selected_keyframe;
@@ -4436,10 +4600,71 @@ impl Render for BundleReviewWindow {
             .and_then(|_| review_neighbor(&self.history, &dir, true))
             .cloned();
         let history_count = self.history.len();
+        let frame_rows = bundle
+            .keyframes
+            .iter()
+            .enumerate()
+            .map(|(idx, frame)| {
+                let c_select = self.coordinator.clone();
+                div()
+                    .id(("review-frame-row", idx))
+                    .w_full()
+                    .p_3()
+                    .rounded(px(8.0))
+                    .bg(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                        SURFACE_BG
+                    } else {
+                        SIDEBAR_BG
+                    }))
+                    .border_1()
+                    .border_color(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                        ACCENT_COLOR
+                    } else {
+                        LINE_COLOR
+                    }))
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        c_select.update(cx, |coord, cx| {
+                            coord.selected_tab = ReviewTab::Keyframes;
+                            coord.selected_keyframe = idx;
+                            cx.notify();
+                        });
+                    })
+                    .child(format!("{}  ·  {}", frame.index, format_clock(frame.t)))
+                    .child(
+                        div()
+                            .mt_1()
+                            .text_size(px(12.0))
+                            .text_color(rgb(MUTED_COLOR))
+                            .child(frame.event.clone()),
+                    )
+            })
+            .collect::<Vec<_>>();
+        let frame_words = bundle
+            .keyframes
+            .iter()
+            .map(|kf| kf.said.as_deref())
+            .collect::<Vec<_>>();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
-        let no_words = bundle_no_words_warning(&dir, &bundle);
-        let missing_reason = bundle.transcript.missing.as_ref()
-            .filter(|_| bundle.transcript.text.trim().is_empty());
+        let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
+        let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
+        let missing_reason = if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) {
+            bundle.transcript.missing.as_ref()
+        } else {
+            None
+        };
+        let speech_status = if no_audio {
+            Some("No microphone audio was saved. The screen capture is still available—check the microphone and try again.".into())
+        } else if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable)
+            && missing_reason.is_none()
+        {
+            Some("Transcription unavailable: recognition did not run".into())
+        } else {
+            review_speech_status(
+                no_words,
+                missing_reason.map(|missing| missing.reason.as_str()),
+            )
+        };
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
             (Some(app), Some(win)) if !win.is_empty() && win != app => {
@@ -4489,6 +4714,21 @@ impl Render for BundleReviewWindow {
                     }
                     if coord.handle_app_key(&event.keystroke, cx) {
                         return true;
+                    }
+                    if !mods.platform && !mods.control && !mods.alt && !mods.shift
+                        && coord.selected_tab == ReviewTab::Keyframes
+                    {
+                        let count = coord.review_bundle.as_ref().map_or(0, |(_, b)| b.keyframes.len());
+                        let next = match key {
+                            "left" => coord.selected_keyframe.checked_sub(1),
+                            "right" => coord.selected_keyframe.checked_add(1).filter(|&i| i < count),
+                            _ => None,
+                        };
+                        if let Some(next) = next {
+                            coord.selected_keyframe = next;
+                            cx.notify();
+                            return true;
+                        }
                     }
                     if let Some(cfg) = shortcut_from_key_and_mods(
                         key,
@@ -4543,50 +4783,26 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(
-                                // Segmented control: R_outer 8 = R_tab 6 + border 1 + pad 1.
+                            .when(!compact, |header| header.child(
                                 div()
                                     .flex_none()
-                                    .h(px(28.0))
-                                    .p(px(1.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .rounded(px(8.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .border_1()
-                                    .border_color(rgb(LINE_COLOR))
-                                    .child(
-                                        tab_chip(
-                                            "tab-contact-sheet",
-                                            "Contact Sheet",
-                                            tab == ReviewTab::ContactSheet,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_sheet.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::ContactSheet;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        tab_chip(
-                                            "tab-keyframes",
-                                            "Keyframes",
-                                            tab == ReviewTab::Keyframes,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_frames.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::Keyframes;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    ),
-                            )
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(14.0))
+                                    .child("Capture review"),
+                            ))
+                            .when(!compact, |header| header.child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(MUTED_COLOR))
+                                    .child(format!(
+                                        "{} · {} · {} frames",
+                                        target_label,
+                                        format_clock(bundle.duration_ms),
+                                        bundle.keyframes.len(),
+                                    )),
+                            ))
                             .child(
                                 div()
                                     .flex_none()
@@ -4595,41 +4811,23 @@ impl Render for BundleReviewWindow {
                                     .gap_2()
                                     .when_some(newer, |d, path| {
                                         d.child(
-                                            action_button("review-newer", "← Newer", false)
+                                            action_button("review-newer", if compact { "←" } else { "← Newer" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_newer, &path, cx);
                                                 }),
                                         )
                                     })
-                                    .when_some(history_position, |d, index| {
+                                    .when_some(history_position.filter(|_| !compact), |d, index| {
                                         d.child(format!("{} / {}", index + 1, history_count))
                                     })
                                     .when_some(older, |d, path| {
                                         d.child(
-                                            action_button("review-older", "Older →", false)
+                                            action_button("review-older", if compact { "→" } else { "Older →" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_older, &path, cx);
                                                 }),
                                         )
                                     }),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED_COLOR))
-                                    .child(format!(
-                                        "{} · {} · {} {}",
-                                        target_label,
-                                        format_clock(bundle.duration_ms),
-                                        bundle.keyframes.len(),
-                                        if bundle.keyframes.len() == 1 {
-                                            "keyframe"
-                                        } else {
-                                            "keyframes"
-                                        }
-                                    )),
                             ),
                     )
                     .child(
@@ -4638,43 +4836,6 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                hint_button(
-                                    "btn-shortcut",
-                                    if recording_shortcut {
-                                        "Press shortcut…"
-                                    } else {
-                                        "Shortcut"
-                                    },
-                                    (!recording_shortcut).then_some(shortcut_label),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    c_shortcut.update(cx, |coord, cx| {
-                                        coord.recording_shortcut_key =
-                                            !coord.recording_shortcut_key;
-                                        cx.notify();
-                                    });
-                                }),
-                            )
-                            .child(
-                                action_button(
-                                    "btn-reveal",
-                                    &format!("Show in {}", platform::FILE_MANAGER),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    let res = crate::handoff::open_path(&send_dir);
-                                    let manager = platform::FILE_MANAGER;
-                                    c_send.update(cx, |coord, cx| {
-                                        coord.review_status = Some(match res {
-                                            Ok(()) => format!("Opened in {manager}"),
-                                            Err(e) => format!("Show in {manager} failed: {e}"),
-                                        });
-                                        cx.notify();
-                                    });
-                                }),
-                            )
                             .child(
                                 action_button(
                                     "btn-copy",
@@ -4702,6 +4863,85 @@ impl Render for BundleReviewWindow {
                     )
                     .children(platform::caption_buttons()),
             )
+            .child(
+                div()
+                    .h(px(if compact { 76.0 } else { 44.0 }))
+                    .flex_none()
+                    .px_5()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .when(compact, |toolbar| toolbar.flex_col().items_start().justify_center().gap_1())
+                    .border_b_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                tab_chip(
+                                    "tab-contact-sheet",
+                                    "Contact Sheet",
+                                    tab == ReviewTab::ContactSheet,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_tab_sheet.update(cx, |coord, cx| {
+                                        coord.selected_tab = ReviewTab::ContactSheet;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                tab_chip("tab-keyframes", "Keyframes", tab == ReviewTab::Keyframes)
+                                    .on_click(move |_, _, cx| {
+                                        c_tab_frames.update(cx, |coord, cx| {
+                                            coord.selected_tab = ReviewTab::Keyframes;
+                                            cx.notify();
+                                        });
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                hint_button(
+                                    "btn-shortcut",
+                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    (!recording_shortcut && !compact).then_some(shortcut_label),
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_shortcut.update(cx, |coord, cx| {
+                                        coord.recording_shortcut_key = !coord.recording_shortcut_key;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                action_button(
+                                    "btn-reveal",
+                                    &if compact { "Show Files".to_owned() } else { format!("Show in {}", platform::FILE_MANAGER) },
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    let res = crate::handoff::open_path(&send_dir);
+                                    let manager = platform::FILE_MANAGER;
+                                    c_send.update(cx, |coord, cx| {
+                                        coord.review_status = Some(match res {
+                                            Ok(()) => format!("Opened in {manager}"),
+                                            Err(e) => format!("Show in {manager} failed: {e}"),
+                                        });
+                                        cx.notify();
+                                    });
+                                }),
+                            ),
+                    ),
+            )
             .when_some(review_notice, |root, message| {
                 root.child(
                     div()
@@ -4713,17 +4953,18 @@ impl Render for BundleReviewWindow {
                 )
             })
             .child(
-                // Main Workspace: Stage on Left + Timeline Sidebar on Right
+                // Keep the selected frame and its words together, even in a narrow window.
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .when(narrow, |workspace| workspace.flex_col())
                     .child(
                         div()
                             .id("review-stage-scroll")
-                            .flex_1()
                             .min_w_0()
-                            .h_full()
+                            .when(narrow, |stage| stage.h(px(narrow_stage_height)).flex_none())
+                            .when(!narrow, |stage| stage.flex_1().h_full())
                             .overflow_y_scroll()
                             .overflow_x_hidden()
                             .p_5()
@@ -4737,20 +4978,53 @@ impl Render for BundleReviewWindow {
                     .child(
                         div()
                             .id("review-timeline-sidebar")
-                            .w(px(320.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
+                            .when(narrow, |sidebar| sidebar.w_full().flex_1().min_h_0())
+                            .when(!narrow, |sidebar| sidebar.w(px(words_w)).h_full().flex_none())
                             .overflow_x_hidden()
                             .bg(rgb(SIDEBAR_BG))
-                            .border_l_1()
+                            .when(narrow, |sidebar| sidebar.border_t_1())
+                            .when(!narrow, |sidebar| sidebar.border_l_1())
                             .border_color(rgb(LINE_COLOR))
                             .px_4()
                             .py(px(18.0))
                             .flex()
                             .flex_col()
-                            .child(sidebar_heading("Transcript"))
-                            .when(no_words, |sidebar| {
+                            .child(sidebar_heading(if tab == ReviewTab::Keyframes {
+                                "WORDS AT THIS MOMENT"
+                            } else {
+                                "FULL TRANSCRIPT"
+                            }))
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.child(
+                                    div()
+                                        .id("review-selected-speech")
+                                        .p_4()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
+                                        .rounded(px(8.0))
+                                        .bg(rgb(SURFACE_BG))
+                                        .border_1()
+                                        .border_color(rgb(LINE_COLOR))
+                                        .text_size(px(15.0))
+                                        .line_height(relative(1.5))
+                                        .child(review_frame_speech(&frame_words, selected_kf).to_owned()),
+                                )
+                            })
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.when_some(speech_status, |sidebar, message| {
+                                    sidebar.child(
+                                        div()
+                                            .mt_3()
+                                            .p_3()
+                                            .rounded(px(8.0))
+                                            .bg(rgba(0xf5a62320))
+                                            .text_color(rgb(0xf5b544))
+                                            .text_size(px(13.0))
+                                            .child(message),
+                                    )
+                                })
+                            })
+                            .when(tab == ReviewTab::ContactSheet && no_words, |sidebar| {
                                 sidebar.child(
                                     div()
                                         .mt_3()
@@ -4762,10 +5036,21 @@ impl Render for BundleReviewWindow {
                                         .child("No words transcribed. Your audio was saved—check it or try again closer to the microphone."),
                                 )
                             })
-                            .when(!no_words, |sidebar| {
+                            .when(tab == ReviewTab::ContactSheet && no_audio, |sidebar| {
+                                sidebar.child(
+                                    div().mt_3().p_3().rounded(px(8.0))
+                                        .bg(rgba(0xf5a62320)).text_color(rgb(0xf5b544))
+                                        .text_size(px(13.0))
+                                        .child("No microphone audio was saved. The screen capture is still available—check the microphone and try again."),
+                                )
+                            })
+                            .when(tab == ReviewTab::ContactSheet && !no_words && (!no_audio || !bundle.transcript.text.trim().is_empty()), |sidebar| {
                                 sidebar.child(
                                     div()
+                                        .id("review-full-transcript")
                                         .p_3()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
                                         .rounded(px(8.0))
                                         .bg(rgb(SURFACE_BG))
                                         .border_1()
@@ -4778,7 +5063,11 @@ impl Render for BundleReviewWindow {
                                                 d.text_color(rgb(MUTED_COLOR)).child(
                                                     missing_reason
                                                         .map(|missing| format!("Transcription unavailable: {}", missing.reason))
-                                                        .unwrap_or_else(|| "No speech".into()),
+                                                        .unwrap_or_else(|| match audio_issue {
+                                                            Some(CompletedAudioIssue::NoAudio) => "No audio",
+                                                            Some(CompletedAudioIssue::TranscriptionUnavailable) => "Transcription unavailable: recognition did not run",
+                                                            _ => "No speech",
+                                                        }.into()),
                                                 )
                                             } else {
                                                 d.text_color(rgb(TEXT_COLOR)).child(format!("“{text}”"))
@@ -4786,14 +5075,23 @@ impl Render for BundleReviewWindow {
                                         }),
                                 )
                             })
-                            .child(div().mt(px(20.0)).child(sidebar_heading("Timeline")))
                             .child(
-                                div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
-                                    timeline
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(|(i, line)| timeline_row(i, &line)),
-                                ),
+                                div()
+                                    .id("review-evidence-list")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("FRAMES")))
+                                    .child(div().flex().flex_col().gap_2().children(frame_rows))
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("TIMELINE")))
+                                    .child(
+                                        div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
+                                            timeline
+                                                .into_iter()
+                                                .enumerate()
+                                                .map(|(i, line)| timeline_row(i, &line)),
+                                        ),
+                                    ),
                             ),
                     ),
             )
@@ -4832,91 +5130,46 @@ impl BundleReviewWindow {
         selected_kf: usize,
         stage_w: f32,
     ) -> AnyElement {
-        // Card: border 1 + pad 8 around the frame, so R_card 12 = R_frame 3 + 9.
-        let card_img_w = (stage_w - 18.0).max(240.0);
-        let cards = bundle
-            .keyframes
-            .iter()
-            .enumerate()
-            .map(|(idx, kf)| {
-                let is_selected = idx == selected_kf;
-                let frame_img = self.cached_frames.get(idx).and_then(Clone::clone);
-                let c_select = self.coordinator.clone();
-                div()
-                    .id(("kf-card", idx))
-                    .p(px(8.0))
-                    .rounded(px(12.0))
-                    .bg(rgb(SURFACE_BG))
-                    .border_1()
-                    .border_color(if is_selected {
-                        rgb(ACCENT_COLOR)
-                    } else {
-                        rgb(LINE_COLOR)
-                    })
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .cursor_pointer()
-                    .when(!is_selected, |d| d.hover(|s| s.border_color(rgb(0x3a3a3a))))
-                    .on_click(move |_, _, cx| {
-                        c_select.update(cx, |coord, cx| {
-                            coord.selected_keyframe = idx;
-                            cx.notify();
-                        });
-                    })
-                    .when_some(frame_img, |d, image| {
-                        d.child(img(image).w(px(card_img_w)).rounded(px(3.0)))
-                    })
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .pb(px(2.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(12.5))
-                            .child(
-                                div()
-                                    .h(px(20.0))
-                                    .px(px(7.0))
-                                    .flex()
-                                    .flex_none()
-                                    .items_center()
-                                    .rounded(px(10.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(TEXT_COLOR))
-                                    .child(format!("#{} · {}", kf.index, format_clock(kf.t))),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(kf.event.clone()),
-                            ),
-                    )
-                    .when_some(kf.said.clone(), |d, said| {
-                        d.child(
-                            div()
-                                .px(px(4.0))
-                                .pb(px(2.0))
-                                .text_size(px(12.0))
-                                .line_height(relative(1.4))
-                                .text_color(rgb(MUTED_COLOR))
-                                .child(format!("“{said}”")),
-                        )
-                    })
-            })
-            .collect::<Vec<_>>();
-
+        let Some(frame) = bundle.keyframes.get(selected_kf) else {
+            return div()
+                .p_6()
+                .child("No frames in this capture.")
+                .into_any_element();
+        };
+        let image = self.cached_frames.get(selected_kf).and_then(Clone::clone);
         div()
             .w_full()
             .flex()
             .flex_col()
-            .gap_4()
-            .children(cards)
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_COLOR))
+                    .child(format!(
+                        "Frame {} / {}",
+                        selected_kf + 1,
+                        bundle.keyframes.len()
+                    ))
+                    .child(format_clock(frame.t))
+                    .child(frame.event.clone()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .rounded(px(10.0))
+                    .bg(rgb(SURFACE_BG))
+                    .border_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .when_some(image, |d, image| {
+                        d.child(img(image).w(px(stage_w)).rounded(px(9.0)))
+                    }),
+            )
             .into_any_element()
     }
 }
@@ -5450,7 +5703,7 @@ pub fn run_app(
         cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys))
             .detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
-        crate::phone::start_ingest_server(ui_sender.clone());
+        crate::web::start_server();
         let telemetry = SharedCaptureTelemetry::new(ui_sender);
         install_global_hotkeys(&telemetry);
         start_global_input_tap(Arc::clone(&telemetry));
@@ -5587,7 +5840,6 @@ pub fn run_app(
                         }
                     }
 
-                    let mut should_open_pill = false;
                     while let Ok(ev) = ui_receiver.try_recv() {
                         loop_coord.update(cx, |coord, cx| match ev {
                             LiveOverlayEvent::CaptureShortcut => coord.press_shortcut(cx),
@@ -5608,29 +5860,7 @@ pub fn run_app(
                                 coord.onboarding_event(event, cx)
                             }
                             LiveOverlayEvent::Settings(event) => coord.settings_event(event, cx),
-                            LiveOverlayEvent::IngestedBundle {
-                                dir,
-                                bundle,
-                                status,
-                            } => {
-                                let frame_count = bundle.keyframes.len();
-                                let duration_ms = bundle.duration_ms;
-                                let inbox_count = coord.add_to_inbox(&dir, &bundle);
-                                coord.completed_dir = Some(dir.clone());
-                                coord.set_review_bundle((dir, *bundle), status);
-                                coord.set_island_phase(IslandPhase::Completed {
-                                    finished_at: Instant::now(),
-                                    frame_count,
-                                    duration_ms,
-                                    inbox_count,
-                                });
-                                should_open_pill = true;
-                                cx.notify();
-                            }
                         });
-                    }
-                    if should_open_pill {
-                        ensure_hud_pill_open(&loop_coord, cx);
                     }
 
                     motion::poll_tune();
@@ -5689,15 +5919,16 @@ mod tests {
     }
 
     #[test]
-    fn no_words_warning_requires_saved_audio_and_successful_empty_recognition() {
+    fn completed_capture_distinguishes_missing_audio_from_no_words_and_model_failure() {
         let empty = crate::model::TranscriptData::default();
-        assert!(no_words_warning(&empty, true));
-        assert!(!no_words_warning(&empty, false));
         let spoken = crate::model::TranscriptData {
             text: "hello".into(),
             ..Default::default()
         };
-        assert!(!no_words_warning(&spoken, true));
+        let skipped = crate::model::TranscriptData {
+            source: "none".into(),
+            ..Default::default()
+        };
         let unavailable = crate::model::TranscriptData {
             missing: Some(crate::model::MissingTranscript {
                 reason: "Model unavailable".into(),
@@ -5705,7 +5936,49 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!no_words_warning(&unavailable, true));
+        assert_eq!(
+            completed_audio_issue(None, &empty, false),
+            Some(CompletedAudioIssue::NoAudio)
+        );
+        assert_eq!(
+            completed_audio_issue(None, &empty, true),
+            Some(CompletedAudioIssue::NoWords)
+        );
+        assert_eq!(
+            completed_audio_issue(None, &unavailable, true),
+            Some(CompletedAudioIssue::TranscriptionUnavailable)
+        );
+        assert_eq!(
+            completed_audio_issue(None, &unavailable, false),
+            Some(CompletedAudioIssue::NoAudio)
+        );
+        assert_eq!(
+            completed_audio_issue(None, &skipped, false),
+            Some(CompletedAudioIssue::NoAudio)
+        );
+        assert_eq!(
+            completed_audio_issue(None, &skipped, true),
+            Some(CompletedAudioIssue::TranscriptionUnavailable)
+        );
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, false), None);
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, true), None);
+        assert_eq!(completed_audio_issue(None, &spoken, true), None);
+        assert_eq!(
+            completed_audio_issue(None, &spoken, false),
+            Some(CompletedAudioIssue::NoAudio)
+        );
+        assert_eq!(
+            completed_status_label(0, None, Some(CompletedAudioIssue::NoAudio)),
+            "Copied · No audio"
+        );
+        assert_eq!(
+            completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)),
+            "Copied · No words"
+        );
+        assert_eq!(
+            completed_status_label(0, None, Some(CompletedAudioIssue::TranscriptionUnavailable)),
+            "Copied · Transcript unavailable"
+        );
     }
 
     #[test]
@@ -5734,6 +6007,34 @@ mod tests {
         assert_eq!(
             review_notice(Some("scan failed"), Some("Ready")),
             Some("Could not read captures: scan failed".to_owned())
+        );
+    }
+
+    #[test]
+    fn review_workspace_gives_words_reading_room_without_cropping_the_stage() {
+        let (stage, words) = review_workspace_widths(1120.0);
+        assert!(words >= 420.0, "words panel too narrow: {words}");
+        assert!(stage >= 600.0, "image stage too narrow: {stage}");
+        let (stage, words) = review_workspace_widths(760.0);
+        assert_eq!((stage, words), (720.0, 760.0));
+        let (stage, words) = review_workspace_widths(320.0);
+        assert_eq!((stage, words), (280.0, 320.0));
+    }
+
+    #[test]
+    fn selected_frame_speech_follows_selection_not_the_whole_capture() {
+        let frames = [Some("first moment"), Some("second moment")];
+        assert_eq!(review_frame_speech(&frames, 1), "second moment");
+        assert_eq!(review_frame_speech(&frames, 2), "No words at this moment.");
+        assert_eq!(review_speech_status(false, None), None);
+        assert!(
+            review_speech_status(true, None)
+                .unwrap()
+                .contains("audio was saved")
+        );
+        assert_eq!(
+            review_speech_status(false, Some("speech failed")),
+            Some("Transcription unavailable: speech failed".into())
         );
     }
 
@@ -6015,14 +6316,24 @@ mod tests {
     fn clock_template_is_width_stable() {
         assert_eq!(clock_template("12:34"), "00:00");
         assert_eq!(completed_label(0, None), "Copied");
-        assert_eq!(completed_label(0, Some("Sent to APPARENT")), "Sent to APPARENT");
+        assert_eq!(
+            completed_label(0, Some("Sent to APPARENT")),
+            "Sent to APPARENT"
+        );
         assert_eq!(completed_label(1, Some("Sent to APPARENT")), "From iPhone");
         assert_eq!(completed_label(3, None), "3 from iPhone");
-        assert_eq!(completed_status_label(0, None, true), "Copied · No words");
         assert_eq!(
-            completed_status_label(0, Some("Sent to APPARENT"), true),
+            completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)),
+            "Copied · No words"
+        );
+        assert_eq!(
+            completed_status_label(
+                0,
+                Some("Sent to APPARENT"),
+                Some(CompletedAudioIssue::NoWords)
+            ),
             "Sent to APPARENT · No words"
         );
-        assert_eq!(completed_status_label(0, None, false), "Copied");
+        assert_eq!(completed_status_label(0, None, None), "Copied");
     }
 }

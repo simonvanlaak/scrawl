@@ -274,6 +274,15 @@
       "docs": ["README.md#capture-controls"]
     },
     {
+      "id": "finish-trace",
+      "group": "finish",
+      "name": "Local finish timing trace",
+      "says": "Saves per-stage finish durations next to each completed bundle for debugging and performance comparisons. No transcript or screen content is added to the trace.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
       "id": "copied",
       "group": "finish",
       "name": "Copied, with a Paste chip",

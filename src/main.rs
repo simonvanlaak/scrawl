@@ -2547,7 +2547,10 @@ mod tests {
         assert!(summary.contains("smaller candidate frames"));
         assert_eq!(std::fs::read_to_string(bundle_dir.join("summary.md")).unwrap(), summary);
         let (directory, mut loaded) = handoff::load_bundle(&bundle_dir).unwrap();
-        assert_eq!(sketch::summary_markdown(&loaded, &directory), summary);
+        // macOS may canonicalize /var to /private/var when loading the bundle.
+        // Regenerating for the original path must preserve the written summary.
+        assert_eq!(sketch::summary_markdown(&loaded, &bundle_dir), summary);
+        assert_eq!(directory, bundle_dir.canonicalize().unwrap());
         loaded.note = Some("a later edit".into());
         let regenerated = sketch::summary_markdown(&loaded, &directory);
         assert!(regenerated.contains("Image quality: Full-quality keyframes could not be decoded"));

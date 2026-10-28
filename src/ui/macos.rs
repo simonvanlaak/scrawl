@@ -178,6 +178,9 @@ pub(super) fn take_keys(cx: &mut App) {
     cx.activate(true);
 }
 
+/// A normal titled AppKit window is already movable and resizable.
+pub(super) fn float_whiteboard(_cx: &mut App) {}
+
 /// Run (deferred) after any window closes: once neither a picker nor a review window is left,
 /// the app that was in front before gets the keys back. `NSApp.deactivate()` isn't enough: a
 /// menu bar (accessory) app stays frontmost with no windows, and keys go nowhere. Deferred, a
@@ -709,6 +712,9 @@ fn find_picker_ns_window() -> Option<Retained<NSWindow>> {
     let app = NSApplication::sharedApplication(mtm);
     for win in app.windows() {
         if win.ignoresMouseEvents() {
+            continue;
+        }
+        if win.title().to_string() == "Apparent Whiteboard" {
             continue;
         }
         let size = win.frame().size;

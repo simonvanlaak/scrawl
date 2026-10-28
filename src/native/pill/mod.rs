@@ -833,6 +833,7 @@ impl PillRuntimeState {
             }
             ElemId::Record => PillAction::RecordSelected,
             ElemId::Cancel => PillAction::Cancel,
+            ElemId::Whiteboard => PillAction::Whiteboard,
             ElemId::Finish => PillAction::Finish,
             ElemId::Close => {
                 if matches!(self.model.pres, Pres::Completed { .. }) {
@@ -1316,11 +1317,11 @@ fn emit_elem_prims(
             };
             push_sprite(out, center_text(tx), tx.uv, [fg, fg, fg, 1.0]);
         }
-        ElemId::Cancel | ElemId::Inspect => {
-            let label = if elem.id == ElemId::Cancel {
-                "Cancel"
-            } else {
-                "Inspect"
+        ElemId::Cancel | ElemId::Whiteboard | ElemId::Inspect => {
+            let label = match elem.id {
+                ElemId::Cancel => "Cancel",
+                ElemId::Whiteboard => "Whiteboard",
+                _ => "Inspect",
             };
             if is_glass {
                 let smoke_a = 0.20 + 0.12 * elem.hover + 0.06 * elem.press;

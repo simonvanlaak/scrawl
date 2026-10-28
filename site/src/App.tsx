@@ -27,7 +27,7 @@ export function App() {
             <div className="agent-install">
               <span className="agent-install-label">Or send this to your agent</span>
               <div className="agent-install-prompt">
-                <p>Install the Apparent desktop app from <a href={RELEASES}>Apparent releases</a>, then launch it.</p>
+                <p>{INSTALL_PROMPT}</p>
                 <Copy text={INSTALL_PROMPT} />
               </div>
             </div>

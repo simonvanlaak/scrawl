@@ -1,8 +1,8 @@
 // Apparent dev SDK, served by the Apparent app at http://127.0.0.1:47777/sdk.js.
-// <script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>
-// or data-directory="/abs/project" to use that project's newest OpenCode session.
-// Registers this tab with Apparent while it's open, so a Mac capture of it is sent to that
-// session. It does nothing outside localhost unless data-token (the ingest token) is set.
+// <script src="http://127.0.0.1:47777/sdk.js"></script>
+// Legacy data-session and data-directory attributes are accepted but do not select a destination.
+// Registration keeps the event channel alive; session and directory are not added to bundles.
+// Captures stay on the Mac for manual clipboard handoff. Only loopback pages register.
 // When Apparent asks for it (loopback pages only), it also tells Apparent what's under clicks and
 // ⇧ marks (element, component, source file:line), video seeks, console errors and failed
 // requests. It never sends request bodies, headers, cookies, query strings or typed values.
@@ -16,17 +16,14 @@
     host === "[::1]" ||
     host === "::1" ||
     /^127\./.test(host);
-  const token = script.dataset.token;
-  if (!loopback && !token) return;
+  if (!loopback) return;
   window.__apparentSdk = true;
 
   const base = new URL(script.src).origin;
   const tab = Math.random().toString(36).slice(2, 14);
   const fetchOriginal = window.fetch.bind(window);
   // text/plain keeps loopback registrations simple requests (no preflight).
-  const headers = token
-    ? { "Content-Type": "application/json", Authorization: "Bearer " + token }
-    : { "Content-Type": "text/plain" };
+  const headers = { "Content-Type": "text/plain" };
   const post = (path, body, keepalive) =>
     fetchOriginal(base + path, {
       method: "POST",

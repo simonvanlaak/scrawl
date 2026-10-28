@@ -12,7 +12,6 @@ mod capture;
 #[cfg_attr(target_os = "windows", path = "win/command_line.rs")]
 mod command_line;
 mod command_transcriber;
-mod delivery;
 mod export;
 #[cfg(test)]
 mod feature_map;
@@ -279,26 +278,6 @@ enum Command {
         /// Output `.apparent` bundle directory.
         #[arg(long)]
         out: Option<PathBuf>,
-    },
-    /// Build a bundle from a ApparentKit in-app recording (`.mp4` + timeline `.json`).
-    Import {
-        /// The recording or its timeline; defaults to the newest pair in ~/Downloads.
-        recording: Option<PathBuf>,
-        /// Timeline JSON, when it isn't beside the recording with the same name.
-        #[arg(long)]
-        timeline: Option<PathBuf>,
-        /// Optional note to attach to the bundle.
-        #[arg(long)]
-        note: Option<String>,
-        /// Output `.apparent` bundle directory.
-        #[arg(long)]
-        out: Option<PathBuf>,
-        /// Copy the summary to the clipboard.
-        #[arg(long)]
-        clipboard: bool,
-        /// Transcribe with `apple`, `hex` or `command` instead of the configured transcriber.
-        #[arg(long, value_parser = parse_engine)]
-        transcriber: Option<crate::transcribe::Engine>,
     },
     /// List cabled iPhones and iPads that can be captured.
     Devices,
@@ -574,28 +553,6 @@ enum Command {
         /// Capture a window screenshot to this path and exit (for deterministic UI verification).
         #[arg(long)]
         capture_screenshot: Option<PathBuf>,
-    },
-    /// Print a `<scheme>://apparent?url=…&token=…` setup link (and QR code) for ApparentKit on iPhone.
-    #[command(alias = "tether-link")]
-    Link {
-        /// URL scheme of the iOS app (for example `updown`).
-        #[arg(long)]
-        scheme: String,
-        /// Apparent ingest base URL(s); defaults to this Mac's Tailscale and LAN IPs on `--port`.
-        #[arg(long = "url")]
-        urls: Vec<String>,
-        /// Ingest port used when discovering default Tailscale / LAN URLs.
-        #[arg(long, default_value_t = phone::DEFAULT_INGEST_PORT)]
-        port: u16,
-    },
-    /// Run the headless ApparentKit ingest server (HTTP + optional USB watcher, no GUI or clipboard).
-    Serve {
-        /// TCP port to listen on.
-        #[arg(long, default_value_t = phone::DEFAULT_INGEST_PORT)]
-        port: u16,
-        /// Also poll cabled iPhones over USB (`devicectl`) for apps listed in `usbApps`.
-        #[arg(long)]
-        usb: bool,
     },
     /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add tryapparent/apparent` installs it).
     Skill,
@@ -1776,30 +1733,6 @@ fn main() -> Result<()> {
             print!("{summary}");
             Ok(())
         }
-        Command::Import {
-            recording,
-            timeline,
-            note,
-            out,
-            clipboard,
-            transcriber,
-        } => {
-            if let Some(engine) = transcriber {
-                transcribe::set_override(engine);
-            }
-            let (movie, timeline) =
-                phone::resolve_import(recording.as_deref(), timeline.as_deref())?;
-            let bundle_dir = out.unwrap_or_else(|| {
-                handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
-            });
-            let (dir, _bundle, summary) =
-                phone::import(&movie, timeline.as_deref(), &bundle_dir, note)?;
-            if clipboard {
-                handoff::copy_bundle_to_clipboard(&dir)?;
-            }
-            print!("{summary}");
-            Ok(())
-        }
         Command::Retranscribe { bundle } => {
             let (dir, _) = handoff::load_bundle(&bundle)?;
             if speech_model::transcribe_again(&dir)? {
@@ -2467,29 +2400,6 @@ fn main() -> Result<()> {
             ui::run_app(initial, false, false, capture_screenshot);
             Ok(())
         }
-        Command::Link {
-            scheme,
-            urls,
-            port,
-        } => {
-            let token = handoff::ensure_ingest_token()?;
-            let resolved_urls = if urls.is_empty() {
-                phone::discover_default_ingest_urls(port)
-            } else {
-                urls
-            };
-            ensure!(
-                !resolved_urls.is_empty(),
-                "Could not discover a Tailscale or LAN IP; pass --url http://<host>:{port}"
-            );
-            let link = phone::format_setup_link(&scheme, &resolved_urls, &token, None)?;
-            println!("{link}");
-            if let Ok(qr) = helper::qr(&link) {
-                eprintln!("\n{qr}");
-            }
-            Ok(())
-        }
-        Command::Serve { port, usb } => phone::run_ingest_server(port, usb),
         Command::Skill => {
             print!("{SKILL}");
             Ok(())

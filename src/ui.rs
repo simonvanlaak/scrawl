@@ -892,18 +892,6 @@ impl ApparentCoordinator {
         }
     }
 
-    /// Records a capture received from elsewhere; returns the unhandled count.
-    fn add_to_inbox(&mut self, dir: &std::path::Path, bundle: &ApparentBundle) -> usize {
-        let source = bundle.source.as_deref().unwrap_or("iphone");
-        self.inbox.add(crate::inbox::InboxEntry::new(
-            dir,
-            bundle,
-            source,
-            crate::now_epoch_ms(),
-        ));
-        set_status_inbox_count(self.inbox.len());
-        self.inbox.len()
-    }
 
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
     fn mark_handled(&mut self, dir: &std::path::Path) {
@@ -5449,7 +5437,7 @@ pub fn run_app(
         cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys))
             .detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
-        crate::phone::start_ingest_server(ui_sender.clone());
+        crate::web::start_server();
         let telemetry = SharedCaptureTelemetry::new(ui_sender);
         install_global_hotkeys(&telemetry);
         start_global_input_tap(Arc::clone(&telemetry));
@@ -5586,7 +5574,6 @@ pub fn run_app(
                         }
                     }
 
-                    let mut should_open_pill = false;
                     while let Ok(ev) = ui_receiver.try_recv() {
                         loop_coord.update(cx, |coord, cx| match ev {
                             LiveOverlayEvent::CaptureShortcut => coord.press_shortcut(cx),
@@ -5607,29 +5594,7 @@ pub fn run_app(
                                 coord.onboarding_event(event, cx)
                             }
                             LiveOverlayEvent::Settings(event) => coord.settings_event(event, cx),
-                            LiveOverlayEvent::IngestedBundle {
-                                dir,
-                                bundle,
-                                status,
-                            } => {
-                                let frame_count = bundle.keyframes.len();
-                                let duration_ms = bundle.duration_ms;
-                                let inbox_count = coord.add_to_inbox(&dir, &bundle);
-                                coord.completed_dir = Some(dir.clone());
-                                coord.set_review_bundle((dir, *bundle), status);
-                                coord.set_island_phase(IslandPhase::Completed {
-                                    finished_at: Instant::now(),
-                                    frame_count,
-                                    duration_ms,
-                                    inbox_count,
-                                });
-                                should_open_pill = true;
-                                cx.notify();
-                            }
                         });
-                    }
-                    if should_open_pill {
-                        ensure_hud_pill_open(&loop_coord, cx);
                     }
 
                     motion::poll_tune();

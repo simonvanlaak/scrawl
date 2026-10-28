@@ -107,7 +107,7 @@ ${commands(skill).join("\n")}
 
 ## Optional
 
-- [README](${REPO}#readme): everything else, including iPhone capture, ApparentKit for iOS apps, auto-crop, clipboard handoff, and retention.
+- [README](${REPO}#readme): everything else, including cabled iPhone capture, auto-crop, local dev-page context, and retention. Captures are copied, not sent to sessions.
 - [Source code](${REPO}): Rust and Swift, MIT licensed.
 - [Appcast](${SITE}/appcast.xml): the Sparkle update feed.
 `

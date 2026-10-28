@@ -15,6 +15,8 @@ Use this developer skill for a short proof video of a visible change. Keep the r
 
 Point at the claim, not every click. For a visual comparison, hold the same viewport and crop before and after. Use a sparse callout, outline or zoom only when the viewer might otherwise miss the changed region. Measure positions from the settled UI rather than guessing coordinates; recheck marks after scrolling or layout changes. Keep captions in empty space, and never cover the result they describe. Do not add arrows, measurements or captions merely to make the video look produced.
 
+Make walkthrough videos at **30 fps by default**, including browser and generated review videos; use **60 fps only when the requester specifically asks for it**. A browser's live rendering rate is not the video's frame rate. Preserve real-time duration when encoding and verify the playable file's rate and duration before sharing it.
+
 ## Choose and prepare the capture surface
 
 Prefer the installed **Apparent** on the same machine showing the result for native windows, screen motion, or iPhone. Follow the host repo's `AGENTS.md` and capture safety rules first. On Apparent's development Macs, read `docs/capture.md`; never wake, flash, or record Kit's real displays to make a demo. On another host, check its own permissions and capture capabilities; do not run a binary from a different machine and call it that host's proof.
@@ -33,17 +35,17 @@ apparent record --window 'Window title or app' --duration 15 --out /absolute/pri
 
 `--window` is a title/app substring; check the actual target in the bundle. For a supported cabled phone: `apparent record --iphone --duration 15 --out /absolute/private/path/walkthrough.apparent`. This command waits for the duration; it does not perform UI actions for you. Arrange the interaction separately or use the normal interactive recording shortcut and stop after the result. Start before the meaningful action and finish after the result settles. Use the returned exact bundle path, not `latest` when other captures could finish concurrently. If the CLI is unavailable, inspect the installed app path and permissions; don't pretend a transcript, synthetic `apparent demo` bundle, or a command that never recorded the action is a walkthrough.
 
-## Render a share copy only if it helps
+## Inspect and render the share copy
 
 Read `summary.md` and `apparent.json`; open `contact-sheet.png` and the relevant `frames/*.png`. Play the **whole raw** `recording.mp4` or `recording.mov`, including first paint, transitions and ending. Check that it shows the correct build/window, all three beats, readable result, correct audio if narrated, no private frames, no error toast or misleading splice. The contact sheet indexes moments but cannot certify the intervening video. If an automatic crop hides context, inspect full frames/source before approving it. Verify the result independently with the relevant test, app state or log where appropriate; the recording proves only what it visibly shows.
 
-Deliver a **30 fps** copy by default; use 60 fps only if the requester explicitly asks. The source may have a different frame rate. If export works on this host, use `--fps 30` and add zoom only when it helps:
+If export works on this host, use `--fps 30` (or `--fps 60` on explicit request) and add zoom only when it helps. Do not hand back a 60 fps original by accident:
 
 ```sh
 apparent export /absolute/private/path/walkthrough.apparent --out /absolute/private/path/walkthrough.mp4 --fps 30
 ```
 
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively.
+Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
 
 ## Hand it back
 

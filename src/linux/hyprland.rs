@@ -304,7 +304,9 @@ pub fn float_whiteboard() -> Result<()> {
         }
         Syntax::Hyprlang => {
             if fullscreen {
-                run(&format!("dispatch fullscreenstate 0 0,address:{address}"))?;
+                // The old dispatcher targets the focused window, not the address in its
+                // arguments. Never risk changing another window's fullscreen state.
+                bail!("Cannot safely unfullscreen the whiteboard on this Hyprland version");
             }
             run(&format!("dispatch setfloating address:{address}"))?;
             run(&format!(

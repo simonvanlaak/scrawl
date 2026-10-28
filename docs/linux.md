@@ -67,7 +67,9 @@ use Undo or Clear, and close/reopen it without losing the current session's stro
 reveals more of the fixed paper instead of scaling marks. On Hyprland the window is floated
 after it maps so it can move and resize without tiling the browser; the recording remains
 one continuous screen-and-voice session. The board appears in the captured video like any
-other window.
+other window. The older hyprlang dispatcher cannot safely clear a fullscreen board by
+address (it acts on the focused window), so Apparent leaves that board untouched and
+logs an error instead of changing another window; the tested Omarchy Lua path clears it.
 At finish, a nonempty board also gets its own last contact-sheet tile: the final strokes
 on white paper, cropped to their bounds for readability even if the window was closed or
 small when recording stopped. The numbered tile and stroke count appear in `summary.md`;

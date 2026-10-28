@@ -493,7 +493,6 @@ function decodeNarrationBuffer(mode: Mode): Promise<AudioBuffer | null> {
 
 export function preloadNarration() {
   void decodeNarrationBuffer("mac")
-  void decodeNarrationBuffer("iphone")
 }
 
 export function stopNarration() {

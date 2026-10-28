@@ -2434,8 +2434,11 @@ mod tests {
             .unwrap();
         client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut reply = String::new();
-        client.read_to_string(&mut reply).unwrap();
-        assert!(reply.is_empty());
+        match client.read_to_string(&mut reply) {
+            Ok(_) => assert!(reply.is_empty()),
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+        }
+        assert!(reply.is_empty(), "revoked clients must receive no response");
         assert!(server.join().unwrap().is_err());
     }
 

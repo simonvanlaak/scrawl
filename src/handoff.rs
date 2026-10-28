@@ -1703,7 +1703,6 @@ pub fn resolve_opencode_session_with(
 /// Queues a bundle's summary and pointers into an OpenCode session.
 pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
     ensure!(
         session.starts_with("ses")
             && session
@@ -1714,32 +1713,44 @@ pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     if let Some(host) = agent_host() {
         sync_bundle_to(&host, &directory)?;
     }
+    opencode_api(
+        "post",
+        &format!("/api/session/{session}/prompt"),
+        Some(&session_prompt(&directory, &bundle)),
+    )?;
+    Ok(())
+}
+
+fn session_prompt(directory: &Path, bundle: &ScrawlBundle) -> serde_json::Value {
+    let summary = crate::sketch::summary_markdown(bundle, directory);
     let quoted_directory = shell_quote(&directory.to_string_lossy());
     let contact_sheet = directory.join(&bundle.contact_sheet);
+    let clicked = bundle.has_screen_click();
+    let visual_note = if clicked {
+        format!("The contact sheet is attached ({}).", contact_sheet.display())
+    } else {
+        format!("No image is attached; the recorded visuals remain in {}. Look them up only if needed.", directory.display())
+    };
     let text = format!(
-        "{}\n\nThe contact sheet is attached ({}); read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said; open the PNG before acting on the feedback. This capture is {} ms long.",
+        "{}\n\n{} Read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said. This capture is {} ms long.",
         summary.trim_end(),
-        contact_sheet.display(),
+        visual_note,
         directory.join("scrawl.json").display(),
         quoted_directory,
         bundle.duration_ms,
     );
     // The server reads `file://` attachments from its own disk; the bundle is at the same path
     // there (copied above when the agents run on another Mac).
-    opencode_api(
-        "post",
-        &format!("/api/session/{session}/prompt"),
-        Some(&serde_json::json!({
-            "text": text,
-            "files": [{
+    let files = if clicked {
+        serde_json::json!([{
                 "uri": file_uri(&contact_sheet),
                 "name": "contact-sheet.png",
                 "description": "Scrawl contact sheet: the capture's keyframes in order",
-            }],
-            "delivery": "queue",
-        })),
-    )?;
-    Ok(())
+            }])
+    } else {
+        serde_json::json!([])
+    };
+    serde_json::json!({ "text": text, "files": files, "delivery": "queue" })
 }
 
 /// A `file://` URL for an absolute path, percent-encoding everything but unreserved
@@ -2170,6 +2181,30 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn session_prompt_attaches_visuals_only_after_a_recorded_click() {
+        let fixture = Fixture::new();
+        let dir = fixture.bundle("speech", 100);
+        let (_, mut bundle) = load_bundle(&dir).unwrap();
+        bundle.events.push(crate::model::InteractionEvent::Drag {
+            t: 500, t1: 800, x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9,
+            label: None, button: None, path: vec![],
+        });
+        let text_only = session_prompt(&dir, &bundle);
+        assert_eq!(text_only["files"], serde_json::json!([]));
+        assert!(text_only["text"].as_str().unwrap().contains("scrawl zoom"));
+        assert!(!text_only["text"].as_str().unwrap().contains(crate::sketch::LOOK_AT_IMAGES));
+        assert!(!text_only["text"].as_str().unwrap().contains("contact sheet is attached"));
+        assert!(dir.join("frames/frame-000.png").exists());
+
+        bundle.events.push(crate::model::InteractionEvent::Click {
+            t: 1_000, x: 0.5, y: 0.5, button: None, label: None, role: None,
+        });
+        let with_click = session_prompt(&dir, &bundle);
+        assert_eq!(with_click["files"][0]["name"], "contact-sheet.png");
+        assert!(with_click["text"].as_str().unwrap().contains("contact sheet is attached"));
     }
 
     #[test]

@@ -109,6 +109,13 @@ pub struct ScrawlBundle {
     pub destination: Option<Destination>,
 }
 
+impl ScrawlBundle {
+    /// A recorded click, not a spoken reference or a keyframe selected for another reason.
+    pub fn has_screen_click(&self) -> bool {
+        self.events.iter().any(|event| matches!(event, InteractionEvent::Click { .. }))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Destination {

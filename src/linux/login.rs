@@ -40,6 +40,18 @@ pub fn status() -> (bool, bool) {
     (true, off)
 }
 
+/// An enabled entry left by an older AppImage can point at a binary that moved.
+pub fn command_stale() -> bool {
+    let (Ok(text), Ok(expected)) = (std::fs::read_to_string(entry()), command()) else {
+        return false;
+    };
+    command_stale_in(&text, &expected)
+}
+
+fn command_stale_in(text: &str, expected: &str) -> bool {
+    !text.lines().any(|line| line.trim() == format!("Exec={expected}"))
+}
+
 pub fn set(on: bool) -> Result<()> {
     let path = entry();
     if on {
@@ -72,5 +84,12 @@ mod tests {
         assert!(text.starts_with("[Desktop Entry]\n"));
         assert!(text.contains("\nExec=\"/opt/Scrawl.AppImage\" app\n"));
         assert!(text.contains("\nTerminal=false\n"));
+    }
+
+    #[test]
+    fn a_moved_appimage_needs_its_autostart_command_refreshed() {
+        let text = desktop_entry("\"/old/Scrawl.AppImage\" app");
+        assert!(command_stale_in(&text, "\"/new/Scrawl.AppImage\" app"));
+        assert!(!command_stale_in(&text, "\"/old/Scrawl.AppImage\" app"));
     }
 }

@@ -667,9 +667,10 @@
       "id": "launch-at-login",
       "group": "settings",
       "name": "Launch at login",
-      "says": "A switch in General.",
-      "status": "stable@0.3.4",
+      "says": "A switch in General; the preference is stored in config.json and applied to OS login registration.",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
+      "config": [{ "key": "launchAtLogin", "value": "true | false", "does": "Register or unregister Scrawl at login; absent leaves the OS choice alone" }],
       "docs": ["README.md#settings"]
     },
     {

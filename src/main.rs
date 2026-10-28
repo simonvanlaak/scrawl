@@ -1693,6 +1693,11 @@ fn main() -> Result<()> {
             note,
             out,
         } => {
+            #[cfg(target_os = "macos")]
+            anyhow::ensure!(
+                capture::screen_capture_usable(false),
+                "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
+            );
             let target = discover_target(window.as_deref());
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))

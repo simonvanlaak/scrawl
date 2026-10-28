@@ -771,49 +771,16 @@ pub fn shortcut_from_key_and_mods(
     })
 }
 
-/// Discovers the current capture target (either a specific window/app or the main display).
+/// Discovers the current display. CLI window queries use `record_target` instead.
 pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
     discover_target_at(window_query, current_mouse_location().map(|p| [p.x, p.y]))
 }
 
 /// Like `discover_target`, recording the display under `point` (see `pick_display`).
-pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
+pub fn discover_target_at(_window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
     let frontmost = frontmost_app_info();
     let screens = crate::screens::displays();
     if let Ok(content) = SCShareableContent::get() {
-        let our_pid = std::process::id() as i32;
-        if let Some(query) = window_query {
-            let q = query.to_lowercase();
-            if let Some(win) = content.windows().into_iter().find(|w| {
-                w.is_on_screen()
-                    && w.window_layer() == 0
-                    && w.owning_application()
-                        .as_ref()
-                        .is_none_or(|a| a.process_id() != our_pid)
-                    && (w
-                        .title()
-                        .as_deref()
-                        .is_some_and(|t| t.to_lowercase().contains(&q))
-                        || w.owning_application()
-                            .as_ref()
-                            .is_some_and(|a| a.application_name().to_lowercase().contains(&q)))
-            }) {
-                let f = win.frame();
-                let rect = [f.origin.x, f.origin.y, f.size.width, f.size.height];
-                let owner = win.owning_application();
-                let (display_id, scale) = display_of(&screens, rect);
-                return TargetInfo {
-                    mode: CaptureMode::Window,
-                    app: owner.as_ref().map(|a| a.application_name()),
-                    bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
-                    window_title: win.title(),
-                    window_id: Some(win.window_id()),
-                    display_id,
-                    frame: crate::screens::with_scale(rect, scale),
-                };
-            }
-        }
-
         let displays = content.displays();
         let front_window = frontmost.as_ref().and_then(|(pid, _, _)| {
             content.windows().into_iter().find(|w| {
@@ -1137,13 +1104,18 @@ fn build_sck_filter_and_config(
     };
     let our_pid = std::process::id() as i32;
 
-    let filter = if let Some(window_id) = target.window_id
+    let filter = if target.mode == CaptureMode::Window && target.window_id.is_none() {
+        None
+    } else if let Some(window_id) = target.window_id
         && let Some(window) = content
             .windows()
             .into_iter()
             .find(|w| w.window_id() == window_id)
     {
         SCContentFilter::create().with_window(&window).build().ok()
+    } else if target.mode == CaptureMode::Window {
+        // The selected window may have closed since discovery. Never switch to a display.
+        None
     } else if let Some(display) = content
         .displays()
         .into_iter()

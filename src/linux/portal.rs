@@ -47,6 +47,8 @@ impl Drop for Stream {
 pub fn source_for(target: &TargetInfo, stopping: &AtomicBool) -> Result<Source> {
     let f = target.frame;
     let rect = [f.x, f.y, f.width, f.height];
+    anyhow::ensure!(target.mode != CaptureMode::Window || target.window_id.is_some(),
+        "Window capture has no selected window ID");
     if !super::wayland_session() {
         return Ok(match (target.mode, target.window_id) {
             (CaptureMode::Window, Some(xid)) => Source::X11Window { xid },

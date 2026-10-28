@@ -436,16 +436,8 @@ pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
 }
 
 /// Like `discover_target`, recording the display under `point` (see `pick_display`).
-pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
+pub fn discover_target_at(_window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
     let frontmost = frontmost_app_info();
-    if let Some(query) = window_query {
-        let q = query.to_lowercase();
-        if let Some((window, app, id)) = app_windows().into_iter().find(|(w, app, _)| {
-            w.title.to_lowercase().contains(&q) || app.to_lowercase().contains(&q)
-        }) {
-            return window_target(&window, &app, &id);
-        }
-    }
     let monitors = linux::monitors();
     let front = external_front_window();
     let rects: Vec<[f64; 4]> = monitors.iter().map(|m| m.rect).collect();

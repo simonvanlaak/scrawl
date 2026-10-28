@@ -1,7 +1,7 @@
-//! Which microphone Mac captures record from: `"microphone": {"id", "name"}` in
-//! `~/.config/apparent/config.json` (absent = the macOS default, followed as it changes). The id is
-//! the CoreAudio device UID, which is also `AVCaptureDevice.uniqueID`; the name is kept only to
-//! say which device is missing. A chosen device that isn't connected falls back to the default.
+//! Which microphone captures record from: `"microphone": {"id", "name"}` in
+//! `~/.config/apparent/config.json` (absent = the system default). The id is a CoreAudio UID
+//! on macOS, a Pulse source name prefixed with `pulse:` on supported Linux desktops, or a CPAL
+//! device id elsewhere; the name is kept to identify a missing device.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ pub struct Input {
     pub name: String,
 }
 
-/// The input devices connected now, in CoreAudio's order, and the default's id.
+/// The input devices connected now, in the host's order, and the default's id.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inputs {
     pub devices: Vec<Input>,
@@ -38,7 +38,7 @@ impl Inputs {
 /// What a recording uses, given the choice and what's connected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pick<'a> {
-    /// No choice: the macOS default (none when there's no microphone at all).
+    /// No choice: the system default (none when there's no microphone at all).
     Default(Option<&'a Input>),
     Chosen(&'a Input),
     /// The chosen device isn't connected; the default stands in.
@@ -112,8 +112,12 @@ pub fn save_in(path: &std::path::Path, id: &str, inputs: &Inputs) -> anyhow::Res
     crate::handoff::set_config_value_in(path, "microphone", value)
 }
 
-/// Enumerates input devices (CoreAudio, a few ms; never on the UI thread).
+/// Enumerates input devices (never on the UI thread).
 pub fn inputs() -> Inputs {
+    #[cfg(target_os = "linux")]
+    if let Some(inputs) = crate::linux::microphone::inputs() {
+        return inputs;
+    }
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
     let devices = host
@@ -144,6 +148,138 @@ pub fn device(id: &str) -> Option<cpal::Device> {
         .find(|device| device.id().is_ok_and(|d| d.id() == id))
 }
 
+/// Settings-only input meter. It opens the effective device and never stores audio.
+#[cfg(target_os = "macos")]
+pub struct Meter;
+
+#[cfg(target_os = "macos")]
+impl Meter {
+    pub fn start(_id: String) -> Self {
+        Self
+    }
+    pub fn level(&self) -> f32 {
+        0.0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub struct Meter {
+    stop: std::sync::mpsc::Sender<()>,
+    level: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    arrival: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl Meter {
+    pub fn start(id: String) -> Self {
+        let (stop, receiver) = std::sync::mpsc::channel();
+        let level = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let arrival = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let output = level.clone();
+        let observed = arrival.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = Self::listen(&id, &receiver, output, observed) {
+                crate::capture::apparent_log(format!("Microphone meter: {error:#}"));
+            }
+        });
+        Self {
+            stop,
+            level,
+            arrival,
+        }
+    }
+
+    pub fn level(&self) -> f32 {
+        if !self.arrival.lock().is_ok_and(|at| {
+            at.is_some_and(|time| time.elapsed() < std::time::Duration::from_millis(300))
+        }) {
+            return 0.0;
+        }
+        f32::from_bits(self.level.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn listen(
+        id: &str,
+        stop: &std::sync::mpsc::Receiver<()>,
+        level: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        arrival: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    ) -> anyhow::Result<()> {
+        use cpal::traits::{DeviceTrait, StreamTrait};
+        #[cfg(target_os = "linux")]
+        if let Some(source) = crate::linux::microphone::source(id) {
+            let _stream = crate::linux::microphone::Stream::start(source, move |data| {
+                let peak = data
+                    .iter()
+                    .map(|sample| sample.abs())
+                    .fold(0.0_f32, f32::max)
+                    .clamp(0.0, 1.0);
+                level.store(peak.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut at) = arrival.lock() {
+                    *at = Some(std::time::Instant::now());
+                }
+            })?;
+            let _ = stop.recv();
+            return Ok(());
+        }
+        let device = device(id).ok_or_else(|| anyhow::anyhow!("selected input disappeared"))?;
+        let supported = device.default_input_config()?;
+        let config = supported.config();
+        let stream = match supported.sample_format() {
+            cpal::SampleFormat::F32 => Self::stream::<f32>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::F64 => Self::stream::<f64>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::I8 => Self::stream::<i8>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::I16 => Self::stream::<i16>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::I24 => Self::stream::<cpal::I24>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::I32 => Self::stream::<i32>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::I64 => Self::stream::<i64>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::U8 => Self::stream::<u8>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::U16 => Self::stream::<u16>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::U24 => Self::stream::<cpal::U24>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::U32 => Self::stream::<u32>(&device, &config, level, arrival)?,
+            cpal::SampleFormat::U64 => Self::stream::<u64>(&device, &config, level, arrival)?,
+            format => anyhow::bail!("unsupported input meter sample format: {format}"),
+        };
+        stream.play()?;
+        let _ = stop.recv();
+        Ok(())
+    }
+
+    fn stream<T: cpal::SizedSample>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        level: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        arrival: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    ) -> anyhow::Result<cpal::Stream>
+    where
+        f32: cpal::FromSample<T>,
+    {
+        use cpal::traits::DeviceTrait;
+        Ok(device.build_input_stream::<T, _, _>(
+            config.clone(),
+            move |data, _| {
+                let peak = data
+                    .iter()
+                    .map(|sample| sample.to_sample::<f32>().abs())
+                    .fold(0.0_f32, f32::max)
+                    .clamp(0.0, 1.0);
+                level.store(peak.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut at) = arrival.lock() {
+                    *at = Some(std::time::Instant::now());
+                }
+            },
+            move |error| crate::capture::apparent_log(format!("Microphone meter: {error}")),
+            None,
+        )?)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl Drop for Meter {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+    }
+}
+
 /// Logs a missing chosen device once, until it's back or another goes missing.
 pub fn note_pick(pick: &Pick) {
     static WARNED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
@@ -161,11 +297,14 @@ pub fn note_pick(pick: &Pick) {
     }
 }
 
-/// Calls `changed` on its own thread once at the start, then whenever an input device is plugged
-/// in or out or the macOS default changes (bursts coalesced). Stops when dropped.
+/// Calls `changed` on its own thread once at the start, then whenever the device list or default
+/// changes. CoreAudio has native notifications; other hosts check once a second while Settings
+/// is open. Stops when dropped.
 pub struct Watch {
     #[cfg(target_os = "macos")]
     sender: std::sync::mpsc::Sender<watch::Message>,
+    #[cfg(not(target_os = "macos"))]
+    stop: std::sync::mpsc::Sender<()>,
 }
 
 impl Watch {
@@ -178,8 +317,22 @@ impl Watch {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            std::thread::spawn(changed);
-            Self {}
+            let (stop, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut previous = inputs();
+                changed();
+                while receiver
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .is_err_and(|e| e == std::sync::mpsc::RecvTimeoutError::Timeout)
+                {
+                    let current = inputs();
+                    if current != previous {
+                        previous = current;
+                        changed();
+                    }
+                }
+            });
+            Self { stop }
         }
     }
 }
@@ -188,6 +341,8 @@ impl Drop for Watch {
     fn drop(&mut self) {
         #[cfg(target_os = "macos")]
         let _ = self.sender.send(watch::Message::Stop);
+        #[cfg(not(target_os = "macos"))]
+        let _ = self.stop.send(());
     }
 }
 
@@ -314,6 +469,24 @@ mod tests {
             id: "airpods".into(),
             name: "AirPods Pro".into(),
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn settings_meter_never_displays_an_old_sample_as_live_input() {
+        use std::sync::{atomic::AtomicU32, Arc, Mutex};
+        let (stop, _receiver) = std::sync::mpsc::channel();
+        let arrival = Arc::new(Mutex::new(Some(
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+        )));
+        let meter = Meter {
+            stop,
+            level: Arc::new(AtomicU32::new(0.7_f32.to_bits())),
+            arrival: arrival.clone(),
+        };
+        assert_eq!(meter.level(), 0.0);
+        *arrival.lock().unwrap() = Some(std::time::Instant::now());
+        assert!(meter.level() > 0.6);
     }
 
     #[test]

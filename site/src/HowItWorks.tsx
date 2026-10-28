@@ -497,7 +497,7 @@ export function HowItWorks() {
           </Visual>
           <div className="feature-copy">
             <h3>Frames only when something happens</h3>
-            <p>Scrawl takes a frame when you draw, click, say “look” or “now”, or the screen changes.</p>
+            <p>Apparent takes a frame when you draw, click, say “look” or “now”, or the screen changes.</p>
           </div>
         </article>
         <article className="feature-card">

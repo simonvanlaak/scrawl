@@ -2720,7 +2720,9 @@ impl ScrawlCoordinator {
 
         let screen = matches!(source, CaptureSource::Screen { .. });
         #[cfg(target_os = "linux")]
-        let final_whiteboard = screen.then(|| self.whiteboard.borrow().clone());
+        let final_whiteboard = screen.then(|| {
+            whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx))
+        });
 
         cx.spawn(async move |entity, cx| {
             let result = cx

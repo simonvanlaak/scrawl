@@ -44,7 +44,8 @@ function featureMap(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), forAgents(), featureMap()],
+  // The public Apparent demo has no Kit release feed, agent instructions or feature map.
+  plugins: [react(), ...(process.env.APPARENT_PUBLIC_SITE === "1" ? [] : [forAgents(), featureMap()])],
   // three.js lives in the lazily loaded hero brush chunk.
   build: { chunkSizeWarningLimit: 700 },
   // Previews are shared over Tailscale (studio.*.ts.net).

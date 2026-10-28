@@ -72,8 +72,9 @@ At finish, a nonempty board also gets its own last contact-sheet tile: the final
 on white paper, cropped to their bounds for readability even if the window was closed or
 small when recording stopped. The numbered tile and stroke count appear in `summary.md`;
 the screen keyframes still show where the board was beside the browser. Clear removes
-the drawing from this final tile. An ordinary clipboard copy is text only; use Paste
-to attach the contact sheet and text to an agent composer.
+the drawing from this final tile. Finish closes the whiteboard window after taking its
+final snapshot; the drawing stays in the completed bundle. An ordinary clipboard copy
+is text only; use Paste to attach the contact sheet and text to an agent composer.
 
 The recording capsule shows five smooth level bars by default, fed by the captured
 microphone PCM. They indicate input activity only, not who spoke or whether

@@ -1,5 +1,9 @@
 # Scrawl
 
+This is historical routing terminology. Scrawl no longer selects an OpenCode destination or
+sends captures automatically, and `scrawl send` no longer exists. Captures are saved and copied
+to the clipboard; the terms below describe the retired design.
+
 ## Routing
 
 **Capture**:

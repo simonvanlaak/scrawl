@@ -1,18 +1,20 @@
 # Releasing Scrawl
 
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
-is one Mac build (notarized DMG + Sparkle zip) and one Windows zip, built from the same tagged commit.
+is one Mac build (notarized DMG + Sparkle zip), one Windows zip and two Linux AppImages,
+built from the same tagged commit.
 
 1. **Version:** bump `version` in `Cargo.toml` and `Cargo.lock` in a `release/<version>` PR, and in the
-   same PR change every `"status": "main"` in `site/src/features.json` to `"stable@<version>"`. Pushing a
-   `release/**` branch dry-runs the Windows job (`.github/workflows/release-windows.yml`), which also opens
-   the welcome window on a fresh profile and keeps a screenshot.
+   same PR change every `"status": "main"` in `site/src/features.json` to `"stable@<version>"`.
+   No push or PR runs CI automatically. Test the change locally before merging.
 2. **Mac build** (Studio, from that commit): `SCRAWL_BUILD_NUMBER=<n> SCRAWL_SPARKLE_DIR=~/.local/share/scrawl-release/sparkle-2.9.4 ./scripts/release-app.sh`.
    The build number goes up by one every release (Sparkle compares it, not the version). The script
    builds, signs, notarizes and staples `dist/Scrawl-<version>-arm64.dmg` and `.zip`. Its own
    `dist/updates/appcast.xml` is throwaway: the published appcast comes from step 4.
 3. **Tag and release:** merge the PR, tag the merge commit `v<version>`, and create the GitHub release
-   with the DMG. The tag's Windows job attaches `Scrawl-<version>-windows-x64.zip`.
+   with the DMG. Manually dispatch the Windows and Linux release workflows on `main`, with
+   `tag=v<version>`; each checks out the tag and attaches its assets. Check both runs and assets
+   before deploying. Pushing the tag alone no longer starts either workflow.
 4. **Appcast** (the Pro, over ssh): copy the Sparkle zip into `~/.local/share/scrawl-release/updates/`
    and run `launchctl kickstart gui/$(id -u)/dev.kit.scrawl-appcast`. The job
    (`~/Library/LaunchAgents/dev.kit.scrawl-appcast.plist` → `~/.local/share/scrawl-release/appcast.sh`)
@@ -33,8 +35,9 @@ or `/tmp`: a clean or a reboot would take the tools and every earlier zip with t
 it's unset.
 
 Check after deploying: the live DMG, zips and newest delta match the release's sha256s, the live
-appcast's signature verifies, `spctl` accepts the downloaded DMG and the app in it, the site shows the
-new version for both the Mac and Windows download buttons, and the Windows zip has `scrawl.exe`,
+appcast's signature verifies, `spctl` accepts the downloaded DMG and the app in it, the site shows
+the new version for both the Mac and Windows download buttons, and the Windows zip has `scrawl.exe`,
 `transcribe.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-<tier>.dll` (x64, sse42, sandybridge,
 haswell, alderlake, skylakex, cannonlake, cascadelake, icelake; see [windows.md](windows.md)), the three
 Visual C++ runtime DLLs (`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`), README and LICENSE.
+Check both Linux AppImages and their `.sha256` assets on the tagged release before advertising them.

@@ -723,6 +723,8 @@ pub struct View {
     pub captures_dir: CapturesDirView,
     pub permissions: Vec<PermissionView>,
     pub updates: bool,
+    pub update_channel: &'static str,
+    pub main_updates: bool,
     pub command_line: CommandLineView,
     pub skill_command: &'static str,
 }
@@ -1310,6 +1312,11 @@ impl Panel {
             ("autoSend" | "videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
                 write(key, (*on).into())
             }
+            ("updateChannel", serde_json::Value::String(channel))
+                if matches!(channel.as_str(), "stable" | "main") =>
+            {
+                write(key, value.clone());
+            }
             ("playbackLevel", serde_json::Value::Number(level))
                 if level.as_u64().is_some_and(|n| n <= 100) =>
             {
@@ -1516,6 +1523,12 @@ impl Panel {
                 })
                 .collect(),
             updates: updates_available(),
+            update_channel: if config.update_channel.as_deref() == Some("main") {
+                "main"
+            } else {
+                "stable"
+            },
+            main_updates: cfg!(target_os = "linux"),
             command_line: CommandLineView::new(
                 &crate::command_line::state(&host.command_line()),
                 self.cli_error.as_deref(),
@@ -1540,18 +1553,22 @@ fn wayland() -> bool {
 fn updates_available() -> bool {
     #[cfg(target_os = "macos")]
     return crate::sparkle::available();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    return std::env::var_os("APPIMAGE").is_some();
+    #[cfg(target_os = "windows")]
     true
 }
 
 fn check_for_updates() {
     #[cfg(target_os = "macos")]
     crate::sparkle::check_for_updates();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    std::thread::spawn(crate::linux::update::check_now);
+    #[cfg(target_os = "windows")]
     let _ = crate::handoff::open_path(Path::new(RELEASES_URL));
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 const RELEASES_URL: &str = "https://github.com/kitlangton/scrawl/releases/latest";
 
 // MARK: The live window
@@ -2491,6 +2508,13 @@ mod tests {
             )
         };
         assert!(panel.view(&host).auto_send);
+        #[cfg(target_os = "linux")]
+        assert!(panel.view(&host).main_updates, "Linux must show the channel choice");
+        assert_eq!(serde_json::to_value(panel.view(&host)).unwrap()["updateChannel"], "stable");
+        set(&mut panel, &mut host, "updateChannel", "main".into());
+        assert_eq!(serde_json::to_value(panel.view(&host)).unwrap()["updateChannel"], "main");
+        set(&mut panel, &mut host, "updateChannel", "untrusted".into());
+        assert_eq!(serde_json::to_value(panel.view(&host)).unwrap()["updateChannel"], "main");
         assert!(!panel.view(&host).remote_phone_ingest);
         assert!(!panel.view(&host).lower_playback);
         assert_eq!(panel.view(&host).playback_level, 20);

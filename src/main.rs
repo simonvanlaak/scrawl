@@ -183,6 +183,17 @@ enum HexCommand {
     Status,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Subcommand)]
+enum UpdateCommand {
+    /// Show the selected channel, live process version, and installed update as JSON.
+    Status,
+    /// Select stable releases or builds from main (does not download anything).
+    Channel { #[arg(value_parser = ["stable", "main"])] channel: String },
+    /// Check the chosen channel now and install an update for the next launch.
+    Check,
+}
+
 #[derive(Subcommand)]
 enum LabCommand {
     /// Play a capsule scene: tap-then-area, tap-then-window, tap-then-screen, picker, finish.
@@ -229,6 +240,9 @@ enum Command {
         #[arg(long, conflicts_with = "record")]
         iphone: bool,
     },
+    /// Inspect or manage Linux AppImage updates.
+    #[cfg(target_os = "linux")]
+    Update { #[command(subcommand)] command: UpdateCommand },
     /// Hand a shortcut press to the running app (Linux: GNOME's custom keybindings run this
     /// where there's no GlobalShortcuts portal).
     #[cfg(target_os = "linux")]
@@ -1621,7 +1635,23 @@ fn main() -> Result<()> {
                 linux::ipc::send(if record { "shortcut record" } else { "open" })?;
                 return Ok(());
             }
+            #[cfg(target_os = "linux")]
+            if let Err(error) = linux::update::record_running() {
+                eprintln!("Scrawl could not record its running version in config: {error:#}");
+            }
             ui::run_app(None, record, iphone, None);
+            Ok(())
+        }
+        #[cfg(target_os = "linux")]
+        Command::Update { command } => {
+            match command {
+                UpdateCommand::Status => println!("{}", serde_json::to_string_pretty(&linux::update::status()?)?),
+                UpdateCommand::Channel { channel } => {
+                    linux::update::set_channel_in(&handoff::default_config_path(), &channel)?;
+                    println!("Update channel: {}", linux::update::status()?["channel"].as_str().unwrap_or("unknown"));
+                }
+                UpdateCommand::Check => println!("{}", linux::update::check_cli()?),
+            }
             Ok(())
         }
         #[cfg(target_os = "linux")]

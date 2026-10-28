@@ -81,6 +81,10 @@ const SEG_PX: f32 = 10.0;
 const SEG_ICON: f32 = 14.0;
 const SEG_ICON_GAP: f32 = 5.0;
 const PILL_WINDOW_W: f32 = 520.0;
+#[cfg(target_os = "linux")]
+const AUDIO_EQUALIZER: &str = "audioEqualizer";
+#[cfg(target_os = "linux")]
+const EQUALIZER_W: f32 = 28.0;
 const PILL_WINDOW_H: f32 = 84.0;
 
 mod lab;
@@ -405,6 +409,12 @@ fn island_content_width(
                 measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
                     + 2.0 * CHIP_PX + divider + 2.0 * CHIP_GAP
             });
+            #[cfg(target_os = "linux")]
+            let meter_w = if crate::handoff::experiment(AUDIO_EQUALIZER) {
+                EQUALIZER_W + CHIP_GAP
+            } else { 0.0 };
+            #[cfg(not(target_os = "linux"))]
+            let meter_w = 0.0;
             CHIP_H
                 + measure_text(
                     window,
@@ -415,6 +425,7 @@ fn island_content_width(
                 + LEAD_TRAIL
                 + divider
                 + warning_w
+                + meter_w
                 + trail.iter().sum::<f32>()
                 + (trail.len() + 1) as f32 * CHIP_GAP
         }
@@ -3161,6 +3172,31 @@ pub struct HudPillWindow {
     chrome: PillChrome,
     /// Frames drawn so far, counting to 2.
     frames: u8,
+    #[cfg(target_os = "linux")]
+    equalizer: InputEqualizer,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct InputEqualizer {
+    last_count: usize,
+    level: f32,
+}
+
+#[cfg(target_os = "linux")]
+impl InputEqualizer {
+    fn step(&mut self, input: Option<(usize, f32)>, reduced_motion: bool) {
+        if input.is_none_or(|(count, _)| count < self.last_count) {
+            self.last_count = 0;
+        }
+        let target = match input {
+            Some((count, level)) if count > self.last_count => level,
+            _ => 0.0,
+        };
+        self.last_count = input.map_or(0, |(count, _)| count);
+        let alpha = if reduced_motion { 1.0 } else if target > self.level { 0.24 } else { 0.12 };
+        self.level += (target - self.level) * alpha;
+    }
 }
 
 impl Render for HudPillWindow {
@@ -3216,6 +3252,16 @@ impl Render for HudPillWindow {
         } else {
             None
         };
+        #[cfg(target_os = "linux")]
+        let equalizer_enabled = crate::handoff::experiment(AUDIO_EQUALIZER);
+        #[cfg(target_os = "linux")]
+        if matches!(phase, IslandPhase::Recording) && equalizer_enabled {
+            let input = coord.active_recording.as_ref().and_then(|recording| match &recording.source {
+                CaptureSource::Screen { audio: Some(audio), .. } => audio.input_activity(),
+                _ => None,
+            });
+            self.equalizer.step(input, coord.reduced_motion);
+        }
         let elapsed_ms = recording_ms.unwrap_or(coord.last_elapsed_ms);
         let switch = coord
             .switch
@@ -3601,6 +3647,30 @@ impl Render for HudPillWindow {
             ),
             IslandPhase::Recording => {
                 // A soft ripple leaves the dot every 1.6s while the dot itself breathes.
+                #[cfg(target_os = "linux")]
+                let meter_w = if equalizer_enabled { EQUALIZER_W + CHIP_GAP } else { 0.0 };
+                #[cfg(not(target_os = "linux"))]
+                let meter_w = 0.0;
+                #[cfg(target_os = "linux")]
+                let meter = equalizer_enabled.then(|| {
+                    div()
+                        .w(px(EQUALIZER_W))
+                        .h(px(18.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.0))
+                        .children([0.6, 0.9, 1.0, 0.8, 0.5].map(|weight| {
+                            div()
+                                .w(px(3.0))
+                                .h(px(3.0 + 15.0 * self.equalizer.level * weight))
+                                .rounded(px(1.5))
+                                .bg(rgb(0xff6b67))
+                        }))
+                });
+                #[cfg(not(target_os = "linux"))]
+                let meter: Option<Div> = None;
                 let cycle = 1.6;
                 let ripple = (phase_age / cycle).fract();
                 let breath = 0.5 + 0.5 * (std::f32::consts::TAU * phase_age / cycle).cos();
@@ -3652,6 +3722,7 @@ impl Render for HudPillWindow {
                         ),
                 )
                 .child(island_divider())
+                .when_some(meter, |row, meter| row.child(meter))
                 .when_some(mic_warning, |row, warning| {
                     row.child(
                         div()
@@ -3676,7 +3747,8 @@ impl Render for HudPillWindow {
                         + mic_warning.map_or(0.0, |warning| {
                             measure_text(window, warning.label(), HUD_TEXT, FontWeight::MEDIUM)
                                 + 2.0 * CHIP_PX + (1.0 + 2.0 * DIVIDER_MX) + 2.0 * CHIP_GAP
-                        });
+                        })
+                        + meter_w;
                     let inner_now = render_width - 2.0 * ISLAND_INSET;
                     let alphas = |group_chips: bool, fade: f32| -> (Vec<f32>, f32) {
                         let widths = recording_trail_widths(window, group_chips, has_iphone);
@@ -5437,6 +5509,8 @@ fn ensure_hud_pill_open(coord_entity: &Entity<ScrawlCoordinator>, cx: &mut App) 
                     focus,
                     chrome,
                     frames: 0,
+                    #[cfg(target_os = "linux")]
+                    equalizer: InputEqualizer::default(),
                 }
             })
         },
@@ -5848,6 +5922,23 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn equalizer_only_moves_for_new_samples_and_decays_on_stall() {
+        let mut meter = InputEqualizer::default();
+        meter.step(None, false); // lab recording / missing microphone
+        assert_eq!(meter.level, 0.0);
+        meter.step(Some((1280, 0.8)), false);
+        assert!(meter.level > 0.0 && meter.level < 0.8);
+        let last = meter.level;
+        meter.step(Some((1280, 0.8)), false); // same samples, not proof of continued input
+        assert!(meter.level < last);
+        meter.step(Some((2560, 0.0)), true); // fresh silent callback
+        assert_eq!(meter.level, 0.0);
+        meter.step(Some((128, 0.5)), true); // new capture resets count
+        assert_eq!(meter.level, 0.5);
+    }
 
     #[test]
     fn review_history_stops_at_both_ends() {

@@ -2992,6 +2992,15 @@ impl ScrawlCoordinator {
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    #[cfg(target_os = "linux")]
+                    if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
+                        if summary.contains("Image quality: ") {
+                            crate::linux::shell::notify(
+                                "Capture used smaller keyframes",
+                                "Full-quality MP4 decoding failed. Open summary.md for details and Settings › Recording for decoder setup.",
+                            );
+                        }
+                    }
                     if !auto_active {
                         let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
                     }

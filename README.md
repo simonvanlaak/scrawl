@@ -47,6 +47,16 @@ inspect --marks` lists them) makes a dense sheet of frames around a moment, `app
 frames` pulls a range, `apparent copy` puts a capture on the clipboard, and `apparent export`
 makes a shareable `.mp4`. `apparent skill` prints the skill without installing anything.
 
+The repository also ships [`make-it-apparent`](skills/make-it-apparent/SKILL.md), a separate
+agent skill for showing a finished change in a short, checked Apparent video. It covers the
+visible before/action/after, privacy before recording, playback review and honest limits of the
+demo. The capture-reading skill above is still for understanding feedback someone sends you;
+the walkthrough skill is for demonstrating what you built.
+
+```sh
+bunx skills add tryapparent/apparent --skill make-it-apparent
+```
+
 ## Usage
 
 ```sh

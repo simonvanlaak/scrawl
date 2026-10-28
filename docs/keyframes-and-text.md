@@ -84,7 +84,7 @@ The old automatic OpenCode attachment policy is inactive. The full capture, keyf
 
 ## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
 
-On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes append a request to show complex changes with a short Apparent recording, return the `recording.mp4` path or video link, and say what the video does not verify. If the agent cannot access the relevant screen, it should say so. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.
+On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes ask the agent to use the repository's `make-it-apparent` skill for a short video of a complex visible change, return the `recording.mp4` path or video link, and say what the video does not verify. If the skill is not installed or the agent cannot access the relevant screen, it should say so rather than claim a video exists. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.
 
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`)
 

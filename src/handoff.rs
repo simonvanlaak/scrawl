@@ -280,7 +280,7 @@ pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
 }
 
 const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
-const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If you cannot record that screen, say so instead of claiming a video exists.";
+const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, use the make-it-apparent skill to record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If the skill is not installed or you cannot record that screen, say so instead of claiming a video exists.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.
 /// Read config on each handoff so file edits take effect without a restart.
@@ -2691,8 +2691,9 @@ mod tests {
         let enabled = with_demo_video_request(original.clone(), true);
         assert!(enabled.starts_with(&original));
         assert!(enabled.contains("complex change"));
+        assert!(enabled.contains("use the make-it-apparent skill"));
         assert!(enabled.contains("recording.mp4"));
-        assert!(enabled.contains("If you cannot record that screen"));
+        assert!(enabled.contains("If the skill is not installed or you cannot record that screen"));
         assert_eq!(enabled.matches(DEMO_VIDEO_REQUEST).count(), 1);
     }
 

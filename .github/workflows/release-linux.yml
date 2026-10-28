@@ -64,7 +64,10 @@ jobs:
           fi
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.sha }}
+      - name: Confirm build identity
+        if: env.TAG == ''
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Install build and packaging dependencies
         run: ./scripts/linux/dependencies.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -156,12 +159,34 @@ jobs:
         run: |
           set -euo pipefail
           tag="linux-main-$GITHUB_SHA"
-          # A superseded build must not become the newest published preview.
+          # Main can advance during the build. Publish a checked ancestor, but
+          # never a build from a branch or a history that main has replaced.
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
           if [[ "$head" != "$GITHUB_SHA" ]]; then
-            echo "Main moved to $head; not publishing an older preview"
-            exit 0
+            relation=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$head" --jq .status)
+            if [[ "$relation" != "ahead" ]]; then
+              echo "Build $GITHUB_SHA is not an ancestor of main ($head): $relation" >&2
+              exit 1
+            fi
           fi
+          # Releases are selected by publication time. A rerun of an older
+          # workflow must not become newer than a preview of a descendant.
+          published_tags=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq '.[] | .tag_name | select(startswith("linux-main-"))')
+          while IFS= read -r published; do
+            if [[ "$published" =~ ^linux-main-([[:xdigit:]]{40})$ ]]; then
+              previous="${BASH_REMATCH[1]}"
+              if [[ "$previous" == "$GITHUB_SHA" ]]; then
+                echo "A preview of $previous has already been published; skipping $GITHUB_SHA"
+                exit 0
+              fi
+              relation=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$previous" --jq .status)
+              if [[ "$relation" == ahead ]]; then
+                echo "A newer preview of $previous has already been published; skipping $GITHUB_SHA"
+                exit 0
+              fi
+            fi
+          done <<< "$published_tags"
           test "$(find dist -name '*.AppImage' | wc -l)" -eq 2
           gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --latest=false --title "Linux main ${GITHUB_SHA:0:12}" \

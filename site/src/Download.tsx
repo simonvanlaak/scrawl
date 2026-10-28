@@ -87,7 +87,7 @@ function Primary({ platform }: { platform: Platform }) {
           Download for Windows
         </a>
       ) : (
-        <Unavailable icon={<Windows />} label="Windows: coming soon" />
+        <Unavailable icon={<Windows />} label="Windows: paused" />
       )
     case "linux":
       return LINUX_DOWNLOAD ? (
@@ -110,7 +110,7 @@ function meta(platform: Platform): string {
     case "windows":
       return WINDOWS_DOWNLOAD
         ? `Preview ${RELEASE.version} · Windows 10 and 11, x64 · Not signed yet: if Windows warns, click More info, then Run anyway.`
-        : "Apparent is Mac-only today. Windows is on the way."
+        : "Windows releases are paused. The Windows implementation remains in the source code."
     case "linux":
       return LINUX_DOWNLOAD ? `Preview ${RELEASE.version} · x86_64 AppImage · Ubuntu 24.04+ · X11 or GNOME/KDE Wayland` : "Linux is on the way."
     case "mobile":
@@ -155,13 +155,13 @@ export function Platforms({ brew }: { brew: boolean }) {
       <li>
         <div className="platform-row">
           <span className="platform-name">Windows</span>
-          <span className="platform-detail">{WINDOWS_DOWNLOAD ? "x64, preview, unsigned" : "x64"}</span>
+          <span className="platform-detail">{WINDOWS_DOWNLOAD ? "x64, preview, unsigned" : "Releases paused"}</span>
           {WINDOWS_DOWNLOAD ? (
             <a className="platform-action" href={WINDOWS_DOWNLOAD}>
               Download
             </a>
           ) : (
-            <Soon />
+            <span className="soon">Paused</span>
           )}
         </div>
       </li>

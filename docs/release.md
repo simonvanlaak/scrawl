@@ -37,8 +37,9 @@ users from the preview back to a signed stable app is a separate migration, not 
 feed. The stable app's build-number ordering and bundle identity will need an explicit plan.
 
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
-is one Mac build (notarized DMG + Sparkle zip), one Windows zip and two Linux AppImages,
-built from the same tagged commit.
+is one Mac build (notarized DMG + Sparkle zip) and two Linux AppImages, built from the same tagged
+commit. Windows releases are paused until native GUI testing resumes. Keep the Windows code and
+packaging recipe, but do not dispatch the disabled Windows workflow or publish a new Windows zip.
 
 1. **Version:** bump `version` in `Cargo.toml` and `Cargo.lock` in a `release/<version>` PR, and in the
    same PR change every `"status": "main"` in `site/src/features.json` to `"stable@<version>"`.
@@ -48,9 +49,9 @@ built from the same tagged commit.
    builds, signs, notarizes and staples `dist/Apparent-<version>-arm64.dmg` and `.zip`. Its own
    `dist/updates/appcast.xml` is throwaway: the published appcast comes from step 4.
 3. **Tag and release:** merge the PR, tag the merge commit `v<version>`, and create the GitHub release
-   with the DMG. Manually dispatch the Windows and Linux release workflows on `main`, with
-   `tag=v<version>`; each checks out the tag and attaches its assets. Check both runs and assets
-   before deploying. Pushing the tag alone no longer starts either workflow.
+   with the DMG. Manually dispatch the Linux release workflow on `main` with `tag=v<version>`;
+   it checks out the tag and attaches its assets. Check the run and assets before deploying.
+   Pushing the tag alone does not start the workflow. Do not dispatch the Windows release workflow.
 4. **Appcast** (the Pro, over ssh): copy the Sparkle zip into `~/.local/share/apparent-release/updates/`
    and run `launchctl kickstart gui/$(id -u)/dev.kit.apparent-appcast`. The job
    (`~/Library/LaunchAgents/dev.kit.apparent-appcast.plist` → `~/.local/share/apparent-release/appcast.sh`)
@@ -61,7 +62,7 @@ built from the same tagged commit.
    `SUPublicEDKey`. For a dry run, run `appcast.sh <folder> <log>` as a one-off launchd job on a copy
    of the folder.
 5. **Site** (the Pro's checkout, where `wrangler` is signed in): fast-forward to `main`, copy the DMG,
-   Sparkle zip, Windows zip and the new `Apparent<n>-*.delta` files into `site/public/releases/` (also as
+   Sparkle zip and the new `Apparent<n>-*.delta` files into `site/public/releases/` (also as
    `Apparent-latest-*`), then `bun run build && bunx wrangler@latest deploy`.
 6. **Homebrew:** a PR to `kitlangton/homebrew-tap` bumping `version` and `sha256` in `Casks/apparent.rb`.
 
@@ -70,10 +71,8 @@ or `/tmp`: a clean or a reboot would take the tools and every earlier zip with t
 `scripts/setup-sparkle.sh` fetches Sparkle (checksummed) into `$APPARENT_SPARKLE_DIR`, or `target/` when
 it's unset.
 
-Check after deploying: the live DMG, zips and newest delta match the release's sha256s, the live
-appcast's signature verifies, `spctl` accepts the downloaded DMG and the app in it, the site shows
-the new version for both the Mac and Windows download buttons, and the Windows zip has `apparent.exe`,
-`transcribe.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-<tier>.dll` (x64, sse42, sandybridge,
-haswell, alderlake, skylakex, cannonlake, cascadelake, icelake; see [windows.md](windows.md)), the three
-Visual C++ runtime DLLs (`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`), README and LICENSE.
+Check after deploying: the live DMG, Sparkle zip and newest delta match the release's sha256s,
+the live appcast's signature verifies, `spctl` accepts the downloaded DMG and the app in it,
+the site shows the new Mac version and says Windows releases are paused. Do not publish a new
+Windows zip or point the site to an older one.
 Check both Linux AppImages and their `.sha256` assets on the tagged release before advertising them.

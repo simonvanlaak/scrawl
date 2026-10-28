@@ -3,7 +3,7 @@ import { Copy } from "./Copy"
 
 const REPO = "https://github.com/tryapparent/apparent"
 const RELEASES = `${REPO}/releases`
-const INSTALL_PROMPT = `Check whether this computer supports Apparent (macOS or Linux, not Windows), then install the desktop app from the official releases at ${RELEASES} following the platform instructions, ask before changing system permissions, and verify it launches.`
+const INSTALL_PROMPT = `Install the Apparent desktop app from ${RELEASES}, then launch it.`
 
 export function App() {
   return (

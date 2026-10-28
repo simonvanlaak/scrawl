@@ -248,6 +248,9 @@ impl Theme {
     fn selection(self) -> Rgba {
         rgb(0x302442)
     }
+    fn hover(self) -> Rgba {
+        rgb(if self.dark { 0x302442 } else { 0xc4a9e6 })
+    }
     fn control(self) -> Rgba {
         self.ink(if self.dark { 0.08 } else { 0.06 })
     }
@@ -721,7 +724,7 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text())
         .when(enabled, |d| {
-            d.cursor_pointer().hover(|s| s.bg(theme.selection()))
+            d.cursor_pointer().hover(|s| s.bg(theme.hover()))
         })
         .when(!enabled, |d| d.opacity(0.45))
         .child(title.to_owned())
@@ -1830,7 +1833,7 @@ impl SettingsWindow {
                     .when(!enabled, |d| d.opacity(0.4))
                     .when(enabled, |d| {
                         d.cursor_pointer()
-                            .hover(|s| s.bg(theme.accent()).text_color(rgb(0xffffff)))
+                            .hover(|s| s.bg(theme.hover()))
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 cx.stop_propagation();
                                 view.menu = None;
@@ -2059,5 +2062,29 @@ mod tests {
         ).unwrap();
         assert!(!finished.update_check.checking);
         assert_eq!(finished.update_check.message.as_deref(), Some("No new update is available."));
+    }
+
+    #[test]
+    fn hovered_control_text_contrasts_in_both_themes() {
+        fn luminance(color: Rgba) -> f32 {
+            let channel = |x: f32| {
+                if x <= 0.04045 {
+                    x / 12.92
+                } else {
+                    ((x + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+        }
+        for dark in [false, true] {
+            let theme = Theme { dark };
+            let a = luminance(theme.hover());
+            let b = luminance(theme.text());
+            let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+            assert!(
+                contrast >= 4.5,
+                "hovered control text must remain readable in both themes: {contrast}"
+            );
+        }
     }
 }

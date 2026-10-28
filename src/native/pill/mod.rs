@@ -117,6 +117,7 @@ struct CompositeElem {
 
 struct PillViewIvars {
     action_tx: flume::Sender<PillAction>,
+    mic_status: Mutex<(Option<crate::audio::InputWarning>, bool)>,
 }
 
 define_class!(
@@ -163,14 +164,23 @@ define_class!(
 
         #[unsafe(method_id(accessibilityLabel))]
         fn accessibility_label(&self) -> Retained<NSString> {
-            NSString::from_str("Scrawl Recording Controls")
+            let status = self.ivars().mic_status.lock().ok().map(|status| *status);
+            match status {
+                Some((Some(warning), chips)) => NSString::from_str(
+                    &types::mic_warning_accessibility_label(warning, chips)
+                ),
+                _ => NSString::from_str("Scrawl Recording Controls"),
+            }
         }
     }
 );
 
 impl ScrawlPillView {
     fn new(mtm: MainThreadMarker, frame: NSRect, action_tx: flume::Sender<PillAction>) -> Retained<Self> {
-        let this = mtm.alloc::<Self>().set_ivars(PillViewIvars { action_tx });
+        let this = mtm.alloc::<Self>().set_ivars(PillViewIvars {
+            action_tx,
+            mic_status: Mutex::new((None, false)),
+        });
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 }
@@ -299,6 +309,7 @@ struct SharedNativePill {
 
 pub struct NativePill {
     shared: Arc<SharedNativePill>,
+    root_view: Retained<ScrawlPillView>,
     display_link: Option<CVDisplayLink>,
     display_link_ctx: Option<*const SharedNativePill>,
     action_rx: flume::Receiver<PillAction>,
@@ -431,6 +442,7 @@ impl NativePill {
 
         Ok(Self {
             shared,
+            root_view,
             display_link,
             display_link_ctx,
             action_rx,
@@ -477,6 +489,12 @@ impl NativePill {
     /// advances springs and renders on the display refresh cadence (with main-loop fallback if
     /// `CVDisplayLink` is paused).
     pub fn sync(&self, snapshot: PillSnapshot) {
+        if let Ok(mut status) = self.root_view.ivars().mic_status.lock() {
+            *status = (
+                snapshot.mic_warning,
+                matches!(&snapshot.pres, Pres::Recording { chips: true, .. }),
+            );
+        }
         let mut needs_fallback_tick = self.display_link.is_none();
         if let Ok(mut st) = self.shared.state.lock() {
             if st.style != snapshot.style {
@@ -511,6 +529,10 @@ impl NativePill {
                     st.window.setLevel(NSStatusWindowLevel + 5);
                     st.window.orderFrontRegardless();
                 }
+            }
+            if st.model.mic_warning != snapshot.mic_warning {
+                st.model.set_mic_warning(snapshot.mic_warning);
+                st.dirty = true;
             }
             if (motion::now() - st.last_tick_now) >= f64::from(0.045 * motion::time_scale()) {
                 needs_fallback_tick = true;
@@ -845,7 +867,7 @@ impl PillRuntimeState {
 
         for elem in &frame.elems {
             let [ex, ey, ew, eh] = elem.rect;
-            let screen_rect = if matches!(elem.id, ElemId::DividerLead | ElemId::DividerClose) {
+            let screen_rect = if matches!(elem.id, ElemId::DividerLead | ElemId::DividerClose | ElemId::DividerWarning) {
                 let dw = 1.0 * elem.scale;
                 let dh = 16.0 * elem.scale;
                 [
@@ -950,6 +972,7 @@ impl MetalPipelines {
                 elem,
                 [slot_x + TILE_PAD_PT, slot_y + TILE_PAD_PT],
                 frame.t,
+                frame.mic_warning,
                 &mut prims,
             );
 
@@ -1119,6 +1142,7 @@ fn emit_elem_prims(
     elem: &model::FrameElem,
     [ox, oy]: [f32; 2],
     t: f32,
+    mic_warning: Option<crate::audio::InputWarning>,
     out: &mut Vec<TilePrim>,
 ) {
     let [bw, bh] = elem.base_size;
@@ -1212,6 +1236,12 @@ fn emit_elem_prims(
             let b = (0.965 + 0.035 * elem.hover - 0.04 * elem.press).clamp(0.0, 1.0);
             push_shape(out, [ox, oy, bw, bh], bh * 0.5, [r, g, b, 1.0]);
             push_sprite(out, center_text(tx), tx.uv, [0.95, 0.95, 0.96, 1.0]);
+        }
+        ElemId::MicWarning => {
+            if let Some(warning) = mic_warning {
+                let tx = atlas.label(warning.label());
+                push_sprite(out, center_text(tx), tx.uv, [1.0, 0.79, 0.44, 1.0]);
+            }
         }
         ElemId::Lead => {
             if is_glass {
@@ -1334,7 +1364,7 @@ fn emit_elem_prims(
                 [fg, fg, fg, 1.0],
             );
         }
-        ElemId::DividerLead | ElemId::DividerClose => {
+        ElemId::DividerLead | ElemId::DividerClose | ElemId::DividerWarning => {
             push_shape(
                 out,
                 [ox + (bw - 1.0) * 0.5, oy + (bh - 16.0) * 0.5, 1.0, 16.0],

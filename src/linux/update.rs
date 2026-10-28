@@ -134,14 +134,20 @@ fn preflight_image(image: &Path, timeout: Duration) -> Result<()> {
 }
 
 fn relaunch_command(image: &Path, backup: &Path, pid: u32) -> Command {
+    let marker = image.with_extension("AppImage.apparent-update.json");
+    let previous_marker = backup.with_file_name(format!("{}.apparent-update.json", backup.file_name().unwrap().to_string_lossy()));
+    let failed_marker = image.with_file_name(format!(".{}.failed-update.json", image.file_name().unwrap().to_string_lossy()));
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg("pid=$1; image=$2; backup=$3; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; if [ -x \"$backup\" ]; then exec \"$backup\" app; fi; exit 1")
+        .arg("pid=$1; image=$2; backup=$3; marker=$4; previous_marker=$5; failed_marker=$6; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; if [ -x \"$backup\" ]; then if mv -f \"$backup\" \"$image\"; then if [ -f \"$marker\" ]; then mv -f \"$marker\" \"$failed_marker\" || rm -f \"$marker\"; fi; if [ -f \"$previous_marker\" ]; then mv -f \"$previous_marker\" \"$marker\" || rm -f \"$marker\"; else rm -f \"$marker\"; fi; exec \"$image\" app; fi; exec \"$backup\" app; fi; exit 1")
         .arg("apparent-update-relaunch")
         .arg(pid.to_string())
         .arg(image)
         .arg(backup)
+        .arg(marker)
+        .arg(previous_marker)
+        .arg(failed_marker)
         .env_remove("APPIMAGE")
         .env_remove("APPDIR")
         .stdin(std::process::Stdio::null())
@@ -295,8 +301,16 @@ fn stable_candidate(arch: &str) -> Result<Candidate> {
 }
 
 fn installed_id(image: &Path) -> Option<(String, String)> {
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(image.with_extension("AppImage.apparent-update.json")).ok()?).ok()?;
+    update_id(&image.with_extension("AppImage.apparent-update.json"))
+}
+
+fn update_id(marker: &Path) -> Option<(String, String)> {
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(marker).ok()?).ok()?;
     Some((value["channel"].as_str()?.to_owned(), value["id"].as_str()?.to_owned()))
+}
+
+fn previously_failed(marker: &Path, candidate: &Candidate) -> bool {
+    update_id(marker) == Some((candidate.channel.to_owned(), candidate.id.clone()))
 }
 
 fn newer(candidate: &Candidate, installed: Option<(String, String)>) -> bool {
@@ -362,6 +376,7 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
     let stage = parent.join(format!(".{name}.download-{}", std::process::id()));
     let backup = parent.join(format!(".{name}.previous"));
     let sidecar = image.with_extension("AppImage.apparent-update.json");
+    let previous_sidecar = parent.join(format!(".{name}.previous.apparent-update.json"));
     let staged_sidecar = parent.join(format!(".{name}.update-{}", std::process::id()));
     // Reserve only our own temporary path; never reuse another process's download.
     let _reserved = OpenOptions::new().write(true).create_new(true).open(&stage)?;
@@ -378,6 +393,18 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&staged_sidecar)?;
         f.write_all(serde_json::to_string(&serde_json::json!({"channel": candidate.channel, "id": candidate.id}))?.as_bytes())?;
         f.sync_all()?;
+        // Keep the old version marker with its old image, or remove a stale one.
+        if fs::symlink_metadata(&previous_sidecar).is_ok() {
+            fs::remove_file(&previous_sidecar)?;
+        }
+        match fs::symlink_metadata(&sidecar) {
+            Ok(meta) => {
+                ensure!(meta.is_file() && !meta.file_type().is_symlink() && meta.uid() == unsafe { libc::geteuid() }, "update marker is not an owned regular file");
+                fs::copy(&sidecar, &previous_sidecar)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.into()),
+        }
         exchange(&stage, image)?;
         swapped = true;
         // The old AppImage is now at stage; it remains a rollback copy.
@@ -404,6 +431,9 @@ fn check() -> Result<bool> {
     } else {
         stable_candidate(arch)?
     };
+    let name = image.file_name().context("AppImage has no name")?.to_string_lossy();
+    let failed = image.with_file_name(format!(".{name}.failed-update.json"));
+    ensure!(!previously_failed(&failed, &candidate), "this update failed to start previously; waiting for a newer release");
     if !newer(&candidate, installed_id(&image)) { return Ok(false) }
     install(&candidate, &image)?;
     super::shell::notify("Apparent updated", "The new version will start the next time you open Apparent. Your previous AppImage is kept beside it.");
@@ -549,8 +579,13 @@ mod tests {
         let image = dir.join("new.AppImage");
         let backup = dir.join("previous.AppImage");
         let marker = dir.join("recovered");
+        let sidecar = image.with_extension("AppImage.apparent-update.json");
+        let previous_sidecar = backup.with_file_name("previous.AppImage.apparent-update.json");
+        let failed_sidecar = image.with_file_name(".new.AppImage.failed-update.json");
         fs::write(&image, b"#!/bin/sh\nexit 1\n").unwrap();
         fs::write(&backup, b"#!/bin/sh\nprintf recovered > \"$TEST_RECOVERY_MARKER\"\n").unwrap();
+        fs::write(&sidecar, br#"{"channel":"stable","id":"v99.0.0"}"#).unwrap();
+        fs::write(&previous_sidecar, br#"{"channel":"stable","id":"v1.0.0"}"#).unwrap();
         for path in [&image, &backup] {
             let mut permissions = fs::metadata(path).unwrap().permissions();
             permissions.set_mode(0o700);
@@ -559,11 +594,28 @@ mod tests {
         assert!(relaunch_command(&image, &backup, u32::MAX)
             .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
         assert_eq!(fs::read(&marker).unwrap(), b"recovered");
+        assert_eq!(fs::read(&image).unwrap(), b"#!/bin/sh\nprintf recovered > \"$TEST_RECOVERY_MARKER\"\n");
+        assert_eq!(installed_id(&image), Some(("stable".into(), "v1.0.0".into())), "rollback must restore the old version marker");
+        let bad = Candidate { id: "v99.0.0".into(), channel: "stable", url: String::new(), sha256: String::new() };
+        let next = Candidate { id: "v100.0.0".into(), channel: "stable", url: String::new(), sha256: String::new() };
+        assert!(previously_failed(&failed_sidecar, &bad), "the broken release must not be reinstalled on startup");
+        assert!(!previously_failed(&failed_sidecar, &next), "a newer release must remain eligible");
+        fs::remove_file(&marker).unwrap();
+        assert!(Command::new(&image).env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        assert_eq!(fs::read(&marker).unwrap(), b"recovered", "the desktop launcher must work on the next start");
+        fs::write(&backup, fs::read(&image).unwrap()).unwrap();
+        let mut permissions = fs::metadata(&backup).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&backup, permissions).unwrap();
         fs::remove_file(&image).unwrap();
         fs::remove_file(&marker).unwrap();
         assert!(relaunch_command(&image, &backup, u32::MAX)
             .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
         assert_eq!(fs::read(&marker).unwrap(), b"recovered");
+        fs::write(&backup, fs::read(&image).unwrap()).unwrap();
+        let mut permissions = fs::metadata(&backup).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&backup, permissions).unwrap();
         fs::remove_file(&marker).unwrap();
         fs::write(&image, b"#!/bin/sh\nexit 0\n").unwrap();
         let mut permissions = fs::metadata(&image).unwrap().permissions();
@@ -572,6 +624,10 @@ mod tests {
         assert!(relaunch_command(&image, &backup, u32::MAX)
             .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
         assert_eq!(fs::read(&marker).unwrap(), b"recovered", "a clean early exit without a running app still needs recovery");
+        fs::write(&backup, fs::read(&image).unwrap()).unwrap();
+        let mut permissions = fs::metadata(&backup).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&backup, permissions).unwrap();
         fs::write(&image, b"#!/bin/sh\nsleep 5\nexit 1\n").unwrap();
         let mut permissions = fs::metadata(&image).unwrap().permissions();
         permissions.set_mode(0o700);

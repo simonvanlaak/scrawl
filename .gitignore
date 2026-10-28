@@ -6,3 +6,4 @@
 /.swiftpm
 /artifacts
 /*.apparent
+__pycache__/

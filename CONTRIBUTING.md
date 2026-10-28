@@ -14,3 +14,9 @@ If you cannot safely share a recording, a text-only issue is just as welcome. Do
 ## Contribute code
 
 Before a larger change, open an issue to discuss the approach. For a pull request, explain the behavior you changed and how you tested it. See [README.md](README.md#testing) for the project test commands and [AGENTS.md](AGENTS.md) for repository-specific build and safety rules.
+
+## Guard local pushes
+
+From the checkout you push, run `git config extensions.worktreeConfig true` once for the repository, then `git config --worktree core.hooksPath "$(git rev-parse --show-toplevel)/.githooks"`. This enables the tracked pre-push hook **for this worktree only**. Each push of a commit runs the offline Cargo build and full test suite, and rejects a dirty checkout, a ref that is not its checked-out `HEAD`, or a failed check. A ref deletion needs no build. Install it separately in each worktree; Git does not install tracked hooks automatically. The hook uses `taskpolicy` if available, or plain Cargo with the same job limit otherwise; its offline dependencies must already be installed.
+
+This is a local safety rail, not server enforcement: `git push --no-verify`, another checkout without the hook, or a direct API write can bypass it. Protect the branch with required CI checks on GitHub if you need a rule that applies to everyone.

@@ -27,6 +27,28 @@ fn native_wayland_clipboard() -> bool {
     (super::kde() || super::hyprland()) && super::wayland_session()
 }
 
+/// This is a preflight only. A failed offer after this check must not replace
+/// clipboard contents: another process may have become the selection owner.
+pub fn combined_offer_supported() -> bool {
+    native_wayland_clipboard()
+        && super::wayland_display()
+            .is_some_and(|display| helper_ready(&restore_helper(), &display))
+}
+
+fn helper_ready(helper: &std::path::Path, display: &std::ffi::OsStr) -> bool {
+    if !helper.is_file() {
+        return false;
+    }
+    Command::new("timeout")
+        .args(["3s", "python3"])
+        .arg(helper)
+        .arg("--check")
+        .env("GDK_BACKEND", "wayland")
+        .env("WAYLAND_DISPLAY", display)
+        .output()
+        .is_ok_and(|check| check.status.success() && check.stdout == b"READY\n")
+}
+
 pub struct TextSnapshot {
     entries: Vec<(String, Vec<u8>)>,
 }
@@ -279,6 +301,23 @@ pub fn set_png(png_bytes: &[u8]) -> Result<()> {
     })
 }
 
+/// Offer both formats on one Wayland selection. arboard replaces its previous
+/// format on X11, so the caller falls back to text there.
+pub fn set_png_and_text(png_bytes: &[u8], text: &str) -> Result<()> {
+    anyhow::ensure!(
+        native_wayland_clipboard(),
+        "Combined image and text clipboard is unavailable on this X11 session"
+    );
+    anyhow::ensure!(
+        png_bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "Contact sheet is not a PNG"
+    );
+    copy_multi_wayland(&[
+        ("image/png".into(), png_bytes.to_vec()),
+        ("text/plain;charset=utf-8".into(), text.as_bytes().to_vec()),
+    ])
+}
+
 fn copy_wayland(mime: &str, bytes: &[u8]) -> Result<()> {
     let bundled = std::env::current_exe()
         .ok()
@@ -311,6 +350,19 @@ fn copy_wayland(mime: &str, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_helper_is_detected_before_the_clipboard_is_touched() {
+        let root = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir(&root).unwrap();
+        let helper = root.join("helper.py");
+        assert!(!helper_ready(&helper, std::ffi::OsStr::new("wayland-0")));
+        std::fs::write(&helper, "import sys; sys.exit(2)\n").unwrap();
+        assert!(!helper_ready(&helper, std::ffi::OsStr::new("wayland-0")));
+        std::fs::write(&helper, "print('READY')\n").unwrap();
+        assert!(helper_ready(&helper, std::ffi::OsStr::new("wayland-0")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn snapshot_policy_accepts_rich_and_image_clipboards_without_losing_their_types() {
@@ -378,6 +430,26 @@ mod tests {
             .unwrap(),
             b"newer synthetic clipboard"
         );
+    }
+
+    #[test]
+    fn isolated_combined_offer_has_both_mime_types_and_exact_bytes() {
+        if std::env::var_os("APPARENT_TEST_WAYLAND_CLIPBOARD").is_none() {
+            return;
+        }
+        let previous = snapshot_text_wayland().unwrap();
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&[7, 8, 9, 255]).unwrap();
+        }
+        let text = "test summary";
+        set_png_and_text(&png, text).unwrap();
+        assert!(still_ours("image/png", &png).unwrap());
+        assert!(still_ours("text/plain;charset=utf-8", text.as_bytes()).unwrap());
+        restore_text_wayland(previous, Some(("text/plain;charset=utf-8", text.as_bytes()))).unwrap();
     }
 
     #[test]

@@ -246,6 +246,42 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn copy_png_and_text_to_clipboard(png_bytes: &[u8], text: &str) -> Result<bool> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeString};
+    use objc2_foundation::{NSArray, NSData, NSString};
+
+    let pasteboard = NSPasteboard::generalPasteboard();
+    let image = NSData::with_bytes(png_bytes);
+    let text = NSString::from_str(text);
+    unsafe {
+        let types = NSArray::from_slice(&[NSPasteboardTypePNG, NSPasteboardTypeString]);
+        pasteboard.clearContents();
+        pasteboard.declareTypes_owner(&types, None);
+        ensure!(
+            pasteboard.setData_forType(Some(&image), NSPasteboardTypePNG)
+                && pasteboard.setString_forType(&text, NSPasteboardTypeString),
+            "Could not copy image and text to clipboard"
+        );
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "windows")]
+fn copy_png_and_text_to_clipboard(png_bytes: &[u8], text: &str) -> Result<bool> {
+    crate::win::clipboard::set_png_and_text(png_bytes, Some(text))?;
+    Ok(true)
+}
+
+#[cfg(target_os = "linux")]
+fn copy_png_and_text_to_clipboard(png_bytes: &[u8], text: &str) -> Result<bool> {
+    if !crate::linux::clipboard::combined_offer_supported() {
+        return Ok(false);
+    }
+    crate::linux::clipboard::set_png_and_text(png_bytes, text)?;
+    Ok(true)
+}
+
 #[cfg(target_os = "windows")]
 pub fn copy_string_to_clipboard(content: &str) -> Result<()> {
     crate::win::clipboard::set_text(content)
@@ -269,14 +305,30 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
 pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
     let summary = clipboard_summary(&bundle, &directory);
-    #[cfg(target_os = "windows")]
-    if experiment("clipboardImage")
-        && let Ok(image) = fs::read(directory.join(&bundle.contact_sheet))
-        && crate::win::clipboard::set_png_and_text(&image, Some(&summary)).is_ok()
-    {
-        return Ok(());
+    offer_image_handoff(
+        experiment("clipboardImage"),
+        || fs::read(directory.join(&bundle.contact_sheet)).map_err(Into::into),
+        &summary,
+        copy_png_and_text_to_clipboard,
+        copy_string_to_clipboard,
+    )
+}
+
+// Only fall back if no image was offered. An error after publication may mean another
+// app took the selection; replacing it with our summary would steal the user's copy.
+fn offer_image_handoff(
+    enabled: bool,
+    image: impl FnOnce() -> Result<Vec<u8>>,
+    summary: &str,
+    offer_both: impl FnOnce(&[u8], &str) -> Result<bool>,
+    offer_text: impl FnOnce(&str) -> Result<()>,
+) -> Result<()> {
+    if enabled && let Ok(image) = image() {
+        if offer_both(&image, summary)? {
+            return Ok(());
+        }
     }
-    copy_string_to_clipboard(&summary)
+    offer_text(summary)
 }
 
 const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
@@ -2020,6 +2072,65 @@ fn existing_keyframes(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn image_offer_is_opt_in_and_falls_back_to_text_if_unavailable() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let offer = |enabled, image: Result<Vec<u8>>| {
+            offer_image_handoff(
+                enabled,
+                || {
+                    calls.borrow_mut().push("read".into());
+                    image
+                },
+                "summary",
+                |png, text| {
+                    calls.borrow_mut().push(format!("image:{}:{text}", png.len()));
+                    Ok(true)
+                },
+                |text| {
+                    calls.borrow_mut().push(format!("text:{text}"));
+                    Ok(())
+                },
+            )
+        };
+        offer(false, Ok(vec![1, 2, 3])).unwrap();
+        offer(true, Ok(vec![1, 2, 3])).unwrap();
+        offer(true, Err(anyhow::anyhow!("missing sheet"))).unwrap();
+        offer_image_handoff(
+            true,
+            || Ok(vec![1]),
+            "summary",
+            |_, _| {
+                calls.borrow_mut().push("unsupported".into());
+                Ok(false)
+            },
+            |text| {
+                calls.borrow_mut().push(format!("text:{text}"));
+                Ok(())
+            },
+        )
+        .unwrap();
+        let contended = offer_image_handoff(
+            true,
+            || Ok(vec![1]),
+            "summary",
+            |_, _| {
+                calls.borrow_mut().push("ownership-lost".into());
+                anyhow::bail!("clipboard changed after image publication")
+            },
+            |_| panic!("must not overwrite the new clipboard owner"),
+        );
+        assert!(contended.is_err());
+        assert_eq!(
+            *calls.borrow(),
+            [
+                "text:summary", "read", "image:3:summary", "read", "text:summary",
+                "unsupported", "text:summary", "ownership-lost"
+            ]
+        );
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

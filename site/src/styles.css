@@ -3943,3 +3943,75 @@ kbd {
     opacity: 0;
   }
 }
+
+/* Apparent's Paper/Lilac identity frames the original interactive demo. */
+@font-face {
+  font-family: "Host Grotesk";
+  src: url("/HostGrotesk-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  --sans: "Host Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.nav {
+  max-width: none;
+  min-height: 72px;
+  background: rgba(245, 240, 232, .94);
+  border-bottom: 1px solid rgba(2, 1, 2, .18);
+  padding-inline: max(24px, calc((100vw - 1200px) / 2));
+  color: #020102;
+}
+.nav .brand img { width: 148px; height: auto; }
+.nav nav { color: #342d40; }
+.nav nav a:hover { color: #7a58c7; }
+.nav .nav-dl { color: #f5f0e8; background: #7a58c7; }
+.nav .nav-dl:hover { color: #fff; background: #6844b9; }
+
+.hero {
+  min-height: 510px;
+  justify-content: center;
+  padding: 72px 24px 68px;
+  background: #f5f0e8;
+  color: #020102;
+  border-bottom: 10px solid #b7a5d8;
+}
+.hero-eyebrow {
+  margin: 0;
+  color: #6844b9;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: 13px;
+  font-weight: 700;
+}
+.hero h1 { font-size: clamp(48px, 7vw, 92px); line-height: .98; margin: 30px 0 0; }
+.hero h1 em { color: #7a58c7; font-style: normal; }
+.hero .lede { max-width: 680px; color: #342d40; line-height: 1.45; font-size: clamp(17px, 2vw, 21px); }
+.hero .lede kbd { color: #020102; background: #e7e0ee; box-shadow: none; }
+.hero .btn-primary,
+.availability .btn-primary { margin-top: 28px; background: #7a58c7; color: #fff; box-shadow: none; }
+.hero .btn-primary:hover,
+.availability .btn-primary:hover { background: #6844b9; }
+.hero-note { max-width: 540px; margin: 19px 0 0; color: #5b5260; font-size: 14px; }
+
+.availability { scroll-margin-top: 80px; }
+.availability-copy { max-width: 570px; color: #f5f0e8; }
+.availability-copy > p { font-size: 19px; line-height: 1.5; margin: 0; }
+.availability-copy .availability-note { margin-top: 22px; font-size: 14px; color: #aaa1b3; }
+.availability .btn-primary { display: inline-flex; }
+.foot { background: #f5f0e8; color: #020102; max-width: none; padding-inline: max(24px, calc((100vw - 1200px) / 2)); }
+.foot img { width: 130px; height: auto; }
+.foot a:hover { color: #7a58c7; }
+
+@media (max-width: 760px) {
+  .nav { min-height: 62px; padding-inline: 16px; }
+  .nav .brand img { width: 110px; }
+  .nav nav { gap: 12px; }
+  .nav nav a:not(.nav-dl) { display: none; }
+  .hero { min-height: 480px; padding: 70px 24px 64px; }
+  .hero h1 { font-size: clamp(42px, 11vw, 60px); }
+  .availability-copy > p { font-size: 17px; }
+  .foot { padding-inline: 24px; }
+}

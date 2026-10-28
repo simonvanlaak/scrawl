@@ -503,7 +503,7 @@ export function Demo() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        aria-label="Scrawl demo"
+        aria-label="Apparent demo"
       >
         <div
           ref={stageRef}

@@ -26,10 +26,12 @@ html = html.replace(/<link rel="stylesheet"[^>]*href="(\/assets\/[^"]+\.css)"[^>
 writeFileSync(join(dist, "index.html"), html)
 
 // The feature map: unlinked, noindex, and left out of the sitemap and llms.txt.
-const report = audit()
-if (report.errors.length) throw new Error(`feature map:\n${report.errors.join("\n")}`)
-mkdirSync(join(dist, MAP_DIR), { recursive: true })
-writeFileSync(join(dist, MAP_DIR, "index.html"), mapPage(report))
-console.log(`feature map: /${MAP_DIR}/ (${report.issues.length} to look at)`)
+if (process.env.APPARENT_PUBLIC_SITE !== "1") {
+  const report = audit()
+  if (report.errors.length) throw new Error(`feature map:\n${report.errors.join("\n")}`)
+  mkdirSync(join(dist, MAP_DIR), { recursive: true })
+  writeFileSync(join(dist, MAP_DIR, "index.html"), mapPage(report))
+  console.log(`feature map: /${MAP_DIR}/ (${report.issues.length} to look at)`)
+}
 rmSync(ssr, { recursive: true, force: true })
 console.log(`prerendered dist/index.html (${(html.length / 1024).toFixed(1)} kB)`)

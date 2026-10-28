@@ -430,7 +430,7 @@ fn open(request: Request, cx: &mut App) {
                     meter: None,
                     icon: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
-                        include_bytes!("../assets/app-icon.png").to_vec(),
+                        about_icon_bytes().to_vec(),
                     )),
                     wordmark: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
@@ -697,6 +697,14 @@ fn caption(theme: Theme, text: &str, error: bool) -> Div {
         .child(text.to_owned())
 }
 
+fn pane_top_inset(pane: Pane) -> f32 {
+    if pane == Pane::Recording { 0.0 } else { 20.0 }
+}
+
+fn about_icon_bytes() -> &'static [u8] {
+    include_bytes!("../assets/brand/apparent-a.png")
+}
+
 fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool) -> Stateful<Div> {
     div()
         .id(id.into())
@@ -925,6 +933,7 @@ impl SettingsWindow {
                     .min_h_0()
                     .overflow_y_scroll()
                     .px(px(INSET))
+                    .pt(px(pane_top_inset(self.pane)))
                     .flex()
                     .flex_col()
                     .child(body),
@@ -1974,6 +1983,28 @@ impl Render for SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn about_uses_the_lilac_a_mark_instead_of_the_brush_icon() {
+        let decoder = png::Decoder::new(std::io::Cursor::new(about_icon_bytes()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        assert_eq!(&pixels[..4], &[0xb7, 0xa5, 0xd8, 0xff]);
+        let center = (frame.width as usize * frame.height as usize / 2
+            + frame.width as usize / 2) * 4;
+        assert_eq!(&pixels[center..center + 4], &[0x02, 0x01, 0x02, 0xff]);
+    }
+
+    #[test]
+    fn first_settings_group_has_room_below_the_title_rule() {
+        for pane in [Pane::General, Pane::Storage, Pane::Permissions, Pane::Agents, Pane::About] {
+            assert_eq!(pane_top_inset(pane), 20.0, "{pane:?}");
+        }
+        // Recording already starts with a section header, which supplies its own spacing.
+        assert_eq!(pane_top_inset(Pane::Recording), 0.0);
+    }
 
     #[test]
     fn settings_columns_fit_the_actual_narrow_viewport() {

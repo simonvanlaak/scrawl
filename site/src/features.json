@@ -671,7 +671,6 @@
       "says": "Pick an input with a live level meter; a missing device falls back to the default and says so.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Linux records from the default input.",
       "config": [{ "key": "microphone", "value": "{\"id\", \"name\"}", "does": "Chosen input; absent follows the system" }],
       "docs": ["README.md#settings"]
     },

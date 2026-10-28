@@ -75,9 +75,9 @@ the screen keyframes still show where the board was beside the browser. Clear re
 the drawing from this final tile. An ordinary clipboard copy is text only; use Paste
 to attach the contact sheet and text to an agent composer.
 
-With `"experiments": {"audioEqualizer": true}`, the recording capsule also shows five
-smooth level bars fed by the captured microphone PCM (off by default). They indicate
-input activity only, not who spoke or whether transcription can understand the voice.
+The recording capsule shows five smooth level bars by default, fed by the captured
+microphone PCM. They indicate input activity only, not who spoke or whether
+transcription can understand the voice.
 The recording cue and Finish remain separate; microphone and intelligibility warnings
 retain their own status text rather than borrowing the bars.
 

@@ -17,7 +17,8 @@ pub fn preflight(original: &FocusedWindow) -> Result<()> {
     super::hyprland::targeted_paste_supported(original)?;
     super::hyprland::check_window(original)?;
     ensure!(
-        super::hyprland::focused_window()? == *original && original.pid != std::process::id(),
+        window_matches(original, &super::hyprland::focused_window()?)
+            && original.pid != std::process::id(),
         "Choose a chat composer and keep it focused until paste finishes"
     );
     Ok(())
@@ -89,7 +90,7 @@ struct LivePaste<'a> {
 impl UserPasteOps for LivePaste<'_> {
     fn check_focus(&mut self) -> Result<()> {
         ensure!(
-            super::hyprland::focused_window()? == *self.original,
+            window_matches(self.original, &super::hyprland::focused_window()?),
             "Paste target lost focus"
         );
         Ok(())

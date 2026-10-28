@@ -412,8 +412,8 @@ fn open(request: Request, cx: &mut App) {
             })
         },
     );
-    if opened.is_err() {
-        crate::capture::scrawl_log("settings: the window failed to open");
+    if let Err(error) = opened {
+        crate::capture::scrawl_log(format!("settings: the window failed to open: {error:#}"));
     }
 }
 
@@ -1201,11 +1201,18 @@ impl SettingsWindow {
             _ => None,
         };
         let video = state.video_export;
+        #[cfg(target_os = "linux")]
+        let decoder_warning = crate::linux::media::decoder_warning();
+        #[cfg(not(target_os = "linux"))]
+        let decoder_warning: Option<String> = None;
         div()
             .flex()
             .flex_col()
             .child(group(theme, rows))
             .child(caption(theme, &note, false))
+            .when_some(decoder_warning, |pane, warning| {
+                pane.child(caption(theme, &warning, true))
+            })
             .when_some(speech, |pane, (text, error)| {
                 pane.child(caption(theme, &text, error))
             })

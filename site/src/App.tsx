@@ -40,7 +40,20 @@ export function App() {
           <a className="btn-primary" href="#demo">See how it works <span aria-hidden="true">↗</span></a>
           <p className="hero-note">A recording becomes keyframes, a timed transcript, and a compact bundle you can paste.</p>
         </section>
-        <section className="demo-section" id="demo" aria-label="Interactive product demo">
+        <section className="demo-section" id="demo" aria-label="Product demo">
+          <div className="demo-film">
+            <div className="demo-film-intro">
+              <div>
+                <p className="demo-film-kicker">New recording · 21 seconds</p>
+                <h2>See the Pi handoff</h2>
+              </div>
+              <p>A scripted walkthrough of the capture, marks, and Pi handoff. The terminal sequence is illustrative, not a live agent session.</p>
+            </div>
+            <video controls playsInline preload="metadata" poster="/apparent-demo-pi-poster.jpg?v=525a5c3" aria-label="Apparent capture and Pi handoff walkthrough">
+              <source src="/apparent-demo-pi.mp4?v=silent-20261028" type="video/mp4" />
+              Your browser does not support this video.
+            </video>
+          </div>
           <Demo />
         </section>
         <IPhoneSection />

@@ -58,62 +58,17 @@ export const BEATS = [
   { label: "Fix", t: 16600 },
 ] as const
 
-// Word onsets in ms from the start of each narration file (measured from the ElevenLabs alignment).
+// Word onsets in ms from the start of the new, locally synthesized Pi-cut narration.
 const MAC_WORDS: [string, number][] = [
-  ["Look", 1200],
-  ["at", 1360],
-  ["this", 1560],
-  ["header", 1840],
-  ["badge…", 2080],
-  ["it's", 3120],
-  ["colliding", 3360],
-  ["with", 3880],
-  ["the", 4000],
-  ["title,", 4160],
-  ["and", 5120],
-  ["this", 5320],
-  ["button", 5600],
-  ["row", 5840],
-  ["is", 6080],
-  ["shifted", 6240],
-  ["down", 6640],
-  ["14", 7040],
-  ["pixels.", 7920],
-  ["Line", 8880],
-  ["them", 9120],
-  ["up.", 9360],
+  ["The", 1100], ["live", 1380], ["badge", 1680], ["overlaps", 2050], ["the", 2600], ["title.", 2790],
+  ["And", 5400], ["the", 5660], ["buttons", 5850], ["sit", 6170], ["too", 6390], ["low.", 6600],
+  ["Move", 6970], ["the", 7220], ["badge", 7410], ["and", 7700], ["align", 7960], ["the", 8230], ["row.", 8460],
 ]
 
 const IPHONE_WORDS: [string, number][] = [
-  ["On", 1124],
-  ["the", 1324],
-  ["phone", 1524],
-  ["it's", 1804],
-  ["even", 2004],
-  ["worse…", 2324],
-  ["this", 3324],
-  ["live", 3524],
-  ["pill", 3844],
-  ["is", 4124],
-  ["right", 4324],
-  ["on", 4564],
-  ["top", 4764],
-  ["of", 4924],
-  ["the", 5044],
-  ["header,", 5284],
-  ["and", 5994],
-  ["the", 6084],
-  ["checkout", 6364],
-  ["bar", 6644],
-  ["is", 6804],
-  ["cut", 7044],
-  ["off", 7204],
-  ["at", 7324],
-  ["the", 7444],
-  ["bottom.", 7724],
-  ["Please", 8564],
-  ["fix", 8884],
-  ["it.", 9204],
+  ["The", 1100], ["live", 1380], ["pill", 1680], ["covers", 1930], ["the", 2310], ["phone's", 2500], ["title.", 2820],
+  ["And", 5400], ["the", 5680], ["bottom", 5880], ["action", 6220], ["bar", 6520], ["is", 6710], ["clipped.", 6940],
+  ["Please", 7450], ["make", 7730], ["both", 8020], ["visible.", 8360],
 ]
 
 export type Narration = {
@@ -124,29 +79,22 @@ export type Narration = {
   clause2: number
   // Demo-clock time when the file ends.
   end: number
-  // Seconds into the file to hold silent: the gaps where the voice model's direction tags sit.
+  // Seconds into the file to hold silent.
   mute: [number, number][]
 }
 
-// Both recordings start with a sigh at the moment recording begins.
+// Narration starts after the capture begins, with a pause between the two marks.
 const narration = (src: string, spoken: [string, number][], speechEnd: number, duration: number, mute: [number, number][]): Narration => {
   const words = spoken.map(([w, at], i): [string, number, number] => {
     const next = spoken[i + 1]?.[1] ?? speechEnd
     return [w, T.record + at, T.record + Math.min(next - 40, at + 520)]
   })
-  return { src, words, clause2: spoken.findIndex(([w]) => w === "and"), end: T.record + duration, mute }
+  return { src, words, clause2: spoken.findIndex(([w]) => w.toLowerCase() === "and"), end: T.record + duration, mute }
 }
 
-// The mute windows stop short of the next word's onset (measured RMS rises ~60 ms before it).
 export const NARRATION: Record<Mode, Narration> = {
-  mac: narration("/narration.mp3", MAC_WORDS, 9900, 9840, [
-    [0.7, 1.05],
-    [4.8, 5.03],
-  ]),
-  iphone: narration("/narration-iphone.mp3", IPHONE_WORDS, 9750, 9680, [
-    [0.82, 1.04],
-    [5.7, 5.86],
-  ]),
+  mac: narration("/apparent-narration-mac.mp3", MAC_WORDS, 8900, 10000, []),
+  iphone: narration("/apparent-narration-iphone.mp3", IPHONE_WORDS, 8800, 10000, []),
 }
 
 export const WORDS = NARRATION.mac.words
@@ -205,7 +153,7 @@ const chipCenter = (items: number[], index: number): Point => {
   return [x + items[index] / 2, PILL_CY]
 }
 
-// The home-screen prompt row inside the OpenCode terminal (see Terminal in stage-parts.tsx).
+// The home-screen prompt row inside the Pi terminal (see Terminal in stage-parts.tsx).
 export const PROMPT_AT: Point = [AGENT.x + 150, AGENT.y + 356]
 
 export type Anchors = { badge: Rect; actions: Rect; title: Rect }

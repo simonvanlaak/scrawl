@@ -44,6 +44,10 @@ Other files: `scrawl.json` is the full manifest (keyframes, `marks` with shape a
 
 ## The scrawl CLI
 
+### Configuring Scrawl
+
+The Settings controls for recording, delivery, shortcuts and retention use `~/.config/scrawl/config.json` (`SCRAWL_CONFIG` overrides the path). The feature map at `site/src/features.json` in the Scrawl repository lists config keys, accepted values and platforms. Change only the needed key, preserve other keys, and keep the file private (`0600` on Unix): it also contains `ingestToken`, a credential. Never paste or print the whole config. A programmatic edit must preserve valid JSON, rather than replacing the file with a partial object. The UI writes changes there; an explicit `"launchAtLogin": true` or `false` also updates OS registration on app launch or within two seconds while it runs. A disabled OS login item can still need the user's approval. Some values (such as captures folder and delivery) are read on demand; shortcuts are registered at app startup or when changed through Settings, so restart Scrawl after editing `shortcuts` by hand. Permissions are OS grants, not JSON settings; do not claim to enable them by editing this file. Installing the CLI or the agent skill is an installation action, not an app preference.
+
 `scrawl` is the Scrawl app's own binary. If `command -v scrawl` finds nothing, use `/Applications/Scrawl.app/Contents/MacOS/scrawl` (or the same path under `~/Applications`), and tell the person they can put it on PATH with Install in Scrawl's Settings › Agents. It runs only on the Mac with Scrawl installed. Anywhere else, read `contact-sheet.png`, `frames/` and `scrawl.json` directly. Every command takes a bundle path, and most default to `latest`, the newest capture. Quote the path, because it usually contains `Application Support`.
 
 ### Look closer at a moment

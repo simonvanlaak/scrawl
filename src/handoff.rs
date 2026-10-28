@@ -646,6 +646,9 @@ fn opencode_binary() -> Result<PathBuf> {
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// Desired OS login registration. Missing leaves the OS's existing choice alone.
+    #[serde(default)]
+    pub launch_at_login: Option<bool>,
     #[serde(default)]
     pub agent_host: Option<String>,
     #[serde(default)]
@@ -884,8 +887,8 @@ fn random_hex_token_32() -> Result<String> {
 /// Returns `ingestToken` from `path`, generating a 32-byte hex token and writing `path` back with
 /// mode `0600` (while preserving all other JSON keys) if `ingestToken` is absent or empty.
 pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
-    let mut map = match fs::read(path) {
-        Ok(bytes) if !bytes.iter().all(u8::is_ascii_whitespace) => {
+    let map = match fs::read(path) {
+        Ok(bytes) => {
             match serde_json::from_slice::<serde_json::Value>(&bytes)
                 .with_context(|| format!("Invalid JSON in {}", path.display()))?
             {
@@ -893,7 +896,8 @@ pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
                 _ => bail!("Expected a JSON object in {}", path.display()),
             }
         }
-        Ok(_) | Err(_) => serde_json::Map::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
     };
 
     if let Some(existing) = map
@@ -906,37 +910,7 @@ pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
     }
 
     let token = random_hex_token_32()?;
-    map.insert(
-        "ingestToken".to_owned(),
-        serde_json::Value::String(token.clone()),
-    );
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    let mut body = serde_json::to_vec_pretty(&serde_json::Value::Object(map))?;
-    body.push(b'\n');
-    #[cfg(unix)]
-    {
-        use std::io::Write as _;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("Could not write {}", path.display()))?;
-        file.write_all(&body)?;
-        file.sync_all()?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, &body).with_context(|| format!("Could not write {}", path.display()))?;
-    }
+    set_config_value_in(path, "ingestToken", token.clone().into())?;
     Ok(token)
 }
 
@@ -1062,11 +1036,16 @@ pub fn pill_style() -> crate::native::pill::PillStyle {
 /// Sets one top-level key in `path` (`null` removes it), keeping the rest (and its `0600` mode,
 /// since it holds the ingest token).
 pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> Result<()> {
-    let mut config = fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
+    let mut config: serde_json::Value = match fs::read(path) {
+        Ok(bytes) => {
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes)
+                .with_context(|| format!("Invalid config at {}", path.display()))?;
+            anyhow::ensure!(parsed.is_object(), "Config at {} must be an object", path.display());
+            parsed
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
+    };
     match (value, config.as_object_mut()) {
         (serde_json::Value::Null, Some(map)) => {
             map.remove(key);
@@ -1078,16 +1057,31 @@ pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> 
     {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!("json.{}.tmp", crate::make_bundle_id()));
     let mut body = serde_json::to_vec_pretty(&config)?;
     body.push(b'\n');
-    fs::write(&tmp, body)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    let result = (|| -> Result<()> {
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            file.write_all(&body)?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        fs::write(&tmp, &body)?;
+        fs::rename(&tmp, path).with_context(|| format!("Could not write {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, path).with_context(|| format!("Could not write {}", path.display()))
+    result
 }
 
 /// Bundle IDs whose `Documents/Scrawl` (and legacy `Documents/Tether`) container the USB watcher
@@ -2444,6 +2438,26 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn setting_a_key_never_replaces_an_invalid_existing_config() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        for bytes in [b"{\"ingestToken\":\"private\",".as_slice(), b"[]".as_slice()] {
+            fs::write(&path, bytes).unwrap();
+            assert!(set_config_value_in(&path, "autoSend", false.into()).is_err());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn token_generation_never_replaces_an_empty_existing_config() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        fs::write(&path, b" \n ").unwrap();
+        assert!(ensure_ingest_token_in(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b" \n ");
     }
 
     #[test]

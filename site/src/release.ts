@@ -7,9 +7,8 @@ export const MAC_DMG: string | null = RELEASE.version ? "/releases/Apparent-late
 export const BREW = "brew install --cask tryapparent/tap/apparent"
 export const SKILL = "bunx skills add tryapparent/apparent"
 
-// The zip .github/workflows/release-windows.yml builds for the same version,
-// copied next to the Mac files. A preview: unsigned, and it doesn't update
-// itself yet. Set it to null and the site says "coming soon" again.
+// Windows releases are paused. Keep the implementation and packaging recipe,
+// but do not offer a download until native Windows GUI testing resumes.
 export const WINDOWS_DOWNLOAD: string | null = null
 
 // Enable each platform only after its artifact has been published.

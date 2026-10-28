@@ -19,6 +19,9 @@ concurrency:
 jobs:
   windows:
     name: Windows x64
+    # Windows releases are paused until native GUI verification is available.
+    # Keep the packaging recipe, but never publish an unverified zip.
+    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:

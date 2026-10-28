@@ -844,9 +844,10 @@
       "id": "windows-zip",
       "group": "install",
       "name": "Windows zip",
-      "says": "apparent.exe for Windows 10 (2004) and later on x64, unsigned, without automatic updates.",
+      "says": "Windows packaging remains in the source, but new Windows releases are paused.",
       "status": "stable@0.3.6",
       "platforms": ["windows"],
+      "note": "Windows releases are paused. Earlier unsigned zips are historical and not currently supported. Resume only after testing the native GUI on Windows.",
       "docs": ["README.md#windows", "docs/windows.md"]
     },
     {
@@ -916,6 +917,7 @@
       "says": "Windows 10 (2004) and later on x64: the same app, without the iPhone, export, Sparkle or the tab URL.",
       "status": "stable@0.3.6",
       "platforms": ["windows"],
+      "note": "Windows releases are paused; the implementation remains, but older builds are unsupported.",
       "docs": ["README.md#windows", "docs/windows.md"]
     },
     {

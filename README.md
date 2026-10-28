@@ -9,8 +9,9 @@ Press a shortcut (`⌥⇧S`) and Apparent starts recording the screen. Talk, cli
 No branded installers, Homebrew cask, or signed update have been published yet. Build from source
 in this checkout; see [macOS packaging](docs/release.md), [Windows](docs/windows.md), or
 [Linux](docs/linux.md). The Mac build needs an Apple silicon Mac on macOS 15 or later (live
-transcription and Liquid Glass need macOS 26). The Windows preview targets Windows 10 (2004)
-or later on x64. Linux builds target Ubuntu 24.04+ on x86_64 or ARM64.
+transcription and Liquid Glass need macOS 26). Windows releases are paused; its source remains,
+but new Windows builds are not distributed or supported. Linux builds target Ubuntu 24.04+ on
+x86_64 or ARM64.
 
 When a Linux AppImage is published, make it executable and launch it with:
 
@@ -540,9 +541,13 @@ X,Y,W,H --visible X,Y,W,H` prints where the card would dock (`below`, `inside`, 
 
 ## Windows
 
-Apparent runs on Windows 10 (2004) and later as the same app: the same capsule, picker, overlay,
-review window, welcome tour and Settings, from the same GPUI code. Only the parts the operating
-system owns differ:
+Windows releases are paused until we can test the native GUI. The Windows implementation and build
+instructions remain here for development, but no new Windows zip is published or supported. Older
+unsigned zips are historical artifacts, not a currently supported download.
+
+The Windows implementation targets Windows 10 (2004) and later as the same app: the same capsule,
+picker, overlay, review window, welcome tour and Settings, from the same GPUI code. Only the parts
+the operating system owns differ:
 
 | | macOS | Windows |
 |---|---|---|
@@ -580,9 +585,8 @@ system owns differ:
 - **Not on Windows:** the cabled iPhone (it needs AVFoundation's screen capture devices), video
   export, Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL
   (`/sdk.js` registrations still route).
-- **Releases:** manually dispatch `.github/workflows/release-windows.yml` on `main` with
-  `tag=v<version>` to build `Apparent-<version>-windows-x64.zip` and attach it to the release.
-  It isn't code-signed yet; signing and automatic updates are planned.
+- **Releases:** paused. `.github/workflows/release-windows.yml` retains the packaging recipe but
+  its job is disabled. Do not dispatch it or attach a Windows zip until native GUI testing resumes.
 
 Build with the MSVC toolchain, CMake and the Windows SDK (Visual Studio Build Tools with the C++
 workload). Release builds also need GPUI's shader compiler: set `GPUI_FXC_PATH` to the SDK's

@@ -182,6 +182,8 @@ struct PillUniforms {
     float4 shape_meta;     // radius, alpha, blur, is_glass (1.0 = glass, 0.0 = black)
     float4 ghost_rect;     // l, t, r, b in panel points
     float4 ghost_meta;     // radius, alpha, 0, 0
+    float4 surface_color;  // Paper or Carbon, shared with tile glyph palette
+    float4 border_color;
 };
 
 struct ScreenVertexOut {
@@ -244,7 +246,7 @@ fragment float4 pill_composite_fragment(
     }
 
     // 2. Optional Reduce Motion ghost silhouette (`shape.wgsl`).
-    float3 bg_rgb = float3(20.0 / 255.0, 20.0 / 255.0, 22.0 / 255.0);
+    float3 bg_rgb = u.surface_color.rgb;
     if (is_glass < 0.5 && u.has_ghost != 0u && u.ghost_meta.y > 0.001) {
         float g_sdf = rrect_sdf(p, u.ghost_rect, u.ghost_meta.x);
         float g_cov = clamp(0.5 - g_sdf * u.scale, 0.0, 1.0);
@@ -334,12 +336,8 @@ fragment float4 pill_composite_fragment(
                          * clamp(0.5 / u.scale - sdf, 0.0, 1.0)
                          * border_sharp;
         if (border_cov > 0.001) {
-            float3 border_rgb = u.completion_state == 2u
-                ? float3(245.0 / 255.0, 181.0 / 255.0, 68.0 / 255.0)
-                : u.completion_state == 1u
-                    ? float3(105.0 / 255.0, 216.0 / 255.0, 159.0 / 255.0)
-                    : float3(1.0, 1.0, 1.0);
-            float border_max_a = (u.completion_state != 0u) ? 0.42 : 0.12;
+            float3 border_rgb = u.border_color.rgb;
+            float border_max_a = 0.24;
             float ba = border_cov * border_max_a * shape_alpha;
             out = blend_over(out, float4(border_rgb * ba, ba));
         }

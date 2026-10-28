@@ -20,7 +20,7 @@ A destination someone stated outright, either the user's **choice** or the recor
 A session the user picked for this capture (`apparent send --session`, a chip on the pill).
 
 **Recorded destination**:
-The session a recording carries: a ApparentKit timeline's top-level `session`, or the destination an earlier routing wrote into `apparent.json`. The session that was merely on screen (`context.session`, OpenCode Desktop's viewed session) is a clue, not a recorded destination.
+The session a recording carries: a destination an earlier routing wrote into `scrawl.json`. The session that was merely on screen (`context.session`, OpenCode Desktop's viewed session) is a clue, not a recorded destination.
 
 **Clue**:
 An observed fact about a capture's surroundings that points at sessions: a page's registration, the folder of the process serving the tab, who published the file the tab shows, a terminal's folder, the session OpenCode Desktop showed, the captured app's name and the checkout it's built from, words in the window title or in what was said.

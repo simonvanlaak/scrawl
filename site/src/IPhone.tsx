@@ -64,32 +64,6 @@ function MirrorVisual() {
   )
 }
 
-function ApparentKitVisual() {
-  return (
-    <div className="ip-visual" aria-hidden>
-      <div className="ip-stack">
-        <Screen>
-          <svg className="ip-touch" viewBox="0 0 160 330" aria-hidden>
-            <defs>
-              <linearGradient id="ip-trail" x1="0" y1="1" x2="0" y2="0">
-                <stop offset="0" stopColor="#0a84ff" stopOpacity="0" />
-                <stop offset="1" stopColor="#0a84ff" stopOpacity="0.9" />
-              </linearGradient>
-            </defs>
-            <circle cx="104" cy="122" r="8" className="ip-tap" />
-            <circle cx="104" cy="122" r="16" className="ip-ring" />
-            <circle cx="104" cy="122" r="25" className="ip-ring faint" />
-            <path d="M54 262C58 226 60 200 66 168" stroke="url(#ip-trail)" strokeWidth="9" strokeLinecap="round" fill="none" />
-            <circle cx="66" cy="168" r="7" className="ip-tap" />
-            <circle cx="118" cy="300" r="7" className="ip-tap" />
-            <circle cx="118" cy="300" r="15" className="ip-ring long" />
-          </svg>
-        </Screen>
-      </div>
-    </div>
-  )
-}
-
 export function IPhoneSection() {
   return (
     <section id="iphone" className="iphone-section">
@@ -100,13 +74,6 @@ export function IPhoneSection() {
           <div className="feature-copy">
             <h3>Plug it into your Mac</h3>
             <p>Your iPhone’s screen appears in a window on the Mac, and you talk and draw over it as it records.</p>
-          </div>
-        </article>
-        <article className="feature-card">
-          <ApparentKitVisual />
-          <div className="feature-copy">
-            <h3>Record inside your own app</h3>
-            <p>Add ApparentKit to your iOS app to record on the phone itself, with every tap and swipe drawn on the frames.</p>
           </div>
         </article>
       </div>

@@ -86,13 +86,13 @@ pub struct ApparentBundle {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceInfo>,
-    /// App-defined values when the recording started (ApparentKit `Apparent.context`).
+    /// App-defined values in older in-app recordings (kept to read existing bundles).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub context: BTreeMap<String, String>,
     /// Changes to `context` during the recording.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_changes: Vec<ContextChange>,
-    /// Which screen the app said it was on, and when (ApparentKit `Apparent.screen`).
+    /// Screen names in older in-app recordings (kept to read existing bundles).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub screens: Vec<ScreenSpan>,
     /// Screen mode: the on-screen windows over time, front to back, stored only when they
@@ -252,7 +252,7 @@ pub struct ContextChange {
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub name: String,
-    /// `"mirror"` for a cabled capture through Apparent, `"apparentkit"` for an in-app SDK recording.
+    /// `"mirror"` for cabled capture; older bundles may contain `"apparentkit"`.
     pub capture: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -431,7 +431,7 @@ pub enum Shape {
     Tap,
     Pin,
     Mark,
-    /// A time-only "look here" marker (M in the mirror, or a ApparentKit marker).
+    /// A time-only "look here" marker (M in the mirror, or an older imported marker).
     Flag,
 }
 
@@ -514,7 +514,7 @@ pub enum InteractionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_title: Option<String>,
     },
-    /// Something the recorded app reported about itself (ApparentKit `events[]`).
+    /// An event reported by an older in-app recording.
     AppEvent {
         t: u64,
         label: String,
@@ -597,7 +597,7 @@ pub struct RgbaFrame {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
-    pub badge_top_right: bool,
+    pub badge_bottom_left: bool,
 }
 
 impl RgbaFrame {
@@ -608,7 +608,7 @@ impl RgbaFrame {
             width,
             height,
             rgba,
-            badge_top_right: false,
+            badge_bottom_left: false,
         }
     }
 }

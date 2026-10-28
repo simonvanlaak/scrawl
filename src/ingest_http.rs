@@ -1,7 +1,5 @@
-//! Connection admission and header deadlines for ingest. Upload bodies keep their existing
-//! per-read timeout, so a progressing upload can take longer than the header deadline. The small
-//! `/web/*` bodies get a total deadline instead (`read_body`), because those routes read their
-//! body before deciding whether to answer, while holding a connection slot.
+//! Connection admission and deadlines for the local browser SDK server.
+//! Bound headers and small request bodies while holding a connection slot.
 
 use std::io::{self, Read};
 use std::net::TcpStream;

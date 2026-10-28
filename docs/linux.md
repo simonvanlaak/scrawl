@@ -90,6 +90,35 @@ Not done: a click's position still comes from XWayland (see above; `j/cursorpos`
 
 Neither X11 nor GNOME's or KDE's screencasts let an app leave its windows out, so the pill and the ink are in `recording.mp4` and the keyframes. The ink is drawn again at the same place on the keyframes, so it doesn't double. The candidate frames used to pick keyframes paint over the pill (`linux::media::own_window_masks`), so its ticking clock never counts as activity.
 
+This is a capture-source limitation, not a missing mask in the keyframe selector. On
+X11, `ximagesrc` records the already-composited root image; GNOME's `RecordArea`
+and the ScreenCast portal return already-composited monitor streams. The portal's
+`SelectSources` can select a monitor or a window, but cannot subtract a set of
+windows from a monitor stream. The GStreamer `tee` sends the same source to the
+MP4 encoder and candidate-frame sink. `own_window_masks` changes only the
+candidate copies used to detect activity; full-quality keyframes are decoded
+again from the MP4, so they can contain the controls too. Hiding the picker,
+capsule or ink from that stream while keeping the user-opened whiteboard and
+click-through/⇧ ink behavior requires compositor-side exclusion or an equivalent
+source that supplies the uncovered pixels. Painting rectangles over the movie
+would destroy the content beneath the controls, not exclude the controls.
+
+Hyprland's `noscreenshare` rule draws **black rectangles** in place of matching
+windows, including when another window is above them; it is not a transparent
+exclusion mechanism and must not be applied to Apparent windows as a purported
+fix. A separately scoped fallback could record an explicitly selected window
+instead of the monitor where the backend supports it, but it would omit other
+windows such as the user's whiteboard and is not equivalent to Screen/Area
+capture. Keep the existing controls and mark this as unsupported until a
+specific compositor/backend can produce a movie that retains the uncovered
+screen and whiteboard; verify the actual MP4 and decoded full-quality frames,
+not just candidate-frame selection, before changing the feature map.
+
+Sources: [ScreenCast portal interface](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html)
+(`SelectSources` source types and options),
+[Hyprland `noscreenshare`](https://wiki.hypr.land/0.50.0/Configuring/Window-Rules/)
+(black rectangles).
+
 ## Movies, transcription, the rest
 
 - **Movies:** GStreamer (`linux::media`): the source above, `videorate` to 30 fps, the first encoder installed of `x264enc`, `openh264enc` and VA-API's, `mp4mux`. Candidate frames come off a `tee` through an `appsink`; `Recorder::finish` drains it, but a stalled candidate branch must not make Apparent delete an MP4 whose file sink has already reported EOS. An unfinished encoder or mux still fails after the eight-second deadline. Compositors send frames only when the screen changes, so the last frame is reused until a new one comes. Without an encoder Apparent records no movie and keeps sharper candidates instead.

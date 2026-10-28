@@ -248,6 +248,9 @@ impl Theme {
     fn selection(self) -> Rgba {
         rgb(0x302442)
     }
+    fn hover(self) -> Rgba {
+        rgb(if self.dark { 0x302442 } else { 0xc4a9e6 })
+    }
     fn control(self) -> Rgba {
         self.ink(if self.dark { 0.08 } else { 0.06 })
     }
@@ -430,7 +433,7 @@ fn open(request: Request, cx: &mut App) {
                     meter: None,
                     icon: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
-                        include_bytes!("../assets/app-icon.png").to_vec(),
+                        about_icon_bytes().to_vec(),
                     )),
                     wordmark: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
@@ -697,6 +700,14 @@ fn caption(theme: Theme, text: &str, error: bool) -> Div {
         .child(text.to_owned())
 }
 
+fn pane_top_inset(pane: Pane) -> f32 {
+    if pane == Pane::Recording { 0.0 } else { 20.0 }
+}
+
+fn about_icon_bytes() -> &'static [u8] {
+    include_bytes!("../assets/brand/apparent-a.png")
+}
+
 fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool) -> Stateful<Div> {
     div()
         .id(id.into())
@@ -713,7 +724,7 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme.text())
         .when(enabled, |d| {
-            d.cursor_pointer().hover(|s| s.bg(theme.selection()))
+            d.cursor_pointer().hover(|s| s.bg(theme.hover()))
         })
         .when(!enabled, |d| d.opacity(0.45))
         .child(title.to_owned())
@@ -925,6 +936,7 @@ impl SettingsWindow {
                     .min_h_0()
                     .overflow_y_scroll()
                     .px(px(INSET))
+                    .pt(px(pane_top_inset(self.pane)))
                     .flex()
                     .flex_col()
                     .child(body),
@@ -1821,7 +1833,7 @@ impl SettingsWindow {
                     .when(!enabled, |d| d.opacity(0.4))
                     .when(enabled, |d| {
                         d.cursor_pointer()
-                            .hover(|s| s.bg(theme.accent()).text_color(rgb(0xffffff)))
+                            .hover(|s| s.bg(theme.hover()))
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 cx.stop_propagation();
                                 view.menu = None;
@@ -1976,6 +1988,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn about_uses_the_lilac_a_mark_instead_of_the_brush_icon() {
+        let decoder = png::Decoder::new(std::io::Cursor::new(about_icon_bytes()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        assert_eq!(&pixels[..4], &[0xb7, 0xa5, 0xd8, 0xff]);
+        let center = (frame.width as usize * frame.height as usize / 2
+            + frame.width as usize / 2) * 4;
+        assert_eq!(&pixels[center..center + 4], &[0x02, 0x01, 0x02, 0xff]);
+    }
+
+    #[test]
+    fn first_settings_group_has_room_below_the_title_rule() {
+        for pane in [Pane::General, Pane::Storage, Pane::Permissions, Pane::Agents, Pane::About] {
+            assert_eq!(pane_top_inset(pane), 20.0, "{pane:?}");
+        }
+        // Recording already starts with a section header, which supplies its own spacing.
+        assert_eq!(pane_top_inset(Pane::Recording), 0.0);
+    }
+
+    #[test]
     fn settings_columns_fit_the_actual_narrow_viewport() {
         // XWayland can give the window less space than its requested size.
         for viewport in [440.0, 560.0, WIDTH] {
@@ -2028,5 +2062,29 @@ mod tests {
         ).unwrap();
         assert!(!finished.update_check.checking);
         assert_eq!(finished.update_check.message.as_deref(), Some("No new update is available."));
+    }
+
+    #[test]
+    fn hovered_control_text_contrasts_in_both_themes() {
+        fn luminance(color: Rgba) -> f32 {
+            let channel = |x: f32| {
+                if x <= 0.04045 {
+                    x / 12.92
+                } else {
+                    ((x + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+        }
+        for dark in [false, true] {
+            let theme = Theme { dark };
+            let a = luminance(theme.hover());
+            let b = luminance(theme.text());
+            let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+            assert!(
+                contrast >= 4.5,
+                "hovered control text must remain readable in both themes: {contrast}"
+            );
+        }
     }
 }

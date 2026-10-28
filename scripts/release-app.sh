@@ -31,6 +31,7 @@ chmod +x "${APP_BUNDLE}/Contents/MacOS/apparent" "${APP_BUNDLE}/Contents/MacOS/a
 cp -f "${REPO_DIR}/assets/Apparent.icns" "${APP_BUNDLE}/Contents/Resources/Apparent.icns"
 cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${APP_BUNDLE}/Contents/Resources/HostGrotesk-Variable.ttf"
 cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${APP_BUNDLE}/Contents/Resources/apparent-wordmark.png"
+cp -f "${REPO_DIR}/assets/brand/apparent-a.png" "${APP_BUNDLE}/Contents/Resources/apparent-a.png"
 
 /usr/bin/ditto "${SPARKLE_DIR}/Sparkle.framework" "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
 

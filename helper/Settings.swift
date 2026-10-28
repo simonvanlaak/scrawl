@@ -18,7 +18,7 @@ import SwiftUI
 //    "updates":true}
 //   {"type":"show","pane":"permissions"}  {"type":"request"|"open-settings","permission":"…"}
 //   {"type":"close"}
-// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"remotePhoneIngest","value":false},
+// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"videoExport","value":false},
 // {"action":"record-shortcut","kind":"record"}, {"action":"shortcut","kind":"record",
 // "keyCode":15,"modifiers":6144,"key":"r","reserved":false}, {"action":"cancel-shortcut"},
 // {"action":"reset-shortcut","kind":"paste"}, {"action":"clear-shortcut","kind":"paste"},
@@ -152,7 +152,6 @@ struct SettingsState: Decodable, Equatable {
   var version = "0.3.2"
   var login = SettingsLogin()
   var agentDemoVideo = true
-  var remotePhoneIngest = false
   var shortcuts: [SettingsShortcut] = [
     SettingsShortcut(),
     SettingsShortcut(kind: "paste", title: "Paste last capture", label: "⌥⇧V", key: "V", clearable: true),
@@ -934,11 +933,6 @@ struct SettingsView: View {
         SettingsRow(title: "Launch at login", enabled: state.login.available) {
           SettingsSwitch(on: state.login.on, enabled: state.login.available) { model.set("launchAtLogin", $0) }
         }
-        SettingsSeparator()
-        SettingsRow(title: "Allow phone uploads from other devices") {
-          SettingsSwitch(on: state.remotePhoneIngest) { model.set("remotePhoneIngest", $0) }
-        }
-        SettingsCaption(text: "Off keeps the ingest port on this computer only. Cabled iPhone capture still works.")
         SettingsSeparator()
         SettingsRow(title: "Lower other audio while recording") {
           SettingsSwitch(on: state.lowerPlayback) { model.set("lowerPlayback", $0) }

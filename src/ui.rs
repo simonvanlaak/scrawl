@@ -245,27 +245,47 @@ fn completed_label(inbox_count: usize, note: Option<&str>) -> String {
     }
 }
 
-fn no_words_warning(
-    transcript: &crate::model::TranscriptData,
-    audio_saved: bool,
-) -> bool {
-    audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletedAudioIssue {
+    NoAudio,
+    NoWords,
+    TranscriptionUnavailable,
 }
 
-fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ApparentBundle) -> bool {
-    no_words_warning(
-        &bundle.transcript,
-        bundle
-            .audio
-            .as_ref()
-            .is_some_and(|file| dir.join(file).is_file()),
-    )
+impl CompletedAudioIssue {
+    fn label(self) -> &'static str {
+        match self {
+            Self::NoAudio => "No audio",
+            Self::NoWords => "No words",
+            Self::TranscriptionUnavailable => "Transcript unavailable",
+        }
+    }
 }
 
-fn completed_status_label(inbox_count: usize, note: Option<&str>, no_words: bool) -> String {
+fn completed_audio_issue(source: Option<&str>, transcript: &crate::model::TranscriptData, audio_saved: bool) -> Option<CompletedAudioIssue> {
+    if source == Some("iphone") {
+        return None;
+    }
+    if !audio_saved {
+        return Some(CompletedAudioIssue::NoAudio);
+    }
+    if !transcript.text.trim().is_empty() {
+        return None;
+    }
+    if transcript.missing.is_some() || transcript.source == "none" {
+        return Some(CompletedAudioIssue::TranscriptionUnavailable);
+    }
+    Some(CompletedAudioIssue::NoWords)
+}
+
+fn bundle_audio_issue(dir: &std::path::Path, bundle: &ApparentBundle) -> Option<CompletedAudioIssue> {
+    completed_audio_issue(bundle.source.as_deref(), &bundle.transcript, bundle.has_microphone_samples(dir))
+}
+
+fn completed_status_label(inbox_count: usize, note: Option<&str>, issue: Option<CompletedAudioIssue>) -> String {
     let label = completed_label(inbox_count, note);
-    if no_words {
-        format!("{label} · No words")
+    if let Some(issue) = issue {
+        format!("{label} · {}", issue.label())
     } else {
         label
     }
@@ -392,7 +412,7 @@ fn island_content_width(
     chips: bool,
     warning: Option<InputWarning>,
     completed_note: Option<&str>,
-    no_words: bool,
+    completed_issue: Option<CompletedAudioIssue>,
     live_no_words: bool,
 ) -> f32 {
     let divider = 1.0 + 2.0 * DIVIDER_MX;
@@ -450,7 +470,7 @@ fn island_content_width(
                 + 8.0
                 + measure_text(
                     window,
-                    &completed_status_label(inbox_count, completed_note, no_words),
+                    &completed_status_label(inbox_count, completed_note, completed_issue),
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 )
@@ -773,6 +793,8 @@ pub struct ApparentCoordinator {
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
     review_bundle: Option<(PathBuf, ApparentBundle)>,
+    /// Read the WAV once when selecting a bundle, never on the capsule's animation tick.
+    review_audio_issue: Option<CompletedAudioIssue>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
@@ -863,9 +885,10 @@ impl ApparentCoordinator {
             display_rect: [0.0, 0.0, 1440.0, 900.0],
             paste_drag_start: None,
             recording_shortcut_key: false,
+            review_audio_issue: initial_bundle.as_ref().and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
-            selected_tab: ReviewTab::ContactSheet,
+            selected_tab: ReviewTab::Keyframes,
             selected_keyframe: 0,
             iphone: None,
             completed_dir: None,
@@ -892,18 +915,6 @@ impl ApparentCoordinator {
         }
     }
 
-    /// Records a capture received from elsewhere; returns the unhandled count.
-    fn add_to_inbox(&mut self, dir: &std::path::Path, bundle: &ApparentBundle) -> usize {
-        let source = bundle.source.as_deref().unwrap_or("iphone");
-        self.inbox.add(crate::inbox::InboxEntry::new(
-            dir,
-            bundle,
-            source,
-            crate::now_epoch_ms(),
-        ));
-        set_status_inbox_count(self.inbox.len());
-        self.inbox.len()
-    }
 
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
     fn mark_handled(&mut self, dir: &std::path::Path) {
@@ -1439,9 +1450,10 @@ impl ApparentCoordinator {
     }
 
     pub fn set_review_bundle(&mut self, bundle: (PathBuf, ApparentBundle), status: Option<String>) {
+        self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
-        self.selected_tab = ReviewTab::ContactSheet;
+        self.selected_tab = ReviewTab::Keyframes;
         self.selected_keyframe = 0;
     }
 
@@ -1913,12 +1925,10 @@ impl ApparentCoordinator {
         }
     }
 
-    fn completed_has_no_words(&self) -> bool {
+    fn completed_audio_issue(&self) -> Option<CompletedAudioIssue> {
         match (&self.completed_dir, &self.review_bundle) {
-            (Some(dir), Some((review_dir, bundle))) if dir == review_dir => {
-                bundle_no_words_warning(dir, bundle)
-            }
-            _ => false,
+            (Some(dir), Some((review_dir, _))) if dir == review_dir => self.review_audio_issue,
+            _ => None,
         }
     }
 
@@ -1951,15 +1961,14 @@ impl ApparentCoordinator {
                 has_iphone,
             },
             IslandPhase::Processing => Pres::Processing,
-            IslandPhase::Completed { inbox_count, .. } => Pres::Completed {
-                warning: self.completed_has_no_words(),
-                label: completed_status_label(
-                    inbox_count,
-                    self.completed_note.as_deref(),
-                    self.completed_has_no_words(),
-                ),
-                routes: Vec::new(),
-            },
+            IslandPhase::Completed { inbox_count, .. } => {
+                let issue = self.completed_audio_issue();
+                Pres::Completed {
+                    warning: issue.is_some(),
+                    label: completed_status_label(inbox_count, self.completed_note.as_deref(), issue),
+                    routes: Vec::new(),
+                }
+            }
         };
         PillSnapshot {
             pres,
@@ -2968,7 +2977,8 @@ impl Render for HudPillWindow {
         let clock = format_clock(elapsed_ms);
         let has_iphone = coord.iphone.is_some();
         let completed_note = coord.completed_note.clone();
-        let completed_no_words = coord.completed_has_no_words();
+        let completed_issue = coord.completed_audio_issue();
+        let completed_warning = completed_issue.is_some();
         let live_no_words = coord.recording_has_no_words() && !coord.reveal.is_open();
         // The Recording capsule's trailing group: switch chips or controls, and the swap between.
         let chips = if matches!(phase, IslandPhase::Recording) {
@@ -2996,7 +3006,7 @@ impl Render for HudPillWindow {
             chips,
             mic_warning,
             completed_note.as_deref(),
-            completed_no_words,
+            completed_issue,
             live_no_words,
         );
         let snap_initial_width =
@@ -3282,19 +3292,19 @@ impl Render for HudPillWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(rgba(if completed_no_words {
+                            .bg(rgba(if completed_warning {
                                 0xf5a6232e
                             } else {
                                 0x34c7592e
                             }))
-                            .text_color(rgb(if completed_no_words {
+                            .text_color(rgb(if completed_warning {
                                 0xf5b544
                             } else {
                                 POSITIVE_COLOR
                             }))
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .child(if completed_no_words { "!" } else { "✓" }),
+                            .child(if completed_warning { "!" } else { "✓" }),
                     )
                     .child(
                         div()
@@ -3304,7 +3314,7 @@ impl Render for HudPillWindow {
                             .child(completed_status_label(
                                 inbox_count,
                                 completed_note.as_deref(),
-                                completed_no_words,
+                                completed_issue,
                             )),
                     ),
             )
@@ -3594,7 +3604,7 @@ impl Render for HudPillWindow {
                     .when(!has_shell, |d| {
                         d.bg(rgba(0x141416f5))
                             .border_1()
-                            .border_color(if is_completed && completed_no_words {
+                            .border_color(if is_completed && completed_warning {
                                 rgba(0xf5b54480)
                             } else if is_completed {
                                 rgba(0x69d89f4d)
@@ -4239,6 +4249,34 @@ fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<St
         .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
 }
 
+/// Pair the frame with its words; stack them when the window cannot fit both.
+fn review_workspace_widths(window_width: f32) -> (f32, f32) {
+    if window_width < 800.0 {
+        ((window_width - 40.0).max(1.0), window_width)
+    } else {
+        let words = (window_width * 0.4).clamp(320.0, 520.0);
+        ((window_width - words - 40.0).max(1.0), words)
+    }
+}
+
+fn review_frame_speech<'a>(frames: &[Option<&'a str>], selected: usize) -> &'a str {
+    frames
+        .get(selected)
+        .and_then(|said| *said)
+        .filter(|said| !said.trim().is_empty())
+        .unwrap_or("No words at this moment.")
+}
+
+fn review_speech_status(no_words: bool, missing_reason: Option<&str>) -> Option<String> {
+    if let Some(reason) = missing_reason {
+        Some(format!("Transcription unavailable: {reason}"))
+    } else if no_words {
+        Some("No words transcribed. Your audio was saved—check it or try again closer to the microphone.".into())
+    } else {
+        None
+    }
+}
+
 /// A point dragged past the picker's display (global points), pulled back onto its edge: an
 /// area belongs to the display the drag started on, which the picker stays on while dragging.
 fn clamp_point([x, y]: [f32; 2], [dx, dy, dw, dh]: [f32; 4]) -> [f32; 2] {
@@ -4351,9 +4389,14 @@ impl BundleReviewWindow {
 
 impl Render for BundleReviewWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stage_w = (f32::from(window.bounds().size.width) - 320.0 - 44.0).max(320.0);
+        let (stage_w, words_w) =
+            review_workspace_widths(f32::from(window.bounds().size.width));
+        let narrow = f32::from(window.bounds().size.width) < 800.0;
+        let compact = f32::from(window.bounds().size.width) < 600.0;
+        let narrow_stage_height = (f32::from(window.bounds().size.height) * 0.46).max(220.0);
         let coord_read = self.coordinator.read(cx);
         let state = coord_read.review_bundle.clone();
+        let audio_issue = coord_read.review_audio_issue;
         let status = coord_read.review_status.clone();
         let tab = coord_read.selected_tab;
         let selected_kf = coord_read.selected_keyframe;
@@ -4435,10 +4478,57 @@ impl Render for BundleReviewWindow {
             .and_then(|_| review_neighbor(&self.history, &dir, true))
             .cloned();
         let history_count = self.history.len();
+        let frame_rows = bundle.keyframes.iter().enumerate().map(|(idx, frame)| {
+            let c_select = self.coordinator.clone();
+            div()
+                .id(("review-frame-row", idx))
+                .w_full()
+                .p_3()
+                .rounded(px(8.0))
+                .bg(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                    SURFACE_BG
+                } else {
+                    SIDEBAR_BG
+                }))
+                .border_1()
+                .border_color(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                    ACCENT_COLOR
+                } else {
+                    LINE_COLOR
+                }))
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    c_select.update(cx, |coord, cx| {
+                        coord.selected_tab = ReviewTab::Keyframes;
+                        coord.selected_keyframe = idx;
+                        cx.notify();
+                    });
+                })
+                .child(format!("{}  ·  {}", frame.index, format_clock(frame.t)))
+                .child(
+                    div()
+                        .mt_1()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_COLOR))
+                        .child(frame.event.clone()),
+                )
+        }).collect::<Vec<_>>();
+        let frame_words = bundle.keyframes.iter().map(|kf| kf.said.as_deref()).collect::<Vec<_>>();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
-        let no_words = bundle_no_words_warning(&dir, &bundle);
-        let missing_reason = bundle.transcript.missing.as_ref()
-            .filter(|_| bundle.transcript.text.trim().is_empty());
+        let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
+        let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
+        let missing_reason = if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) {
+            bundle.transcript.missing.as_ref()
+        } else {
+            None
+        };
+        let speech_status = if no_audio {
+            Some("No microphone audio was saved. The screen capture is still available—check the microphone and try again.".into())
+        } else if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) && missing_reason.is_none() {
+            Some("Transcription unavailable: recognition did not run".into())
+        } else {
+            review_speech_status(no_words, missing_reason.map(|missing| missing.reason.as_str()))
+        };
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
             (Some(app), Some(win)) if !win.is_empty() && win != app => {
@@ -4488,6 +4578,21 @@ impl Render for BundleReviewWindow {
                     }
                     if coord.handle_app_key(&event.keystroke, cx) {
                         return true;
+                    }
+                    if !mods.platform && !mods.control && !mods.alt && !mods.shift
+                        && coord.selected_tab == ReviewTab::Keyframes
+                    {
+                        let count = coord.review_bundle.as_ref().map_or(0, |(_, b)| b.keyframes.len());
+                        let next = match key {
+                            "left" => coord.selected_keyframe.checked_sub(1),
+                            "right" => coord.selected_keyframe.checked_add(1).filter(|&i| i < count),
+                            _ => None,
+                        };
+                        if let Some(next) = next {
+                            coord.selected_keyframe = next;
+                            cx.notify();
+                            return true;
+                        }
                     }
                     if let Some(cfg) = shortcut_from_key_and_mods(
                         key,
@@ -4542,50 +4647,26 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(
-                                // Segmented control: R_outer 8 = R_tab 6 + border 1 + pad 1.
+                            .when(!compact, |header| header.child(
                                 div()
                                     .flex_none()
-                                    .h(px(28.0))
-                                    .p(px(1.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .rounded(px(8.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .border_1()
-                                    .border_color(rgb(LINE_COLOR))
-                                    .child(
-                                        tab_chip(
-                                            "tab-contact-sheet",
-                                            "Contact Sheet",
-                                            tab == ReviewTab::ContactSheet,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_sheet.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::ContactSheet;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        tab_chip(
-                                            "tab-keyframes",
-                                            "Keyframes",
-                                            tab == ReviewTab::Keyframes,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_frames.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::Keyframes;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    ),
-                            )
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(14.0))
+                                    .child("Capture review"),
+                            ))
+                            .when(!compact, |header| header.child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(MUTED_COLOR))
+                                    .child(format!(
+                                        "{} · {} · {} frames",
+                                        target_label,
+                                        format_clock(bundle.duration_ms),
+                                        bundle.keyframes.len(),
+                                    )),
+                            ))
                             .child(
                                 div()
                                     .flex_none()
@@ -4594,41 +4675,23 @@ impl Render for BundleReviewWindow {
                                     .gap_2()
                                     .when_some(newer, |d, path| {
                                         d.child(
-                                            action_button("review-newer", "← Newer", false)
+                                            action_button("review-newer", if compact { "←" } else { "← Newer" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_newer, &path, cx);
                                                 }),
                                         )
                                     })
-                                    .when_some(history_position, |d, index| {
+                                    .when_some(history_position.filter(|_| !compact), |d, index| {
                                         d.child(format!("{} / {}", index + 1, history_count))
                                     })
                                     .when_some(older, |d, path| {
                                         d.child(
-                                            action_button("review-older", "Older →", false)
+                                            action_button("review-older", if compact { "→" } else { "Older →" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_older, &path, cx);
                                                 }),
                                         )
                                     }),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED_COLOR))
-                                    .child(format!(
-                                        "{} · {} · {} {}",
-                                        target_label,
-                                        format_clock(bundle.duration_ms),
-                                        bundle.keyframes.len(),
-                                        if bundle.keyframes.len() == 1 {
-                                            "keyframe"
-                                        } else {
-                                            "keyframes"
-                                        }
-                                    )),
                             ),
                     )
                     .child(
@@ -4637,43 +4700,6 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                hint_button(
-                                    "btn-shortcut",
-                                    if recording_shortcut {
-                                        "Press shortcut…"
-                                    } else {
-                                        "Shortcut"
-                                    },
-                                    (!recording_shortcut).then_some(shortcut_label),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    c_shortcut.update(cx, |coord, cx| {
-                                        coord.recording_shortcut_key =
-                                            !coord.recording_shortcut_key;
-                                        cx.notify();
-                                    });
-                                }),
-                            )
-                            .child(
-                                action_button(
-                                    "btn-reveal",
-                                    &format!("Show in {}", platform::FILE_MANAGER),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    let res = crate::handoff::open_path(&send_dir);
-                                    let manager = platform::FILE_MANAGER;
-                                    c_send.update(cx, |coord, cx| {
-                                        coord.review_status = Some(match res {
-                                            Ok(()) => format!("Opened in {manager}"),
-                                            Err(e) => format!("Show in {manager} failed: {e}"),
-                                        });
-                                        cx.notify();
-                                    });
-                                }),
-                            )
                             .child(
                                 action_button(
                                     "btn-copy",
@@ -4701,6 +4727,85 @@ impl Render for BundleReviewWindow {
                     )
                     .children(platform::caption_buttons()),
             )
+            .child(
+                div()
+                    .h(px(if compact { 76.0 } else { 44.0 }))
+                    .flex_none()
+                    .px_5()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .when(compact, |toolbar| toolbar.flex_col().items_start().justify_center().gap_1())
+                    .border_b_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                tab_chip(
+                                    "tab-contact-sheet",
+                                    "Contact Sheet",
+                                    tab == ReviewTab::ContactSheet,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_tab_sheet.update(cx, |coord, cx| {
+                                        coord.selected_tab = ReviewTab::ContactSheet;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                tab_chip("tab-keyframes", "Keyframes", tab == ReviewTab::Keyframes)
+                                    .on_click(move |_, _, cx| {
+                                        c_tab_frames.update(cx, |coord, cx| {
+                                            coord.selected_tab = ReviewTab::Keyframes;
+                                            cx.notify();
+                                        });
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                hint_button(
+                                    "btn-shortcut",
+                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    (!recording_shortcut && !compact).then_some(shortcut_label),
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_shortcut.update(cx, |coord, cx| {
+                                        coord.recording_shortcut_key = !coord.recording_shortcut_key;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                action_button(
+                                    "btn-reveal",
+                                    &if compact { "Show Files".to_owned() } else { format!("Show in {}", platform::FILE_MANAGER) },
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    let res = crate::handoff::open_path(&send_dir);
+                                    let manager = platform::FILE_MANAGER;
+                                    c_send.update(cx, |coord, cx| {
+                                        coord.review_status = Some(match res {
+                                            Ok(()) => format!("Opened in {manager}"),
+                                            Err(e) => format!("Show in {manager} failed: {e}"),
+                                        });
+                                        cx.notify();
+                                    });
+                                }),
+                            ),
+                    ),
+            )
             .when_some(review_notice, |root, message| {
                 root.child(
                     div()
@@ -4712,17 +4817,18 @@ impl Render for BundleReviewWindow {
                 )
             })
             .child(
-                // Main Workspace: Stage on Left + Timeline Sidebar on Right
+                // Keep the selected frame and its words together, even in a narrow window.
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .when(narrow, |workspace| workspace.flex_col())
                     .child(
                         div()
                             .id("review-stage-scroll")
-                            .flex_1()
                             .min_w_0()
-                            .h_full()
+                            .when(narrow, |stage| stage.h(px(narrow_stage_height)).flex_none())
+                            .when(!narrow, |stage| stage.flex_1().h_full())
                             .overflow_y_scroll()
                             .overflow_x_hidden()
                             .p_5()
@@ -4736,20 +4842,53 @@ impl Render for BundleReviewWindow {
                     .child(
                         div()
                             .id("review-timeline-sidebar")
-                            .w(px(320.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
+                            .when(narrow, |sidebar| sidebar.w_full().flex_1().min_h_0())
+                            .when(!narrow, |sidebar| sidebar.w(px(words_w)).h_full().flex_none())
                             .overflow_x_hidden()
                             .bg(rgb(SIDEBAR_BG))
-                            .border_l_1()
+                            .when(narrow, |sidebar| sidebar.border_t_1())
+                            .when(!narrow, |sidebar| sidebar.border_l_1())
                             .border_color(rgb(LINE_COLOR))
                             .px_4()
                             .py(px(18.0))
                             .flex()
                             .flex_col()
-                            .child(sidebar_heading("Transcript"))
-                            .when(no_words, |sidebar| {
+                            .child(sidebar_heading(if tab == ReviewTab::Keyframes {
+                                "WORDS AT THIS MOMENT"
+                            } else {
+                                "FULL TRANSCRIPT"
+                            }))
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.child(
+                                    div()
+                                        .id("review-selected-speech")
+                                        .p_4()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
+                                        .rounded(px(8.0))
+                                        .bg(rgb(SURFACE_BG))
+                                        .border_1()
+                                        .border_color(rgb(LINE_COLOR))
+                                        .text_size(px(15.0))
+                                        .line_height(relative(1.5))
+                                        .child(review_frame_speech(&frame_words, selected_kf).to_owned()),
+                                )
+                            })
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.when_some(speech_status, |sidebar, message| {
+                                    sidebar.child(
+                                        div()
+                                            .mt_3()
+                                            .p_3()
+                                            .rounded(px(8.0))
+                                            .bg(rgba(0xf5a62320))
+                                            .text_color(rgb(0xf5b544))
+                                            .text_size(px(13.0))
+                                            .child(message),
+                                    )
+                                })
+                            })
+                            .when(tab == ReviewTab::ContactSheet && no_words, |sidebar| {
                                 sidebar.child(
                                     div()
                                         .mt_3()
@@ -4761,10 +4900,21 @@ impl Render for BundleReviewWindow {
                                         .child("No words transcribed. Your audio was saved—check it or try again closer to the microphone."),
                                 )
                             })
-                            .when(!no_words, |sidebar| {
+                            .when(tab == ReviewTab::ContactSheet && no_audio, |sidebar| {
+                                sidebar.child(
+                                    div().mt_3().p_3().rounded(px(8.0))
+                                        .bg(rgba(0xf5a62320)).text_color(rgb(0xf5b544))
+                                        .text_size(px(13.0))
+                                        .child("No microphone audio was saved. The screen capture is still available—check the microphone and try again."),
+                                )
+                            })
+                            .when(tab == ReviewTab::ContactSheet && !no_words && (!no_audio || !bundle.transcript.text.trim().is_empty()), |sidebar| {
                                 sidebar.child(
                                     div()
+                                        .id("review-full-transcript")
                                         .p_3()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
                                         .rounded(px(8.0))
                                         .bg(rgb(SURFACE_BG))
                                         .border_1()
@@ -4777,7 +4927,11 @@ impl Render for BundleReviewWindow {
                                                 d.text_color(rgb(MUTED_COLOR)).child(
                                                     missing_reason
                                                         .map(|missing| format!("Transcription unavailable: {}", missing.reason))
-                                                        .unwrap_or_else(|| "No speech".into()),
+                                                        .unwrap_or_else(|| match audio_issue {
+                                                            Some(CompletedAudioIssue::NoAudio) => "No audio",
+                                                            Some(CompletedAudioIssue::TranscriptionUnavailable) => "Transcription unavailable: recognition did not run",
+                                                            _ => "No speech",
+                                                        }.into()),
                                                 )
                                             } else {
                                                 d.text_color(rgb(TEXT_COLOR)).child(format!("“{text}”"))
@@ -4785,14 +4939,23 @@ impl Render for BundleReviewWindow {
                                         }),
                                 )
                             })
-                            .child(div().mt(px(20.0)).child(sidebar_heading("Timeline")))
                             .child(
-                                div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
-                                    timeline
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(|(i, line)| timeline_row(i, &line)),
-                                ),
+                                div()
+                                    .id("review-evidence-list")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("FRAMES")))
+                                    .child(div().flex().flex_col().gap_2().children(frame_rows))
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("TIMELINE")))
+                                    .child(
+                                        div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
+                                            timeline
+                                                .into_iter()
+                                                .enumerate()
+                                                .map(|(i, line)| timeline_row(i, &line)),
+                                        ),
+                                    ),
                             ),
                     ),
             )
@@ -4831,91 +4994,39 @@ impl BundleReviewWindow {
         selected_kf: usize,
         stage_w: f32,
     ) -> AnyElement {
-        // Card: border 1 + pad 8 around the frame, so R_card 12 = R_frame 3 + 9.
-        let card_img_w = (stage_w - 18.0).max(240.0);
-        let cards = bundle
-            .keyframes
-            .iter()
-            .enumerate()
-            .map(|(idx, kf)| {
-                let is_selected = idx == selected_kf;
-                let frame_img = self.cached_frames.get(idx).and_then(Clone::clone);
-                let c_select = self.coordinator.clone();
-                div()
-                    .id(("kf-card", idx))
-                    .p(px(8.0))
-                    .rounded(px(12.0))
-                    .bg(rgb(SURFACE_BG))
-                    .border_1()
-                    .border_color(if is_selected {
-                        rgb(ACCENT_COLOR)
-                    } else {
-                        rgb(LINE_COLOR)
-                    })
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .cursor_pointer()
-                    .when(!is_selected, |d| d.hover(|s| s.border_color(rgb(0x3a3a3a))))
-                    .on_click(move |_, _, cx| {
-                        c_select.update(cx, |coord, cx| {
-                            coord.selected_keyframe = idx;
-                            cx.notify();
-                        });
-                    })
-                    .when_some(frame_img, |d, image| {
-                        d.child(img(image).w(px(card_img_w)).rounded(px(3.0)))
-                    })
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .pb(px(2.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(12.5))
-                            .child(
-                                div()
-                                    .h(px(20.0))
-                                    .px(px(7.0))
-                                    .flex()
-                                    .flex_none()
-                                    .items_center()
-                                    .rounded(px(10.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(TEXT_COLOR))
-                                    .child(format!("#{} · {}", kf.index, format_clock(kf.t))),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(kf.event.clone()),
-                            ),
-                    )
-                    .when_some(kf.said.clone(), |d, said| {
-                        d.child(
-                            div()
-                                .px(px(4.0))
-                                .pb(px(2.0))
-                                .text_size(px(12.0))
-                                .line_height(relative(1.4))
-                                .text_color(rgb(MUTED_COLOR))
-                                .child(format!("“{said}”")),
-                        )
-                    })
-            })
-            .collect::<Vec<_>>();
-
+        let Some(frame) = bundle.keyframes.get(selected_kf) else {
+            return div().p_6().child("No frames in this capture.").into_any_element();
+        };
+        let image = self.cached_frames.get(selected_kf).and_then(Clone::clone);
         div()
             .w_full()
             .flex()
             .flex_col()
-            .gap_4()
-            .children(cards)
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_COLOR))
+                    .child(format!("Frame {} / {}", selected_kf + 1, bundle.keyframes.len()))
+                    .child(format_clock(frame.t))
+                    .child(frame.event.clone()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .rounded(px(10.0))
+                    .bg(rgb(SURFACE_BG))
+                    .border_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .when_some(image, |d, image| {
+                        d.child(img(image).w(px(stage_w)).rounded(px(9.0)))
+                    }),
+            )
             .into_any_element()
     }
 }
@@ -5449,7 +5560,7 @@ pub fn run_app(
         cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys))
             .detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
-        crate::phone::start_ingest_server(ui_sender.clone());
+        crate::web::start_server();
         let telemetry = SharedCaptureTelemetry::new(ui_sender);
         install_global_hotkeys(&telemetry);
         start_global_input_tap(Arc::clone(&telemetry));
@@ -5586,7 +5697,6 @@ pub fn run_app(
                         }
                     }
 
-                    let mut should_open_pill = false;
                     while let Ok(ev) = ui_receiver.try_recv() {
                         loop_coord.update(cx, |coord, cx| match ev {
                             LiveOverlayEvent::CaptureShortcut => coord.press_shortcut(cx),
@@ -5607,29 +5717,7 @@ pub fn run_app(
                                 coord.onboarding_event(event, cx)
                             }
                             LiveOverlayEvent::Settings(event) => coord.settings_event(event, cx),
-                            LiveOverlayEvent::IngestedBundle {
-                                dir,
-                                bundle,
-                                status,
-                            } => {
-                                let frame_count = bundle.keyframes.len();
-                                let duration_ms = bundle.duration_ms;
-                                let inbox_count = coord.add_to_inbox(&dir, &bundle);
-                                coord.completed_dir = Some(dir.clone());
-                                coord.set_review_bundle((dir, *bundle), status);
-                                coord.set_island_phase(IslandPhase::Completed {
-                                    finished_at: Instant::now(),
-                                    frame_count,
-                                    duration_ms,
-                                    inbox_count,
-                                });
-                                should_open_pill = true;
-                                cx.notify();
-                            }
                         });
-                    }
-                    if should_open_pill {
-                        ensure_hud_pill_open(&loop_coord, cx);
                     }
 
                     motion::poll_tune();
@@ -5688,15 +5776,16 @@ mod tests {
     }
 
     #[test]
-    fn no_words_warning_requires_saved_audio_and_successful_empty_recognition() {
+    fn completed_capture_distinguishes_missing_audio_from_no_words_and_model_failure() {
         let empty = crate::model::TranscriptData::default();
-        assert!(no_words_warning(&empty, true));
-        assert!(!no_words_warning(&empty, false));
         let spoken = crate::model::TranscriptData {
             text: "hello".into(),
             ..Default::default()
         };
-        assert!(!no_words_warning(&spoken, true));
+        let skipped = crate::model::TranscriptData {
+            source: "none".into(),
+            ..Default::default()
+        };
         let unavailable = crate::model::TranscriptData {
             missing: Some(crate::model::MissingTranscript {
                 reason: "Model unavailable".into(),
@@ -5704,7 +5793,19 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!no_words_warning(&unavailable, true));
+        assert_eq!(completed_audio_issue(None, &empty, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &empty, true), Some(CompletedAudioIssue::NoWords));
+        assert_eq!(completed_audio_issue(None, &unavailable, true), Some(CompletedAudioIssue::TranscriptionUnavailable));
+        assert_eq!(completed_audio_issue(None, &unavailable, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &skipped, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &skipped, true), Some(CompletedAudioIssue::TranscriptionUnavailable));
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, false), None);
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, true), None);
+        assert_eq!(completed_audio_issue(None, &spoken, true), None);
+        assert_eq!(completed_audio_issue(None, &spoken, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoAudio)), "Copied · No audio");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)), "Copied · No words");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::TranscriptionUnavailable)), "Copied · Transcript unavailable");
     }
 
     #[test]
@@ -5734,6 +5835,27 @@ mod tests {
             review_notice(Some("scan failed"), Some("Ready")),
             Some("Could not read captures: scan failed".to_owned())
         );
+    }
+
+    #[test]
+    fn review_workspace_gives_words_reading_room_without_cropping_the_stage() {
+        let (stage, words) = review_workspace_widths(1120.0);
+        assert!(words >= 420.0, "words panel too narrow: {words}");
+        assert!(stage >= 600.0, "image stage too narrow: {stage}");
+        let (stage, words) = review_workspace_widths(760.0);
+        assert_eq!((stage, words), (720.0, 760.0));
+        let (stage, words) = review_workspace_widths(320.0);
+        assert_eq!((stage, words), (280.0, 320.0));
+    }
+
+    #[test]
+    fn selected_frame_speech_follows_selection_not_the_whole_capture() {
+        let frames = [Some("first moment"), Some("second moment")];
+        assert_eq!(review_frame_speech(&frames, 1), "second moment");
+        assert_eq!(review_frame_speech(&frames, 2), "No words at this moment.");
+        assert_eq!(review_speech_status(false, None), None);
+        assert!(review_speech_status(true, None).unwrap().contains("audio was saved"));
+        assert_eq!(review_speech_status(false, Some("speech failed")), Some("Transcription unavailable: speech failed".into()));
     }
 
     #[test]
@@ -6017,11 +6139,11 @@ mod tests {
         assert_eq!(completed_label(0, Some("Sent to APPARENT")), "Sent to APPARENT");
         assert_eq!(completed_label(1, Some("Sent to APPARENT")), "From iPhone");
         assert_eq!(completed_label(3, None), "3 from iPhone");
-        assert_eq!(completed_status_label(0, None, true), "Copied · No words");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)), "Copied · No words");
         assert_eq!(
-            completed_status_label(0, Some("Sent to APPARENT"), true),
+            completed_status_label(0, Some("Sent to APPARENT"), Some(CompletedAudioIssue::NoWords)),
             "Sent to APPARENT · No words"
         );
-        assert_eq!(completed_status_label(0, None, false), "Copied");
+        assert_eq!(completed_status_label(0, None, None), "Copied");
     }
 }

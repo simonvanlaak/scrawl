@@ -1543,7 +1543,7 @@ mod tests {
             width: w as u32,
             height: h as u32,
             rgba,
-            badge_top_right: false,
+            badge_bottom_left: false,
         }
     }
 

@@ -186,7 +186,7 @@ fn feature_map() -> Map {
 fn the_scanner_sees_known_keys_and_flags() {
     let sources = sources();
     let keys = config_keys(&sources);
-    for key in ["autoSend", "shortcuts", "retention", "transcribeCommand", "onboarding", "usbApps"] {
+    for key in ["autoSend", "shortcuts", "retention", "transcribeCommand", "onboarding"] {
         assert!(keys.contains(key), "scanner missed config key {key}: {keys:?}");
     }
     let flags = experiments(&sources).unwrap();

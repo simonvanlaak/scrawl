@@ -21,7 +21,7 @@ const KIND_MEANS: Record<Status["kind"], string> = {
   review: "an open pull request",
 }
 
-const PLATFORM_LABEL: Record<Platform, string> = { mac: "Mac", windows: "Windows", linux: "Linux" }
+const PLATFORM_LABEL: Record<Platform, string> = { mac: "Mac", linux: "Linux" }
 
 const statusOf = (f: Feature) => parseStatus(f.status)
 

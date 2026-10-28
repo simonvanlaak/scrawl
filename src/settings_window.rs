@@ -125,6 +125,23 @@ struct Transcriber {
     speech: Speech,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+struct Microphone {
+    selected: String,
+    value: String,
+    options: Vec<MicrophoneOption>,
+    note: Option<String>,
+    meter: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct MicrophoneOption {
+    id: String,
+    title: String,
+    enabled: bool,
+}
+
 /// `speech_model::Status`: the local model's download.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -166,6 +183,7 @@ struct ViewState {
     agent_demo_video: bool,
     shortcuts: Vec<Shortcut>,
     transcriber: Transcriber,
+    microphone: Microphone,
     video_export: bool,
     retention: Retention,
     captures_size: Option<String>,
@@ -312,6 +330,7 @@ pub struct SettingsWindow {
     /// Modifiers held while a recorder listens, so their keycaps light as they go down.
     live: gpui::Modifiers,
     menu: Option<Menu>,
+    meter: Option<(String, crate::mic::Meter)>,
     icon: Arc<Image>,
     wordmark: Arc<Image>,
     /// The skill command was just copied (the button says Copied for a moment).
@@ -389,7 +408,7 @@ fn open(request: Request, cx: &mut App) {
                                     window.remove_window();
                                     return false;
                                 }
-                                if changed {
+                                if changed || view.pane == Pane::Recording && view.meter.is_some() {
                                     cx.notify();
                                 }
                                 true
@@ -408,6 +427,7 @@ fn open(request: Request, cx: &mut App) {
                     focus,
                     live: gpui::Modifiers::default(),
                     menu: None,
+                    meter: None,
                     icon: Arc::new(Image::from_bytes(
                         ImageFormat::Png,
                         include_bytes!("../assets/app-icon.png").to_vec(),
@@ -436,6 +456,7 @@ impl SettingsWindow {
                         self.live = gpui::Modifiers::default();
                     }
                     self.state = Some(next);
+                    self.sync_meter();
                 }
             }
             "show" => {
@@ -444,6 +465,7 @@ impl SettingsWindow {
                     .and_then(|p| serde_json::from_value(p.into()).ok())
                 {
                     self.pane = pane;
+                    self.sync_meter();
                 }
                 window.activate_window();
             }
@@ -785,6 +807,16 @@ fn keycap(theme: Theme, glyph: &str, name: Option<&str>, lit: bool, center: bool
 // MARK: Panes
 
 impl SettingsWindow {
+    fn sync_meter(&mut self) {
+        let wanted = (self.pane == Pane::Recording)
+            .then(|| self.state.as_ref()?.microphone.meter.clone())
+            .flatten();
+        if self.meter.as_ref().map(|(id, _)| id) == wanted.as_ref() {
+            return;
+        }
+        self.meter = wanted.map(|id| (id.clone(), crate::mic::Meter::start(id)));
+    }
+
     fn sidebar(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
         div()
             .flex_none()
@@ -839,6 +871,7 @@ impl SettingsWindow {
                 }
                 view.menu = None;
                 view.pane = pane;
+                view.sync_meter();
                 cx.notify();
             }))
     }
@@ -884,7 +917,17 @@ impl SettingsWindow {
                     .child(drag_strip("settings-drag-title").absolute().top_0().left_0()),
             )
             .child(div().w_full().h(px(1.0)).bg(theme.group_line()))
-            .child(div().w_full().px(px(INSET)).flex().flex_col().child(body))
+            .child(
+                div()
+                    .id("settings-pane-scroll")
+                    .w_full()
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .px(px(INSET))
+                    .flex()
+                    .flex_col()
+                    .child(body),
+            )
     }
 
     fn general(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
@@ -1071,6 +1114,14 @@ impl SettingsWindow {
     }
 
     fn recording_pane(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
+        let mic = &state.microphone;
+        let inputs: Vec<(String, String, bool)> = mic
+            .options
+            .iter()
+            .map(|option| (option.id.clone(), option.title.clone(), option.enabled))
+            .collect();
+        let selected = mic.selected.clone();
+        let level = self.meter.as_ref().map_or(0.0, |(_, meter)| meter.level());
         let t = &state.transcriber;
         let hex = t.engine == "hex";
         let command = t.engine == "command";
@@ -1181,6 +1232,26 @@ impl SettingsWindow {
         div()
             .flex()
             .flex_col()
+            .child(header(theme, "Microphone"))
+            .child(group(theme, vec![row(
+                theme, "Input", true,
+                popup(theme, "settings-microphone", &mic.value).on_click(cx.listener(
+                    move |view, event: &ClickEvent, _, cx| {
+                        view.open_menu("microphone", inputs.clone(), Some(selected.clone()), event);
+                        cx.notify();
+                    },
+                )),
+            ).into_any_element()]))
+            .when_some(mic.note.clone(), |pane, note| pane.child(caption(theme, &note, true)))
+            .when(mic.meter.is_some(), |pane| pane.child(
+                div().mx(px(8.0)).mt(px(8.0)).w(px(260.0)).h(px(7.0))
+                    .rounded_full().bg(theme.track()).child(
+                        div().w(px(260.0 * level.clamp(0.0, 1.0))).h(px(7.0))
+                            .rounded_full().bg(theme.accent())
+                    ),
+            ))
+            .child(caption(theme, "If the chosen input cannot open, recording uses the system default. The level shows input, not speech clarity.", false))
+            .child(header(theme, "Transcription"))
             .child(group(theme, rows))
             .child(caption(theme, &note, false))
             .when_some(decoder_warning, |pane, warning| {
@@ -1901,6 +1972,18 @@ mod tests {
         assert_eq!(t.engine, "command");
         assert_eq!(t.command.as_deref(), Some("whisper-apparent"));
         assert_eq!(Transcriber::default().command, None);
+    }
+
+    #[test]
+    fn microphone_selection_and_fallback_reach_the_gpui_window() {
+        let state: ViewState = serde_json::from_str(r#"{"microphone":{"selected":"usb-1","value":"USB mic","options":[{"id":"default","title":"System default (Built-in)","enabled":true},{"id":"usb-1","title":"USB mic (not connected)","enabled":false}],"note":"USB mic isn't connected. Using Built-in.","meter":"built-in"}}"#).unwrap();
+        assert_eq!(state.microphone.selected, "usb-1");
+        assert_eq!(
+            state.microphone.note.as_deref(),
+            Some("USB mic isn't connected. Using Built-in.")
+        );
+        assert_eq!(state.microphone.meter.as_deref(), Some("built-in"));
+        assert!(!state.microphone.options[1].enabled);
     }
 
     #[test]

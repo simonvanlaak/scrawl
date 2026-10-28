@@ -152,7 +152,7 @@ fn hex_status() {
 enum MicCommand {
     /// The connected microphones (id, name), marking the default and the one recordings use.
     List,
-    /// Record from this device id, or `default` to follow macOS.
+    /// Record from this device id, or `default` to follow the system input.
     Set { id: String },
     /// Print the list again whenever an input is plugged in or out or the default changes.
     Watch,

@@ -1,7 +1,7 @@
 // Apparent dev SDK, served by the Apparent app at http://127.0.0.1:47777/sdk.js.
-// <script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>
-// or data-directory="/abs/project" to label the local page context with its project.
-// Registers this tab with Apparent while it's open, adding page context to local captures.
+// <script src="http://127.0.0.1:47777/sdk.js"></script>
+// Legacy data-session and data-directory attributes are accepted but do not select a destination.
+// Registration keeps the event channel alive; session and directory are not added to bundles.
 // Captures stay on the Mac for manual clipboard handoff. Only loopback pages register.
 // When Apparent asks for it (loopback pages only), it also tells Apparent what's under clicks and
 // ⇧ marks (element, component, source file:line), video seeks, console errors and failed

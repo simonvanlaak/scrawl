@@ -542,7 +542,9 @@ mod tests {
             header.push(byte[0]);
         }
         let header = String::from_utf8(header).unwrap();
-        assert!(handle(&mut stream, &header).unwrap());
+        if !handle(&mut stream, &header).unwrap() {
+            respond_json(&mut stream, "404 Not Found", &serde_json::json!({"ok": false}), None);
+        }
         drop(stream);
         client.join().unwrap()
     }
@@ -623,6 +625,10 @@ mod tests {
         let rebound = request("GET /web/registrations HTTP/1.1\r\nHost: attacker.example:47777\r\n\r\n");
         assert!(rebound.starts_with("HTTP/1.1 403"), "{rebound}");
         assert!(!rebound.contains("ses_webtest"), "{rebound}");
+        let no_host = request("GET /web/registrations HTTP/1.1\r\nHost: \r\n\r\n");
+        assert!(no_host.starts_with("HTTP/1.1 403"), "{no_host}");
+        let retired = request("POST /ingest HTTP/1.1\r\n\r\n");
+        assert!(retired.starts_with("HTTP/1.1 404"), "{retired}");
         let list = request(
             "GET /web/registrations HTTP/1.1\r\nAuthorization: Bearer tok\r\n\r\n",
         );

@@ -560,8 +560,8 @@
     {
       "id": "sdk-js",
       "group": "delivery",
-      "name": "Legacy /sdk.js registration (inactive)",
-      "says": "The script can still register a dev page, but captures no longer use its session or project folder.",
+      "name": "Dev-page event context (local)",
+      "says": "The script supplies click, mark and page-error context for local captures. Its legacy session and project registration does not route captures.",
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],

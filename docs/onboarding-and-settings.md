@@ -38,6 +38,8 @@ Recording › Language shows under Transcription while it's Apple Speech: Automa
 
 The sidebar is the helper's alone: a row selects on mouse-down and its pane replaces the last on the next frame, with no transition (keep it that way; a fade read as lag; the level meter starts after the Recording pane has drawn). Rust's `state` never carries the pane (only `show` does, when Settings is opened again), so a reply can't move the selection.
 
+Linux GPUI Settings currently renders its light palette. Hovered buttons and menu items pair black text with light lilac (`#c4a9e6`, 10.09:1); the selected sidebar keeps dark lilac (`#302442`) with cream text. Black on that dark lilac gives only 1.45:1. The dark palette's cream-on-dark hover pair (12.71:1) is covered by a contrast test but is not yet used by Settings.
+
 
 Launch at login writes `"launchAtLogin": true|false` to `config.json` before changing OS registration; if registration fails, it restores the previous preference. An explicit value is reconciled with `SMAppService.mainApp` (only inside Apparent.app) or Linux XDG autostart on app launch and every two seconds while running; stale Linux launch commands are refreshed when enabled, an absent value leaves existing OS registration alone, and a disabled/approval-needed OS entry is not forced back on. OS approval is still done in System Settings. There's no Dock icon: gpui 0.2.2 makes the app Regular after launch despite `LSUIElement`, so `ui::stay_out_of_dock` sets Accessory again at the top of `run_app`. The menu keeps Record, Choose What to Record…, Open Latest Capture, Export (flag), Settings…, Check for Updates…, Quit.
 

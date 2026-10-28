@@ -3007,6 +3007,15 @@ impl ScrawlCoordinator {
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    #[cfg(target_os = "linux")]
+                    if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
+                        if summary.contains("Image quality: ") {
+                            crate::linux::shell::notify(
+                                "Capture used smaller keyframes",
+                                "Full-quality MP4 decoding failed. Open summary.md for details and Settings › Recording for decoder setup.",
+                            );
+                        }
+                    }
                     if !auto_active {
                         let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
                     }
@@ -5645,6 +5654,7 @@ pub fn run_app(
     app.run(move |cx: &mut App| {
         scrawl_log(format!("run_app started pid={}", std::process::id()));
         platform::keep_alive(cx);
+        crate::settings::reconcile_login_item();
         // ⌘W, Esc, the close button or Scrawl itself: every way a window closes ends up here.
         cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys)).detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
@@ -5707,12 +5717,17 @@ pub fn run_app(
         let loop_coord = coordinator.clone();
         cx.spawn(async move |cx| {
             let mut shown_status: Option<String> = None;
+            let mut last_login_check = std::time::Instant::now();
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(8))
                     .await;
                 let mut should_quit = false;
                 let _ = cx.update(|cx| {
+                    if last_login_check.elapsed() >= Duration::from_secs(2) {
+                        crate::settings::reconcile_login_item();
+                        last_login_check = std::time::Instant::now();
+                    }
                     let status = EXPORT_STATUS.lock().ok().and_then(|s| s.clone());
                     if status != shown_status {
                         match &status {

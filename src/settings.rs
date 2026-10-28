@@ -528,6 +528,41 @@ pub enum LoginItem {
     Unavailable,
 }
 
+/// Apply an explicit file preference to OS registration, without fighting approval switches.
+fn reconcile_login_item_in(
+    path: &Path,
+    current: LoginItem,
+    stale_command: bool,
+    mut set: impl FnMut(bool) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let Some(wanted) = crate::handoff::load_config_from(path).launch_at_login else {
+        return Ok(());
+    };
+    if current == LoginItem::Unavailable || current == LoginItem::NeedsApproval && wanted {
+        return Ok(());
+    }
+    if wanted != (current == LoginItem::On) || wanted && stale_command {
+        set(wanted)?;
+    }
+    Ok(())
+}
+
+/// Reconcile at launch and on Settings refresh, so agent edits take effect without restarting.
+pub fn reconcile_login_item() {
+    if let Err(error) = reconcile_login_item_in(
+        &crate::handoff::default_config_path(), login_item(), login_command_stale(), set_login_item,
+    ) {
+        crate::capture::scrawl_log(format!("Launch at login: {error:#}"));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn login_command_stale() -> bool { false }
+#[cfg(target_os = "windows")]
+fn login_command_stale() -> bool { crate::win::login::command_stale() }
+#[cfg(target_os = "linux")]
+fn login_command_stale() -> bool { crate::linux::login::command_stale() }
+
 #[cfg(target_os = "macos")]
 pub use self::login::{login_item, open_login_items_settings, set_login_item};
 
@@ -1245,8 +1280,21 @@ impl Panel {
         };
         match (key, value) {
             ("launchAtLogin", serde_json::Value::Bool(on)) => {
+                let previous = std::fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                    .and_then(|config| config.get(key).cloned())
+                    .unwrap_or(serde_json::Value::Null);
+                if let Err(error) = crate::handoff::set_config_value_in(&path, key, (*on).into()) {
+                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                    return Effect::None;
+                }
                 if let Err(error) = host.set_login_item(*on) {
                     crate::capture::scrawl_log(format!("Launch at login: {error:#}"));
+                    if let Err(rollback) = crate::handoff::set_config_value_in(&path, key, previous) {
+                        crate::capture::scrawl_log(format!("Restoring {key} failed: {rollback:#}"));
+                    }
+                    return Effect::None;
                 }
                 if *on && login_item() == LoginItem::NeedsApproval {
                     return Effect::OpenLoginItems;
@@ -1844,6 +1892,8 @@ mod tests {
         path: PathBuf,
         paused: Vec<bool>,
         refuse: Option<String>,
+        refuse_login: bool,
+        login_changes: Vec<bool>,
         cli: crate::command_line::Places,
     }
 
@@ -1866,7 +1916,9 @@ mod tests {
         fn config_path(&self) -> PathBuf {
             self.path.clone()
         }
-        fn set_login_item(&mut self, _on: bool) -> anyhow::Result<()> {
+        fn set_login_item(&mut self, on: bool) -> anyhow::Result<()> {
+            self.login_changes.push(on);
+            anyhow::ensure!(!self.refuse_login, "login registration refused");
             Ok(())
         }
         fn command_line(&self) -> crate::command_line::Places {
@@ -1909,12 +1961,56 @@ mod tests {
             path: dir.0.join("config.json"),
             paused: Vec::new(),
             refuse: None,
+            refuse_login: false,
+            login_changes: Vec::new(),
             cli: crate::command_line::Places {
                 target: None,
                 install: vec![dir.0.join("bin")],
                 also: Vec::new(),
             },
         }
+    }
+
+    #[test]
+    fn login_preference_is_saved_after_registration_succeeds() {
+        let dir = TempDir::new("login-preference");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        panel.on(Action::Set { key: "launchAtLogin".into(), value: true.into() }, &mut host);
+        assert_eq!(read_json(&host.path)["launchAtLogin"], true);
+        assert_eq!(crate::handoff::load_config_from(&host.path).launch_at_login, Some(true));
+        host.refuse_login = true;
+        panel.on(Action::Set { key: "launchAtLogin".into(), value: false.into() }, &mut host);
+        assert_eq!(read_json(&host.path)["launchAtLogin"], true, "a failed OS change must not claim success in the file");
+    }
+
+    #[test]
+    fn invalid_config_blocks_login_registration() {
+        let dir = TempDir::new("invalid-login-config");
+        let mut host = fake(&dir);
+        std::fs::write(&host.path, b"{").unwrap();
+        let mut panel = Panel::default();
+        panel.on(Action::Set { key: "launchAtLogin".into(), value: true.into() }, &mut host);
+        assert_eq!(std::fs::read(&host.path).unwrap(), b"{");
+        assert!(host.login_changes.is_empty());
+    }
+
+    #[test]
+    fn external_login_preference_applies_only_when_it_differs_from_the_os() {
+        let dir = TempDir::new("login-reconcile");
+        let path = dir.0.join("config.json");
+        let mut applied = Vec::new();
+        reconcile_login_item_in(&path, LoginItem::Off, false, |on| { applied.push(on); Ok(()) }).unwrap();
+        assert!(applied.is_empty(), "an absent preference must not change existing OS state");
+        crate::handoff::set_config_value_in(&path, "launchAtLogin", true.into()).unwrap();
+        reconcile_login_item_in(&path, LoginItem::Off, false, |on| { applied.push(on); Ok(()) }).unwrap();
+        reconcile_login_item_in(&path, LoginItem::On, false, |on| { applied.push(on); Ok(()) }).unwrap();
+        reconcile_login_item_in(&path, LoginItem::On, true, |on| { applied.push(on); Ok(()) }).unwrap();
+        reconcile_login_item_in(&path, LoginItem::NeedsApproval, true, |on| { applied.push(on); Ok(()) }).unwrap();
+        assert_eq!(applied, [true, true]);
+        crate::handoff::set_config_value_in(&path, "launchAtLogin", false.into()).unwrap();
+        reconcile_login_item_in(&path, LoginItem::On, false, |on| { applied.push(on); Ok(()) }).unwrap();
+        assert_eq!(applied, [true, true, false]);
     }
 
     #[test]

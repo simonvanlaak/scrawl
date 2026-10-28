@@ -71,6 +71,9 @@ pub struct ScrawlBundle {
     pub events: Vec<InteractionEvent>,
     pub keyframes: Vec<Keyframe>,
     pub contact_sheet: String,
+    /// Why some keyframes use lower-resolution candidates instead of MP4 frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_quality_warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video: Option<String>,
     /// When the video starts on the bundle's clock (ms): video time = bundle time − this.
@@ -107,6 +110,13 @@ pub struct ScrawlBundle {
     /// recovers to the same place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Destination>,
+}
+
+impl ScrawlBundle {
+    /// A recorded click, not a spoken reference or a keyframe selected for another reason.
+    pub fn has_screen_click(&self) -> bool {
+        self.events.iter().any(|event| matches!(event, InteractionEvent::Click { .. }))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

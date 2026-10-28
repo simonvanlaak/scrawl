@@ -22,6 +22,15 @@
   ],
   "features": [
     {
+      "id": "linux-h264-decoder-check",
+      "group": "settings",
+      "name": "H.264 decoder setup warning",
+      "says": "Warns when the Linux GStreamer runtime lacks H.264 decoding, gives a distro-specific repair command, and explains candidate-frame fallback in the capture summary.",
+      "status": "main",
+      "platforms": ["linux"],
+      "docs": ["docs/linux.md"]
+    },
+    {
       "id": "record-screen",
       "group": "start",
       "name": "Record the screen",
@@ -272,6 +281,15 @@
       "platforms": ["mac", "windows", "linux"],
       "shortcuts": [{ "keys": "⌥⇧V", "does": "Paste the latest capture (Alt+Shift+V on Windows and Linux)" }],
       "docs": ["README.md#capture-controls"]
+    },
+    {
+      "id": "click-visual-handoff",
+      "group": "finish",
+      "name": "Attach visuals after a click",
+      "says": "Automatic agent delivery omits the image on no-click captures, while the recorded visuals remain available through scrawl zoom.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md"]
     },
     {
       "id": "clipboard-image",
@@ -677,9 +695,10 @@
       "id": "launch-at-login",
       "group": "settings",
       "name": "Launch at login",
-      "says": "A switch in General.",
-      "status": "stable@0.3.4",
+      "says": "A switch in General; the preference is stored in config.json and applied to OS login registration.",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
+      "config": [{ "key": "launchAtLogin", "value": "true | false", "does": "Register or unregister Scrawl at login; absent leaves the OS choice alone" }],
       "docs": ["README.md#settings"]
     },
     {

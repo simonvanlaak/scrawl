@@ -556,6 +556,10 @@ thread_local! {
 }
 
 pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
+    if let Some(warning) = linux::media::decoder_warning() {
+        crate::capture::scrawl_log(&warning);
+        linux::shell::notify("Scrawl setup: H.264 decoder missing", &warning);
+    }
     let (sender, receiver) = flume::bounded(16);
     // A second launch (`linux::ipc`) opens Settings: GNOME without the AppIndicator extension
     // shows no tray icon, and this is how to reach Scrawl there.

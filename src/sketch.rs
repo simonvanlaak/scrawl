@@ -721,6 +721,7 @@ fn context_value(raw: &str) -> String {
 
 /// Agents given only the text fix what was said and skip the pictures, missing what only shows there.
 pub const LOOK_AT_IMAGES: &str = "Open contact-sheet.png and frames/ in that folder before changing anything: the marks and words only make sense on the images, which can show more than the text does.";
+pub const OPTIONAL_IMAGES: &str = "Visuals are saved in this bundle, but are optional for this text-first handoff. Use scrawl zoom if the words need screen context; contact-sheet.png and frames/ are also available there.";
 
 pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &std::path::Path) -> String {
     let agent_context = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
@@ -729,6 +730,14 @@ pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &std::path::Path) -> 
 
 /// `agent_context` is the `agentContext` experiment (`agent_context::keyframe_texts`).
 pub fn summary_markdown_with(
+    bundle: &ScrawlBundle,
+    bundle_dir: &std::path::Path,
+    agent_context: bool,
+) -> String {
+    summary_markdown_with_visual_policy(bundle, bundle_dir, agent_context)
+}
+
+pub(crate) fn summary_markdown_with_visual_policy(
     bundle: &ScrawlBundle,
     bundle_dir: &std::path::Path,
     agent_context: bool,
@@ -781,7 +790,7 @@ pub fn summary_markdown_with(
         out.push('\n');
     }
     if !bundle.keyframes.is_empty() {
-        out.push_str(LOOK_AT_IMAGES);
+        out.push_str(if bundle.has_screen_click() { LOOK_AT_IMAGES } else { OPTIONAL_IMAGES });
         out.push('\n');
     }
     // The screen at the start and the app's own values, on one line.
@@ -804,6 +813,9 @@ pub fn summary_markdown_with(
         && !note.trim().is_empty()
     {
         out.push_str(&format!("Note: {}\n", note.trim()));
+    }
+    if let Some(warning) = &bundle.image_quality_warning {
+        out.push_str(&format!("Image quality: {warning}\n"));
     }
     if let Some(crop) = &bundle.autocrop {
         out.push_str(&format!(
@@ -2106,15 +2118,18 @@ mod tests {
             cursor: Vec::new(),
             autocrop: None,
             destination: None,
+            image_quality_warning: None,
         };
         let tl = timeline(&bundle).join("\n");
         assert!(tl.find("0:03 “").unwrap() < tl.find("0:04 · pressed").unwrap());
         assert!(tl.find("0:04 · pressed").unwrap() < tl.find("0:05 ✎").unwrap());
         assert!(tl.contains("— frame #1"));
 
-        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/test"));
+        let summary = summary_markdown_with_visual_policy(&bundle, std::path::Path::new("/recordings/test"), false);
         assert!(summary.starts_with("[scrawl 0:14 · App “Window” · /recordings/test]"));
         assert!(summary.contains("Note: Simplify it."));
+        assert!(!summary.contains(LOOK_AT_IMAGES));
+        assert!(summary.contains("scrawl zoom"));
         assert!(summary.contains("- #1 (0:05) “This row is too dense.”"));
         assert!(!summary.contains("No transcript"));
 
@@ -2179,12 +2194,12 @@ mod tests {
                 label: "Done tapped".into(),
             },
         ];
-        let summary = summary_markdown(&phone, std::path::Path::new("/recordings/phone"));
+        let summary = summary_markdown_with_visual_policy(&phone, std::path::Path::new("/recordings/phone"), false);
         assert_eq!(
             summary,
             format!(
                 "[scrawl 0:14 · iPhone · dev.example.App (42) · /recordings/phone]\n\
-                 {LOOK_AT_IMAGES}\n\
+                 {OPTIONAL_IMAGES}\n\
                  \x20 · 0:01 app: launched\n\
                  - #1 (0:05) “This row is too dense.”\n\
                  \x20 · 0:06 app: rest started\n\
@@ -2280,6 +2295,10 @@ mod tests {
                 Some("Done."),
             ),
         ];
+        bundle.events.push(InteractionEvent::Click {
+            t: 3_000, x: 0.10, y: 0.90, button: Some("touch".into()),
+            label: Some("Settings".into()), role: None,
+        });
         bundle.screens = vec![
             ScreenSpan {
                 t0: 0,

@@ -26,7 +26,7 @@ import { easeOutCubic, motion, smoother, springAt } from "./motion"
 
 const pressedAt = (t: number, at: number) => t >= at - 60 && t < at + 160
 
-// Ghostty becomes the key window once the cursor clicks into the OpenCode prompt.
+// Ghostty becomes the key window once the cursor clicks into the Pi prompt.
 export const terminalActive = (t: number) => t >= T.promptClick
 
 const APPLE =

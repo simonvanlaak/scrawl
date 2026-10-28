@@ -499,6 +499,57 @@ kbd {
   padding: 8px 20px 40px;
 }
 
+.demo-film {
+  max-width: 960px;
+  margin: 0 auto 72px;
+}
+
+.demo-film-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+
+.demo-film-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.demo-film h2 {
+  margin: 0;
+  font-size: clamp(25px, 3vw, 38px);
+  letter-spacing: -0.04em;
+}
+
+.demo-film-intro > p {
+  max-width: 350px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.demo-film video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 3;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #08080a;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
+}
+
+@media (max-width: 700px) {
+  .demo-film-intro { display: block; }
+  .demo-film-intro > p { margin-top: 12px; }
+}
+
 .split {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -2124,7 +2175,7 @@ kbd {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-/* ---------- Ghostty + OpenCode TUI ---------- */
+/* ---------- Ghostty + Pi demo TUI ---------- */
 
 .term {
   position: absolute;
@@ -2242,6 +2293,18 @@ kbd {
 .tui-logo {
   flex: none;
   white-space: pre;
+}
+
+.pi-logo {
+  color: #eac988;
+  font: 700 38px/1 var(--term);
+  letter-spacing: -0.08em;
+}
+
+.pi-logo span {
+  color: #eeeeee;
+  font-size: 30px;
+  letter-spacing: -0.06em;
 }
 
 .tui-logo > div {
@@ -2440,6 +2503,31 @@ kbd {
   width: 1ch;
   font-style: normal;
   text-align: center;
+}
+
+/* Pi's editor is a simple bordered prompt, not a beveled agent selector. */
+.tp-box {
+  border: 1px solid #66615a;
+  border-radius: 5px;
+}
+
+.tp-bar,
+.tp-foot-edge {
+  display: none;
+}
+
+.tp-inner {
+  padding: var(--row) 1ch;
+  background: #181818;
+  border-radius: 5px;
+}
+
+.tp-meta {
+  padding-top: calc(var(--row) * 0.5);
+}
+
+.tp-footer {
+  margin-top: calc(var(--row) * 0.5);
 }
 
 .tui-session {

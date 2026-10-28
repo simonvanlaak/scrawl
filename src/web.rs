@@ -359,8 +359,8 @@ pub fn handle_with_policy(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
             anyhow::ensure!(len <= 64 * 1024, "Page context too large");
-            let mut bytes = vec![0_u8; len];
-            stream.read_exact(&mut bytes)?;
+            let bytes =
+                crate::ingest_http::read_body(stream, len, crate::ingest_http::SMALL_BODY_TIMEOUT)?;
             anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
             // Loopback pages only, token or not.
             let Some(page_origin) = origin
@@ -392,9 +392,10 @@ pub fn handle_with_policy(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
             anyhow::ensure!(len <= 16 * 1024, "Registration too large");
-            // Read the body even when refusing, so the answer isn't lost to a reset.
-            let mut bytes = vec![0_u8; len];
-            stream.read_exact(&mut bytes)?;
+            // Read the body even when refusing, so the answer isn't lost to a reset. Within a
+            // total deadline, so a client trickling it can't hold a connection slot.
+            let bytes =
+                crate::ingest_http::read_body(stream, len, crate::ingest_http::SMALL_BODY_TIMEOUT)?;
             anyhow::ensure!(policy.allowed(), "Remote phone ingest is off");
             if !may_register(origin, peer_loopback, token_ok) {
                 respond_json(
@@ -580,6 +581,37 @@ mod tests {
         assert!(handle(&mut stream, &header, token).unwrap());
         drop(stream);
         client.join().unwrap()
+    }
+
+    #[test]
+    fn web_registration_body_has_a_total_deadline() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let writer = std::thread::spawn(move || {
+            let mut client = TcpStream::connect(addr).unwrap();
+            client
+                .write_all(b"POST /web/register HTTP/1.1\r\nOrigin: http://localhost:6123\r\nContent-Length: 100\r\n\r\n")
+                .unwrap();
+            for _ in 0..7 {
+                if client.write_all(b"x").is_err() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        });
+        let (mut server, _) = listener.accept().unwrap();
+        server.set_read_timeout(Some(std::time::Duration::from_secs(30))).unwrap();
+        let header = crate::ingest_http::read_header(&mut server, crate::ingest_http::HEADER_TIMEOUT)
+            .unwrap()
+            .unwrap();
+        let start = std::time::Instant::now();
+        assert!(handle(&mut server, &header, "tok").is_err());
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(6_000),
+            "body trickle occupied a connection beyond the deadline"
+        );
+        drop(server);
+        writer.join().unwrap();
     }
 
     #[test]

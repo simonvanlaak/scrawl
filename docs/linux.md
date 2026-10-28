@@ -72,12 +72,13 @@ At finish, a nonempty board also gets its own last contact-sheet tile: the final
 on white paper, cropped to their bounds for readability even if the window was closed or
 small when recording stopped. The numbered tile and stroke count appear in `summary.md`;
 the screen keyframes still show where the board was beside the browser. Clear removes
-the drawing from this final tile. An ordinary clipboard copy is text only; use Paste
-to attach the contact sheet and text to an agent composer.
+the drawing from this final tile. Finish closes the whiteboard window after taking its
+final snapshot; the drawing stays in the completed bundle. An ordinary clipboard copy
+is text only; use Paste to attach the contact sheet and text to an agent composer.
 
-With `"experiments": {"audioEqualizer": true}`, the recording capsule also shows five
-smooth level bars fed by the captured microphone PCM (off by default). They indicate
-input activity only, not who spoke or whether transcription can understand the voice.
+The recording capsule shows five smooth level bars by default, fed by the captured
+microphone PCM. They indicate input activity only, not who spoke or whether
+transcription can understand the voice.
 The recording cue and Finish remain separate; microphone and intelligibility warnings
 retain their own status text rather than borrowing the bars.
 
@@ -143,6 +144,7 @@ Linux previews can be published manually from checked AppImage artifacts as `lin
 ### AppImage update channels
 
 Settings › About › Channel selects Stable releases (default) or Latest main. Only an AppImage owned by the user and stored under their home directory auto-updates; a debug build, symlink or system-owned install stays untouched. At launch and hourly, Apparent checks its selected feed. It downloads the matching architecture's AppImage, checks its SHA-256 against the release's checksum (Stable) or the main feed (Main), atomically swaps the executable, and keeps the previous image beside it. The running process stays on the old image; the new one starts at the next launch. Settings and the tray's Check for Updates… trigger the same check. Errors are logged without replacing the installed image.
+In Settings, a manual check immediately changes the button to “Checking…” and disables repeat clicks. When it finishes, a dismissible result reports an installed update, no new update, or the reason the check failed. The tray and automatic checks remain silent except for the existing installed-update notification and log.
 
 Stable reads the newest non-prerelease GitHub release on `tryapparent/apparent`, which must include the Linux AppImage and its `.sha256` asset. **There is no such stable Linux release yet**, so Stable currently has nothing to install. Main reads `linux-main-feed/main-updates.json` on that repository. To publish a Main preview, manually dispatch the Linux release workflow on `main` with `publish_main=true` and an empty `tag`. It builds both architectures, runs the full Rust suite and packaged CPU smoke checks, uploads an immutable prerelease, then advances the feed only if that commit is still main. No preview is published before those checks pass. The feed is not populated until this workflow successfully runs on main. Main therefore tracks the latest *published* preview, not every commit. A user choosing Main accepts unreviewed code; channel changes install the chosen channel even if its version is lower.
 

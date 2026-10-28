@@ -1057,10 +1057,8 @@ pub type IngestCallback = Arc<dyn Fn(PathBuf, ApparentBundle, Option<String>) + 
 #[derive(Clone, Default)]
 pub struct IngestConfig {
     pub copy_clipboard: bool,
-    pub route_opencode: bool,
     pub on_bundle: Option<IngestCallback>,
-    /// Where bundles are built and pending deliveries retried; the default captures folder if
-    /// unset.
+    /// Where bundles are built; the default captures folder if unset.
     captures: Option<PathBuf>,
     hooks: IngestHooks,
 }
@@ -1073,25 +1071,20 @@ impl IngestConfig {
     }
 }
 
-/// The steps of an ingest that reach outside the process, swappable in tests so they never
-/// build real movies or post to a real OpenCode session.
+/// The bundle builder, swappable in tests so they never build real movies.
 #[derive(Clone, Copy)]
 struct IngestHooks {
-    resolve: fn(Option<&str>, Option<&str>) -> Result<(String, String)>,
     /// Movie, timeline, bundle directory → the built bundle.
     build: fn(&Path, &Path, &Path) -> Result<(PathBuf, Option<ApparentBundle>)>,
-    forward: crate::delivery::Forward,
 }
 
 impl Default for IngestHooks {
     fn default() -> Self {
         Self {
-            resolve: crate::handoff::resolve_opencode_session,
             build: |movie, timeline, bundle_dir| {
                 let (dir, bundle, _) = import(movie, Some(timeline), bundle_dir, None)?;
                 Ok((dir, Some(bundle)))
             },
-            forward: crate::handoff::send_bundle_to_session,
         }
     }
 }
@@ -1241,15 +1234,13 @@ pub fn format_setup_link(
 /// Starts Apparent's background ApparentKit ingest inside the GUI app: a loopback HTTP server
 /// on port 47777 (all IPv4 interfaces only when remote phone ingest is enabled), and a
 /// cabled-iPhone `devicectl` watcher for when the network can't reach the Mac. Each recording
-/// becomes a `.apparent` bundle, lands on the clipboard and is queued into the matching session.
+/// becomes a `.apparent` bundle and lands on the clipboard.
 pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
     if let Err(err) = crate::handoff::ensure_ingest_token() {
         apparent_log(format!("ingest token setup failed: {err:#}"));
     }
-    let route_opencode = std::env::var_os("APPARENT_NO_OPENCODE").is_none();
     let config = IngestConfig {
         copy_clipboard: true,
-        route_opencode,
         on_bundle: Some(Arc::new(move |dir, bundle, status| {
             let _ = ui_sender.send(LiveOverlayEvent::IngestedBundle {
                 dir,
@@ -1271,13 +1262,11 @@ pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
 }
 
 /// Runs the headless ApparentKit ingest server (`apparent serve`): same HTTP auth, dedupe, bundle
-/// building, and OpenCode routing as the GUI app, without touching the clipboard or HUD.
-pub fn run_ingest_server(port: u16, usb: bool, no_opencode: bool) -> Result<()> {
+/// building as the GUI app, without touching the clipboard or HUD.
+pub fn run_ingest_server(port: u16, usb: bool) -> Result<()> {
     let _ = crate::handoff::ensure_ingest_token()?;
-    let route_opencode = !no_opencode && std::env::var_os("APPARENT_NO_OPENCODE").is_none();
     let config = IngestConfig {
         copy_clipboard: false,
-        route_opencode,
         on_bundle: None,
         ..IngestConfig::default()
     };
@@ -1501,6 +1490,9 @@ fn accept_ingest_connection(
     {
         return Ok(None);
     }
+    // On macOS an accepted socket inherits O_NONBLOCK from the polling listener.
+    // The header and body readers require a blocking socket for their deadlines.
+    stream.set_nonblocking(false)?;
     Ok(Some(stream))
 }
 
@@ -1528,10 +1520,6 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
         apparent_log(format!("ingest server: {err:#}; using loopback"));
     }
     crate::web::set_serving();
-    // Only the process that owns the port retries deliveries, so two never race over a bundle.
-    if config.route_opencode {
-        crate::delivery::spawn_retries(config.captures_dir(), config.hooks.forward, mark_sent);
-    }
     let connections = crate::ingest_http::Connections::default();
     let clients = Arc::new(RemoteClients::default());
     loop {
@@ -1644,18 +1632,6 @@ fn ingest_key(timeline: &Timeline) -> String {
         .unwrap_or_else(crate::make_bundle_id)
 }
 
-/// A retried delivery went through: later copies of that recording hear it was sent.
-fn mark_sent(_: &Path, pending: &crate::delivery::Pending) {
-    if let Some(key) = &pending.key {
-        ingested().insert(
-            key.clone(),
-            IngestState::Done(Delivery::Sent {
-                title: pending.title.clone(),
-            }),
-        );
-        INGEST_CHANGED.notify_all();
-    }
-}
 
 /// Waits up to `wait` for the recording `key` to finish.
 fn wait_for_ingest(key: &str, wait: Duration) -> Outcome {
@@ -1679,7 +1655,7 @@ fn wait_for_ingest(key: &str, wait: Duration) -> Outcome {
 }
 
 /// Takes in a received recording whose files are in `staging` (removed when done): builds its
-/// bundle and sends it to its session on a thread, and waits up to `wait` to say how that went.
+/// bundle on a thread, and waits up to `wait` to say how that went.
 /// A copy of a recording already being taken in waits for that one instead.
 fn ingest_recording(
     staging: PathBuf,
@@ -1690,7 +1666,7 @@ fn ingest_recording(
     wait: Duration,
 ) -> (Outcome, String) {
     let key = ingest_key(timeline);
-    let (session, title) = ingest_target(timeline, config);
+    let title = "Mac".to_owned();
     let fresh = {
         let mut map = ingested();
         if map.contains_key(&key) {
@@ -1709,16 +1685,13 @@ fn ingest_recording(
     }
     let (sender, receiver) = std::sync::mpsc::channel();
     let spawned = {
-        let (key, title, config) = (key.clone(), title.clone(), config.clone());
+        let (key, config) = (key.clone(), config.clone());
         std::thread::Builder::new()
             .name("apparent-ingest-build".into())
             .spawn(move || {
                 let built = build_ingested(
                     &movie,
                     &timeline_path,
-                    session.as_deref(),
-                    &title,
-                    &key,
                     &config,
                 );
                 let _ = std::fs::remove_dir_all(&staging);
@@ -1760,30 +1733,11 @@ fn ingest_recording(
     (outcome, title)
 }
 
-/// The OpenCode session a recording goes to (if one resolves) and the name the phone shows.
-fn ingest_target(timeline: &Timeline, config: &IngestConfig) -> (Option<String>, String) {
-    if !config.route_opencode {
-        return (None, "Mac".to_owned());
-    }
-    let app = timeline.app.as_deref().or(timeline.bundle_id.as_deref());
-    match (config.hooks.resolve)(timeline.session.as_deref(), app) {
-        Ok((id, title)) => (Some(id), title),
-        Err(err) => {
-            apparent_log(format!("ingest: no OpenCode session ({err:#})"));
-            (None, "Mac".to_owned())
-        }
-    }
-}
-
-/// Builds the bundle for a received recording, optionally copies it to the clipboard, queues it
-/// into `session` (leaving a pending delivery to retry if that fails), and notifies the GUI HUD
-/// if running inside the app.
+/// Builds the bundle for a received recording, optionally copies it to the clipboard,
+/// and notifies the GUI HUD if running inside the app.
 fn build_ingested(
     movie: &Path,
     timeline_path: &Path,
-    session: Option<&str>,
-    title: &str,
-    key: &str,
     config: &IngestConfig,
 ) -> Result<Delivery> {
     let bundle_dir = config
@@ -1793,12 +1747,7 @@ fn build_ingested(
     if config.copy_clipboard {
         let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
     }
-    let delivery = match session {
-        Some(session) if config.route_opencode => {
-            crate::delivery::deliver(&dir, session, title, Some(key), config.hooks.forward)
-        }
-        _ => Delivery::Saved,
-    };
+    let delivery = Delivery::Saved;
     let status = delivery.status(if config.copy_clipboard {
         "Copied to clipboard"
     } else {
@@ -2640,13 +2589,51 @@ mod tests {
             port, &mut listener, &mut bound, true, &mut last_wanted, bind_ingest_listener,
         ).unwrap();
         assert_eq!(bound, Some(true));
-        queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        assert!(matches!(queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
-        still_queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        assert!(matches!(still_queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
+        // macOS rejects SO_RCVTIMEO on a connection left in a closed
+        // listener's accept queue. Poll nonblocking instead, and do not
+        // mistake WouldBlock (still connected) for a closed old socket.
+        let expect_closed = |stream: &mut std::net::TcpStream| {
+            stream.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                match stream.read(&mut [0_u8; 1]) {
+                    Ok(0) => break,
+                    Err(ref error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                    Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(std::time::Instant::now() < deadline, "old connection stayed open");
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    result => panic!("old connection was not closed: {result:?}"),
+                }
+            }
+        };
+        expect_closed(&mut queued);
+        expect_closed(&mut still_queued);
         let fresh = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let (accepted, _) = listener.as_ref().unwrap().accept().unwrap();
         assert_eq!(accepted.peer_addr().unwrap(), fresh.local_addr().unwrap());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accepted_ingest_socket_waits_for_a_delayed_body_on_macos() {
+        use std::io::Read as _;
+
+        let listener = bind_ingest_listener(0, false).unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let mut accepted = accept_ingest_connection(&listener, false, 0).unwrap().unwrap();
+        accepted
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            (&client).write_all(b"body").unwrap();
+        });
+        let mut body = [0; 4];
+        let result = accepted.read_exact(&mut body);
+        writer.join().unwrap();
+        result.unwrap();
+        assert_eq!(&body, b"body");
     }
 
     #[test]
@@ -2756,28 +2743,10 @@ mod tests {
         Ok((bundle_dir.to_owned(), None))
     }
 
-    /// Never reaches OpenCode: `ses_down` fails like an unreachable server.
-    fn fake_forward(_: &Path, session: &str) -> Result<()> {
-        ensure!(
-            session != "ses_down",
-            "OpenCode API failed: connection refused"
-        );
-        Ok(())
-    }
-
-    fn fake_resolve(session: Option<&str>, _app: Option<&str>) -> Result<(String, String)> {
-        Ok((session.unwrap_or("ses_up").to_owned(), "UP DOWN".to_owned()))
-    }
-
-    fn test_config(captures: &Path, route_opencode: bool) -> IngestConfig {
+    fn test_config(captures: &Path) -> IngestConfig {
         IngestConfig {
-            route_opencode,
             captures: Some(captures.to_owned()),
-            hooks: IngestHooks {
-                resolve: fake_resolve,
-                build: fake_build,
-                forward: fake_forward,
-            },
+            hooks: IngestHooks { build: fake_build },
             ..IngestConfig::default()
         }
     }
@@ -2835,10 +2804,10 @@ mod tests {
     }
 
     #[test]
-    fn ingest_answers_saved_when_routing_is_off() {
+    fn ingest_answers_saved() {
         let captures = temp_captures();
         let (status, body) = post_ingest(
-            &test_config(&captures, false),
+            &test_config(&captures),
             serde_json::json!({"recordedAt": "2026-10-18T10:00:00Z-saved"}),
             b"movie",
             None,
@@ -2853,61 +2822,28 @@ mod tests {
     }
 
     #[test]
-    fn ingest_answers_sent_only_after_opencode_took_it() {
+    fn ingest_never_forwards_even_with_a_recorded_session() {
         let captures = temp_captures();
         let (status, body) = post_ingest(
-            &test_config(&captures, true),
-            serde_json::json!({"recordedAt": "2026-10-18T10:00:00Z-sent", "session": "ses_up"}),
+            &test_config(&captures),
+            serde_json::json!({"recordedAt": "2026-10-28T10:00:00Z-no-send", "session": "ses_down"}),
             b"movie",
             None,
         );
         assert_eq!(status, "HTTP/1.1 200 OK");
-        assert_eq!(
-            body,
-            serde_json::json!({"ok": true, "delivered": true, "state": "sent", "sessionTitle": "UP DOWN"})
-        );
-        std::fs::remove_dir_all(captures).unwrap();
-    }
-
-    #[test]
-    fn a_failed_forward_is_queued_on_the_mac_and_retried() {
-        let captures = temp_captures();
-        let config = test_config(&captures, true);
-        let timeline =
-            serde_json::json!({"recordedAt": "2026-10-18T10:00:00Z-queued", "session": "ses_down"});
-        let (status, body) = post_ingest(&config, timeline.clone(), b"movie", None);
-        assert_eq!(status, "HTTP/1.1 200 OK");
-        assert_eq!(body["delivered"], false);
-        assert_eq!(body["state"], "queued");
-        assert_eq!(body["sessionTitle"], "UP DOWN");
-        assert_eq!(body["error"], "OpenCode API failed: connection refused");
+        assert_eq!(body, serde_json::json!({
+            "ok": true, "delivered": false, "state": "saved", "sessionTitle": "Mac"
+        }));
         let bundle = bundles(&captures).pop().unwrap();
-        let pending: crate::delivery::Pending =
-            serde_json::from_slice(&std::fs::read(bundle.join(crate::delivery::PENDING)).unwrap())
-                .unwrap();
-        assert_eq!(pending.session, "ses_down");
-        assert_eq!(pending.attempts, 1);
-
-        // OpenCode is back (the session answers now): the Mac's retry goes through.
-        let report = crate::delivery::retry_due(&captures, u64::MAX / 2, |dir, _| {
-            fake_forward(dir, "ses_up")
-        });
-        assert_eq!(report.sent.len(), 1);
         assert!(!bundle.join(crate::delivery::PENDING).exists());
-        for (dir, pending) in &report.sent {
-            mark_sent(dir, pending);
-        }
-        // The phone sending it again (a lost reply) hears it was sent, and nothing is rebuilt.
-        let (_, again) = post_ingest(&config, timeline, b"movie", None);
-        assert_eq!(again["state"], "sent");
-        assert_eq!(bundles(&captures).len(), 1);
         std::fs::remove_dir_all(captures).unwrap();
     }
+
 
     #[test]
     fn a_failed_build_answers_500_and_the_upload_can_be_sent_again() {
         let captures = temp_captures();
-        let config = test_config(&captures, true);
+        let config = test_config(&captures);
         let timeline = serde_json::json!({"recordedAt": "2026-10-18T10:00:00Z-bad"});
         let (status, body) = post_ingest(&config, timeline.clone(), b"bad", None);
         assert_eq!(status, "HTTP/1.1 500 Internal Server Error");
@@ -2915,24 +2851,24 @@ mod tests {
         assert_eq!(body["error"], "no video track");
         let (status, body) = post_ingest(&config, timeline, b"movie", None);
         assert_eq!(status, "HTTP/1.1 200 OK");
-        assert_eq!(body["state"], "sent");
+        assert_eq!(body["state"], "saved");
         std::fs::remove_dir_all(captures).unwrap();
     }
 
     #[test]
     fn a_slow_build_answers_processing_and_a_copy_waits_for_the_real_outcome() {
         let captures = temp_captures();
-        let config = test_config(&captures, true);
+        let config = test_config(&captures);
         let timeline = serde_json::json!({"recordedAt": "2026-10-18T10:00:00Z-slow"});
         let (status, body) = post_ingest(&config, timeline.clone(), b"slow", Some(0));
         assert_eq!(status, "HTTP/1.1 200 OK");
         assert_eq!(
             body,
-            serde_json::json!({"ok": true, "delivered": false, "state": "processing", "sessionTitle": "UP DOWN"})
+            serde_json::json!({"ok": true, "delivered": false, "state": "processing", "sessionTitle": "Mac"})
         );
         // The same recording over the other address waits for the first build.
         let (_, body) = post_ingest(&config, timeline, b"slow", Some(10));
-        assert_eq!(body["state"], "sent");
+        assert_eq!(body["state"], "saved");
         assert_eq!(bundles(&captures).len(), 1);
         std::fs::remove_dir_all(captures).unwrap();
     }

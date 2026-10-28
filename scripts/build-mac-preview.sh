@@ -5,10 +5,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${APPARENT_PREVIEW_VERSION:?set APPARENT_PREVIEW_VERSION (e.g. 0.123.1)}"
 BUILD_NUMBER="${APPARENT_PREVIEW_BUILD_NUMBER:?set APPARENT_PREVIEW_BUILD_NUMBER (e.g. 123.1)}"
+PUBLIC_KEY="${APPARENT_PREVIEW_PUBLIC_KEY:?set the preview Sparkle EdDSA public key}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid preview version" >&2; exit 1; }
 [[ "$BUILD_NUMBER" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "Invalid preview build number" >&2; exit 1; }
+python3 - "$PUBLIC_KEY" <<'PY'
+import base64, sys
+try:
+    key = base64.b64decode(sys.argv[1], validate=True)
+    if len(key) != 32:
+        raise ValueError('wrong public key length')
+except ValueError:
+    sys.exit('Preview Sparkle public key must be 32 base64-encoded bytes')
+PY
 
 cd "$ROOT"
+SPARKLE_DIR="$(scripts/setup-sparkle.sh)"
 APPARENT_PREVIEW_BUILD=1 APPARENT_HELPER_BUNDLE_ID=dev.simonvanlaak.apparent.preview.helper \
   cargo build --release --locked -j 3
 
@@ -16,14 +27,17 @@ dist="$ROOT/dist"
 app="$dist/Apparent Preview.app"
 staging="$dist/preview-staging"
 name="Apparent-Preview-${VERSION}-arm64.dmg"
+zip="Apparent-Preview-${VERSION}-arm64.zip"
 rm -rf "$app" "$staging"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$staging"
-cp target/release/apparent "$app/Contents/MacOS/apparent"
-cp target/release/apparent-helper "$app/Contents/MacOS/"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks" "$staging"
+cp target/release/apparent target/release/apparent-helper "$app/Contents/MacOS/"
 chmod +x "$app/Contents/MacOS/apparent" "$app/Contents/MacOS/apparent-helper"
 if [[ -f assets/Apparent.icns ]]; then
   cp assets/Apparent.icns "$app/Contents/Resources/Apparent.icns"
 fi
+cp assets/fonts/HostGrotesk-Variable.ttf "$app/Contents/Resources/HostGrotesk-Variable.ttf"
+cp assets/brand/apparent-wordmark.png "$app/Contents/Resources/apparent-wordmark.png"
+ditto "$SPARKLE_DIR/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,13 +60,24 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Apparent records your voice to align transcripts with keyframes.</string>
   <key>NSCameraUsageDescription</key><string>Apparent mirrors and records a cabled iPhone's screen.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Apparent transcribes your narration on this Mac.</string>
-  <key>NSAppleEventsUsageDescription</key><string>Apparent reads the address of the browser tab you captured, to send a capture of a dev site to its project's session.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Apparent reads the address of the browser tab you captured to record its context.</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUFeedURL</key><string>https://raw.githubusercontent.com/tryapparent/apparent/preview-mac-feed/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>${PUBLIC_KEY}</string>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
 </dict>
 </plist>
 PLIST
 
 plutil -lint "$app/Contents/Info.plist"
-# There is deliberately no Sparkle framework or production update feed in this app.
+sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+codesign --force --sign - "$sparkle/XPCServices/Installer.xpc"
+codesign --force --sign - --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+codesign --force --sign - "$sparkle/Autoupdate"
+codesign --force --sign - "$sparkle/Updater.app"
+codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - --identifier dev.simonvanlaak.apparent.preview.helper "$app/Contents/MacOS/apparent-helper"
 codesign --force --sign - --identifier dev.simonvanlaak.apparent.preview "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
@@ -63,4 +88,5 @@ rm -f "$dist/$name" "$dist/$name.sha256"
 hdiutil create -quiet -fs HFS+ -format UDZO -volname "Apparent Preview" -srcfolder "$staging" "$dist/$name"
 hdiutil verify "$dist/$name"
 (cd "$dist" && shasum -a 256 "$name" > "$name.sha256")
-printf 'Built %s\n' "$dist/$name"
+ditto -c -k --sequesterRsrc --keepParent "$app" "$dist/$zip"
+printf 'Built %s and %s\n' "$dist/$name" "$dist/$zip"

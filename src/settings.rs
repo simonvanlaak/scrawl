@@ -716,7 +716,7 @@ pub const SKILL_COMMAND: &str = "bunx skills add tryapparent/apparent";
 pub struct View {
     pub version: String,
     pub login: LoginView,
-    pub auto_send: bool,
+    pub agent_demo_video: bool,
     pub remote_phone_ingest: bool,
     pub shortcuts: Vec<ShortcutView>,
     pub microphone: MicrophoneView,
@@ -730,10 +730,18 @@ pub struct View {
     pub captures_dir: CapturesDirView,
     pub permissions: Vec<PermissionView>,
     pub updates: bool,
+    pub update_check: UpdateCheck,
     pub update_channel: &'static str,
     pub main_updates: bool,
     pub command_line: CommandLineView,
     pub skill_command: &'static str,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheck {
+    pub checking: bool,
+    pub message: Option<String>,
 }
 
 /// The "Command-line tool" row.
@@ -1061,7 +1069,7 @@ fn shortcut_view(
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum Action {
-    /// A settings control: `launchAtLogin`, `autoSend`, `remotePhoneIngest`, `videoExport`, `lowerPlayback` (bool),
+    /// A settings control: `launchAtLogin`, `remotePhoneIngest`, `videoExport`, `lowerPlayback` (bool),
     /// `playbackLevel` (u8), `microphone` ("default" or a device id), `transcriber`
     /// ("apple"/"hex"/"command"), `hexModel` (an id), `hexLanguage` (a code), `appleLocale`
     /// (a locale id or "auto"), `retention` (a preset id).
@@ -1096,6 +1104,7 @@ pub enum Action {
     Reopen,
     ShowCaptures,
     CheckForUpdates,
+    DismissUpdateCheck,
     /// "Show Welcome Tour" on About.
     Tour,
     /// Link `apparent` into a folder on PATH, or remove that link.
@@ -1148,6 +1157,7 @@ pub struct Panel {
     captures_size: Option<u64>,
     /// The connected microphones, once listed (`mic::Watch` keeps them fresh).
     inputs: Option<crate::mic::Inputs>,
+    update_check: UpdateCheck,
 }
 
 impl Panel {
@@ -1166,6 +1176,18 @@ impl Panel {
 
     pub fn set_inputs(&mut self, inputs: crate::mic::Inputs) {
         self.inputs = Some(inputs);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn finish_update_check(&mut self, result: Result<&'static str, String>) {
+        self.update_check.checking = false;
+        self.update_check.message = Some(match result {
+            Ok("installed; restart Apparent to use it") | Ok("already installed; restart Apparent to use it") =>
+                "Update installed. Restart Apparent to use it.".into(),
+            Ok("up to date") => "No new update is available on this channel.".into(),
+            Ok(other) => other.into(),
+            Err(error) => format!("Could not check for updates: {error}"),
+        });
     }
 
     pub fn on(&mut self, action: Action, host: &mut dyn Host) -> Effect {
@@ -1225,7 +1247,19 @@ impl Panel {
                 }
             }
             Action::ShowCaptures => Effect::ShowCaptures,
-            Action::CheckForUpdates => Effect::CheckForUpdates,
+            Action::CheckForUpdates => {
+                if cfg!(target_os = "linux") && self.update_check.checking {
+                    return Effect::None;
+                }
+                if cfg!(target_os = "linux") {
+                    self.update_check = UpdateCheck { checking: true, message: None };
+                }
+                Effect::CheckForUpdates
+            }
+            Action::DismissUpdateCheck => {
+                self.update_check.message = None;
+                Effect::None
+            }
             Action::Tour => Effect::Tour,
             Action::InstallCli => {
                 let result = crate::command_line::install(&host.command_line());
@@ -1288,6 +1322,11 @@ impl Panel {
             }
         };
         match (key, value) {
+            ("agentDemoVideo", serde_json::Value::Bool(on)) => {
+                if let Err(error) = crate::handoff::set_experiment_in(&path, "agentDemoVideo", *on) {
+                    crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
+                }
+            }
             ("launchAtLogin", serde_json::Value::Bool(on)) => {
                 let previous = std::fs::read(&path)
                     .ok()
@@ -1316,7 +1355,7 @@ impl Panel {
                     crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
                 }
             }
-            ("autoSend" | "videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
+            ("videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
                 write(key, (*on).into())
             }
             ("updateChannel", serde_json::Value::String(channel))
@@ -1461,7 +1500,7 @@ impl Panel {
                 available: login != LoginItem::Unavailable,
                 needs_approval: login == LoginItem::NeedsApproval,
             },
-            auto_send: config.auto_send.unwrap_or(true),
+            agent_demo_video: crate::handoff::experiment_enabled_in(&config, "agentDemoVideo"),
             remote_phone_ingest: config.remote_phone_ingest.unwrap_or(false),
             shortcuts: ShortcutKind::ALL
                 .into_iter()
@@ -1530,6 +1569,7 @@ impl Panel {
                 })
                 .collect(),
             updates: updates_available(),
+            update_check: self.update_check.clone(),
             update_channel: if config.update_channel.as_deref() == Some("main") {
                 "main"
             } else {
@@ -1566,11 +1606,10 @@ fn updates_available() -> bool {
     true
 }
 
+#[cfg(not(target_os = "linux"))]
 fn check_for_updates() {
     #[cfg(target_os = "macos")]
     crate::sparkle::check_for_updates();
-    #[cfg(target_os = "linux")]
-    std::thread::spawn(crate::linux::update::check_now);
     #[cfg(target_os = "windows")]
     let _ = crate::handoff::open_path(Path::new(RELEASES_URL));
 }
@@ -1625,6 +1664,8 @@ pub enum Event {
     Grants(Grants),
     CapturesSize(u64),
     Microphones(crate::mic::Inputs),
+    #[cfg(target_os = "linux")]
+    UpdateChecked(Result<&'static str, String>),
     /// Something outside the window may have changed (Hex, the login item): redraw.
     Tick,
     Exited,
@@ -1775,6 +1816,11 @@ impl Session {
                 self.panel.set_inputs(inputs);
                 Effect::None
             }
+            #[cfg(target_os = "linux")]
+            Event::UpdateChecked(result) => {
+                self.panel.finish_update_check(result);
+                Effect::None
+            }
             Event::Tick => Effect::None,
             Event::Exited => {
                 self.panel.on(Action::Close, host);
@@ -1806,6 +1852,15 @@ impl Session {
                 Effect::None
             }
             Effect::CheckForUpdates => {
+                #[cfg(target_os = "linux")]
+                {
+                    let events = std::sync::Arc::clone(&self.events);
+                    std::thread::spawn(move || {
+                        let result = crate::linux::update::check_cli().map_err(|error| format!("{error:#}"));
+                        events(Event::UpdateChecked(result));
+                    });
+                }
+                #[cfg(not(target_os = "linux"))]
                 check_for_updates();
                 Effect::None
             }
@@ -1995,6 +2050,30 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn manual_update_check_shows_progress_immediately() {
+        let dir = TempDir::new("update-progress");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
+        let view = serde_json::to_value(panel.view(&host)).unwrap();
+        assert_eq!(view["updateCheck"]["checking"], true, "a click must have visible in-progress state");
+        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None, "do not start two checks");
+        panel.finish_update_check(Ok("up to date"));
+        let view = serde_json::to_value(panel.view(&host)).unwrap();
+        assert_eq!(view["updateCheck"]["checking"], false);
+        assert_eq!(view["updateCheck"]["message"], "No new update is available on this channel.");
+        panel.on(Action::DismissUpdateCheck, &mut host);
+        assert!(panel.view(&host).update_check.message.is_none());
+        panel.on(Action::CheckForUpdates, &mut host);
+        panel.finish_update_check(Ok("already installed; restart Apparent to use it"));
+        assert!(panel.view(&host).update_check.message.unwrap().contains("Restart"));
+        panel.on(Action::CheckForUpdates, &mut host);
+        panel.finish_update_check(Err("feed unavailable".into()));
+        assert!(panel.view(&host).update_check.message.unwrap().contains("feed unavailable"));
+    }
+
     #[test]
     fn login_preference_is_saved_after_registration_succeeds() {
         let dir = TempDir::new("login-preference");
@@ -2006,6 +2085,23 @@ mod tests {
         host.refuse_login = true;
         panel.on(Action::Set { key: "launchAtLogin".into(), value: false.into() }, &mut host);
         assert_eq!(read_json(&host.path)["launchAtLogin"], true, "a failed OS change must not claim success in the file");
+    }
+
+    #[test]
+    fn agent_demo_video_switch_round_trips_without_losing_config() {
+        let dir = TempDir::new("agent-demo-video");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        assert!(panel.view(&host).agent_demo_video, "missing config defaults on");
+        std::fs::write(&host.path, r#"{"ingestToken":"private","experiments":{"other":true}}"#).unwrap();
+        assert!(panel.view(&host).agent_demo_video, "missing flag defaults on");
+        panel.on(Action::Set { key: "agentDemoVideo".into(), value: true.into() }, &mut host);
+        assert!(panel.view(&host).agent_demo_video);
+        assert_eq!(read_json(&host.path)["experiments"]["other"], true);
+        assert_eq!(read_json(&host.path)["ingestToken"], "private");
+        panel.on(Action::Set { key: "agentDemoVideo".into(), value: false.into() }, &mut host);
+        assert!(!panel.view(&host).agent_demo_video);
+        assert_eq!(read_json(&host.path)["experiments"]["agentDemoVideo"], false);
     }
 
     #[test]
@@ -2514,7 +2610,6 @@ mod tests {
                 host,
             )
         };
-        assert!(panel.view(&host).auto_send);
         #[cfg(target_os = "linux")]
         assert!(panel.view(&host).main_updates, "Linux must show the channel choice");
         assert_eq!(serde_json::to_value(panel.view(&host)).unwrap()["updateChannel"], "stable");
@@ -2532,7 +2627,6 @@ mod tests {
         set(&mut panel, &mut host, "playbackLevel", 0.5.into());
         assert!(Panel::default().view(&host).lower_playback);
         assert_eq!(Panel::default().view(&host).playback_level, 35);
-        set(&mut panel, &mut host, "autoSend", false.into());
         set(&mut panel, &mut host, "remotePhoneIngest", true.into());
         set(&mut panel, &mut host, "videoExport", true.into());
         set(&mut panel, &mut host, "transcriber", "hex".into());
@@ -2542,8 +2636,11 @@ mod tests {
         );
         set(&mut panel, &mut host, "transcriber", "nonsense".into());
         let view = panel.view(&host);
-        assert!(!view.auto_send && view.video_export);
+        assert!(view.video_export);
         assert!(view.remote_phone_ingest);
+        assert!(serde_json::to_value(&view).unwrap().get("autoSend").is_none());
+        set(&mut panel, &mut host, "autoSend", true.into());
+        assert!(read_json(&host.path).get("autoSend").is_none());
         assert_eq!(view.retention.preset, Some("month"));
         assert_eq!(
             view.retention.note,

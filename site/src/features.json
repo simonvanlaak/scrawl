@@ -17,7 +17,7 @@
     { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone or ApparentKit", "group": "start" },
     { "title": "Record", "detail": "Screen, voice, clicks and ⇧ ink on one clock", "group": "record" },
     { "title": "Bundle", "detail": "Keyframes, contact sheet, summary.md, apparent.json", "group": "agent" },
-    { "title": "Deliver", "detail": "Clipboard and ⌥⇧V, or straight to a session", "group": "delivery" },
+    { "title": "Deliver", "detail": "Clipboard and ⌥⇧V; no automatic session send", "group": "delivery" },
     { "title": "Agent", "detail": "The skill, then apparent zoom for a closer look", "group": "cli" }
   ],
   "features": [
@@ -137,9 +137,9 @@
       "group": "record",
       "name": "Microphone input equalizer",
       "says": "Five smooth bars respond to captured microphone samples in the Linux recording capsule; this does not assess speech or transcription quality.",
-      "status": "experiment:audioEqualizer",
+      "status": "main",
       "platforms": ["linux"],
-      "note": "Off by default. The recording cue, Finish, and warning text remain separate.",
+      "note": "On by default on Linux. The recording cue, Finish, and warning text remain separate.",
       "docs": ["docs/linux.md"]
     },
     {
@@ -296,10 +296,19 @@
       "id": "click-visual-handoff",
       "group": "finish",
       "name": "Attach visuals after a click",
-      "says": "Automatic agent delivery omits the image on no-click captures, while the recorded visuals remain available through apparent zoom.",
+      "says": "The old automatic attachment rule is inactive; recorded visuals remain available through apparent zoom.",
       "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
+      "id": "agent-demo-video",
+      "group": "finish",
+      "name": "Ask the agent for an Apparent video",
+      "says": "When enabled, a copied or pasted capture asks an agent to demonstrate complex changes in a short Apparent video if it can access the screen.",
+      "status": "experiment:agentDemoVideo",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md", "docs/onboarding-and-settings.md"]
     },
     {
       "id": "clipboard-image",
@@ -530,40 +539,43 @@
     {
       "id": "devsite-routing",
       "group": "delivery",
-      "name": "Dev-site captures to their session",
-      "says": "A capture that ends on a localhost dev site goes to that project's newest OpenCode session, and is still copied.",
-      "status": "stable@0.3.4",
+      "name": "Legacy dev-site routing (disabled)",
+      "says": "Old autoSend configuration is preserved, but captures now stay local and are copied; it no longer sends anything.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac"],
-      "note": "Reads the browser's tab URL, which only the Mac does; /sdk.js registrations route everywhere.",
-      "config": [{ "key": "autoSend", "value": "false", "does": "Keep dev-site captures on the clipboard" }],
-      "docs": ["README.md#sending-captures-of-a-dev-site-to-its-session", "docs/iphone-and-routing.md"]
+      "note": "Retained only to document old configuration keys; no active routing.",
+      "config": [{ "key": "autoSend", "value": "true", "does": "Ignored; captures are never sent automatically" }],
+      "docs": ["docs/iphone-and-routing.md"]
     },
     {
       "id": "sdk-js",
       "group": "delivery",
-      "name": "/sdk.js page registration",
-      "says": "A dev page that loads Apparent's /sdk.js names its session or project folder.",
-      "status": "stable@0.3.4",
+      "name": "Legacy /sdk.js registration (inactive)",
+      "says": "The script can still register a dev page, but captures no longer use its session or project folder.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["README.md#sending-captures-of-a-dev-site-to-its-session"]
+      "docs": ["docs/iphone-and-routing.md"]
     },
     {
       "id": "smart-routing",
       "group": "delivery",
-      "name": "Smart routing",
-      "says": "Weighs more clues (tab, Ghostty pane, window title, transcript) and sends with a 3 s undo, or offers a choice.",
-      "status": "experiment:smartRouting",
+      "name": "Legacy smart routing (disabled)",
+      "says": "The old routing settings remain readable; the smartRouting experiment no longer sends captures.",
+      "status": "main",
       "platforms": ["mac"],
       "added": "2026-10-19",
-      "config": [{ "key": "routing", "value": "{\"apps\": {…}, \"servers\": {…}}", "does": "Checkouts for apps and folders for file servers" }],
+      "config": [{ "key": "routing", "value": "{\"apps\": {…}, \"servers\": {…}}", "does": "Ignored by capture delivery" }],
       "docs": ["docs/routing.md"]
     },
     {
       "id": "delivery-retries",
       "group": "delivery",
-      "name": "Retries",
-      "says": "A send OpenCode didn't take is retried every 15 s, backing off to 30 min, for a day.",
-      "status": "stable@0.3.4",
+      "name": "Legacy delivery retries (disabled)",
+      "says": "Capture processing does not queue new OpenCode deliveries. Old retry markers are not processed on startup.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/iphone-and-routing.md"]
     },
@@ -833,13 +845,14 @@
       "docs": ["skills/apparent/SKILL.md"]
     },
     {
-      "id": "cli-send",
+      "id": "cli-copy",
       "group": "cli",
-      "name": "send and route",
-      "says": "Queue a capture into a session (refusing a different one than recorded without --reroute); see where a URL would route.",
-      "status": "stable@0.3.4",
+      "name": "copy",
+      "says": "Copy a saved capture to the clipboard without selecting or contacting an agent session.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/apparent/SKILL.md", "README.md#sending-captures-of-a-dev-site-to-its-session"]
+      "docs": ["skills/apparent/SKILL.md", "README.md#usage"]
     },
     {
       "id": "cli-reprocess",
@@ -900,7 +913,7 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
+      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
     },
     {

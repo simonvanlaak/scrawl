@@ -84,11 +84,15 @@ pub fn status() -> Result<serde_json::Value> {
 }
 
 pub fn check_cli() -> Result<&'static str> {
-    let image = target()?.context("Updates require an AppImage owned by you under your home directory")?;
-    let before = installed_id(&image);
+    target()?.context("Updates require an AppImage owned by you under your home directory")?;
     let _guard = CHECK.lock().map_err(|_| anyhow::anyhow!("update check lock poisoned"))?;
-    check()?;
-    Ok(if installed_id(&image) != before { "installed; restart Apparent to use it" } else { "up to date" })
+    Ok(if check()? {
+        "installed; restart Apparent to use it"
+    } else if status()?["pendingRestart"] == true {
+        "already installed; restart Apparent to use it"
+    } else {
+        "up to date"
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,8 +288,8 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
     result
 }
 
-fn check() -> Result<()> {
-    let Some(image) = target()? else { return Ok(()) };
+fn check() -> Result<bool> {
+    let Some(image) = target()? else { return Ok(false) };
     let status = status()?;
     let arch = arch().context("no AppImage for this CPU")?;
     let candidate = if status["channel"] == "main" {
@@ -294,10 +298,10 @@ fn check() -> Result<()> {
     } else {
         stable_candidate(arch)?
     };
-    if !newer(&candidate, installed_id(&image)) { return Ok(()) }
+    if !newer(&candidate, installed_id(&image)) { return Ok(false) }
     install(&candidate, &image)?;
     super::shell::notify("Apparent updated", "The new version will start the next time you open Apparent. Your previous AppImage is kept beside it.");
-    Ok(())
+    Ok(true)
 }
 
 pub fn check_now() {

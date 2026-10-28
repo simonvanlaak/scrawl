@@ -71,7 +71,7 @@ pub fn paste_bundle(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = crate::handoff::load_bundle(bundle_dir)?;
     let image = std::fs::read(directory.join(&bundle.contact_sheet))
         .context("Could not read contact sheet")?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = crate::handoff::clipboard_summary(&bundle, &directory);
     let focused = super::hyprland::focused_window()?;
     preflight(&focused)?;
     user_paste_sequence(&mut LivePaste {

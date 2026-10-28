@@ -53,7 +53,7 @@ const SAYS: Record<string, string> = {
   zoom: "a PNG sheet of frames around a moment, given as M:SS or as a phrase that was said",
   inspect: "print summary.md, or apparent.json with --json",
   frames: "plain PNGs of a time range; prints their paths",
-  send: "queue the capture into an OpenCode session, or --clipboard to copy the summary",
+  copy: "copy the capture to the clipboard",
   export: "one .mp4 with the ink and clicks burned in and the audio in sync",
   skill: "print the agent skill without installing anything",
 }
@@ -91,7 +91,7 @@ ${version ? `- [Download for Mac](${SITE}/releases/Apparent-latest-arm64.dmg): v
 
 ## Agents
 
-- [Agent skill](${SITE}/skill.md): install it with \`bunx skills add tryapparent/apparent\`. With it, an agent that gets a Apparent paste reads the contact sheet and transcript, opens the keyframes the narration points at, and uses the \`apparent\` command to look closer.
+- [Agent skill](${SITE}/skill.md): install it with \`bunx skills add tryapparent/apparent\`. With it, an agent that gets an Apparent paste reads the contact sheet and transcript, opens the keyframes the narration points at, and uses the \`apparent\` command to look closer.
 - [SKILL.md on GitHub](${RAW_SKILL}): the same skill, raw, from the main branch.
 - [Full text](${SITE}/llms-full.txt): this file plus the install notes, capture controls, CLI and the whole skill in one document.
 
@@ -107,7 +107,7 @@ ${commands(skill).join("\n")}
 
 ## Optional
 
-- [README](${REPO}#readme): everything else, including the iPhone capture, ApparentKit for iOS apps, auto-crop, sending dev-site captures to OpenCode sessions, and retention.
+- [README](${REPO}#readme): everything else, including iPhone capture, ApparentKit for iOS apps, auto-crop, clipboard handoff, and retention.
 - [Source code](${REPO}): Rust and Swift, MIT licensed.
 - [Appcast](${SITE}/appcast.xml): the Sparkle update feed.
 `

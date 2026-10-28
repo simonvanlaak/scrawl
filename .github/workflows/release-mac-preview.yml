@@ -1,6 +1,7 @@
-name: Mac preview DMG
+name: Mac preview release
 
-# A separate, ad-hoc-signed preview channel. This does not publish Kit's appcast or site.
+# The temporary Mac release path: ad-hoc code signature, Sparkle EdDSA update signature.
+# Keep its feed separate from Kit's Developer ID signed production appcast.
 on:
   workflow_dispatch:
 
@@ -25,15 +26,30 @@ jobs:
           cache-on-failure: true
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
-      - name: Build and verify the DMG
+      - name: Build and verify the preview app
         env:
           APPARENT_PREVIEW_VERSION: 0.${{ github.run_number }}.${{ github.run_attempt }}
           APPARENT_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+          APPARENT_PREVIEW_PUBLIC_KEY: ${{ vars.SPARKLE_PREVIEW_PUBLIC_KEY }}
         run: |
-          python3 -m unittest discover -s scripts/tests -p test_preview_release.py
+          python3 -m unittest discover -s scripts/tests -p 'test_preview_*.py'
           bash scripts/build-mac-preview.sh
           scripts/check-ca-roots.sh target/release/apparent
           target/release/apparent --help
+      - name: Sign the Sparkle archive
+        env:
+          SPARKLE_PREVIEW_PRIVATE_KEY: ${{ secrets.SPARKLE_PREVIEW_PRIVATE_KEY }}
+          SPARKLE_PREVIEW_PUBLIC_KEY: ${{ vars.SPARKLE_PREVIEW_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SPARKLE_PREVIEW_PRIVATE_KEY" || { echo 'Missing preview Sparkle signing secret' >&2; exit 1; }
+          swift scripts/verify-preview-sparkle-key.swift
+          version="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          zip="dist/Apparent-Preview-${version}-arm64.zip"
+          # Sparkle reads the key from stdin; do not put it in arguments, logs or the checkout.
+          printf '%s\n' "$SPARKLE_PREVIEW_PRIVATE_KEY" | \
+            "$(scripts/setup-sparkle.sh)/bin/sign_update" --ed-key-file - "$zip" \
+            > "$RUNNER_TEMP/preview-signature-attributes"
       - name: Publish a uniquely versioned prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,13 +58,48 @@ jobs:
           version="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           tag="preview-mac-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           dmg="dist/Apparent-Preview-${version}-arm64.dmg"
+          zip="dist/Apparent-Preview-${version}-arm64.zip"
           # Never replace an existing tag or release, including on a re-run.
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
             echo "Tag already exists: ${tag}" >&2
             exit 1
           fi
-          gh release create "$tag" "$dmg" "$dmg.sha256" \
+          gh release create "$tag" "$dmg" "$dmg.sha256" "$zip" \
             --target "$GITHUB_SHA" \
             --title "Apparent Mac preview ${version}" \
-            --notes "Ad-hoc-signed Apple silicon prototype. Not notarized: macOS may require Privacy & Security → Open Anyway. No automatic updates; install newer previews manually. This is not Kit's production Apparent release." \
+            --notes "Temporary Mac release. Ad-hoc code signed, not notarized: initial installation may require Privacy & Security → Open Anyway. Later updates use the preview Sparkle feed and EdDSA signature. This does not update Kit's Developer ID signed app." \
             --prerelease --latest=false
+      - name: Publish the signed preview appcast after the ZIP is available
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          build="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          tag="preview-mac-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          zip="dist/Apparent-Preview-${version}-arm64.zip"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$zip")"
+          curl --fail --location --head --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors "$url" > /dev/null
+          branch=preview-mac-feed
+          if ! gh api "repos/${GITHUB_REPOSITORY}/branches/${branch}" > /dev/null 2>&1; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${branch}" -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          previous="$RUNNER_TEMP/previous-preview-appcast.xml"
+          printf '' > "$previous"
+          sha=''
+          if gh api "repos/${GITHUB_REPOSITORY}/contents/appcast.xml?ref=${branch}" > "$RUNNER_TEMP/preview-feed-response.json" 2>/dev/null; then
+            sha=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha"])' "$RUNNER_TEMP/preview-feed-response.json")
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["content"].replace("\n", ""), end="")' \
+              "$RUNNER_TEMP/preview-feed-response.json" | base64 -D > "$previous"
+          fi
+          python3 scripts/preview_appcast.py \
+            --previous "$previous" --zip "$zip" --version "$version" --build-number "$build" \
+            --signature-attributes "$(cat "$RUNNER_TEMP/preview-signature-attributes")" \
+            --url "$url" --out "$RUNNER_TEMP/preview-appcast.xml"
+          fields=(-f branch="$branch" -f message="Publish signed Mac preview $version" \
+            -f content="$(base64 < "$RUNNER_TEMP/preview-appcast.xml" | tr -d '\n')")
+          if [[ -n "$sha" ]]; then fields+=(-f sha="$sha"); fi
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/appcast.xml" "${fields[@]}" > /dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/contents/appcast.xml?ref=${branch}" \
+            --jq '.content' | base64 -D | cmp - "$RUNNER_TEMP/preview-appcast.xml"

@@ -1,6 +1,7 @@
 """Contract checks for the isolated, manual Mac preview release path."""
 
 from pathlib import Path
+import base64
 import os
 import plistlib
 import subprocess
@@ -17,9 +18,16 @@ class PreviewReleaseTest(unittest.TestCase):
             root = Path(tmp)
             (root / "scripts").mkdir()
             (root / "bin").mkdir()
+            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png"):
+                destination = root / "assets" / asset
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((ROOT / "assets" / asset).read_bytes())
+            (root / "sparkle/Sparkle.framework/Versions/B/XPCServices").mkdir(parents=True)
             (root / "scripts/build-mac-preview.sh").write_bytes(
                 (ROOT / "scripts/build-mac-preview.sh").read_bytes()
             )
+            (root / "scripts/setup-sparkle.sh").write_text('#!/bin/sh\nprintf "%s/sparkle\\n" "$PWD"\n')
+            (root / "scripts/setup-sparkle.sh").chmod(0o755)
             (root / "bin/cargo").write_text(
                 '#!/bin/sh\nmkdir -p target/release\n'
                 'printf "test" > target/release/apparent\n'
@@ -31,10 +39,16 @@ class PreviewReleaseTest(unittest.TestCase):
                 '#!/bin/sh\n'
                 'if [ "$1" = create ]; then eval "out=\\${$#}"; printf "fake dmg" > "$out"; fi\n'
             )
+            (root / "bin/ditto").write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = -c ]; then eval "out=\\${$#}"; printf "fake zip" > "$out"; '
+                'else cp -R "$1" "$2"; fi\n'
+            )
             for tool in (root / "bin").iterdir():
                 tool.chmod(0o755)
             env = dict(os.environ, PATH=f'{root / "bin"}:{os.environ["PATH"]}',
-                       APPARENT_PREVIEW_VERSION="0.123.2", APPARENT_PREVIEW_BUILD_NUMBER="123.2")
+                       APPARENT_PREVIEW_VERSION="0.123.2", APPARENT_PREVIEW_BUILD_NUMBER="123.2",
+                       APPARENT_PREVIEW_PUBLIC_KEY=base64.b64encode(bytes([1]) * 32).decode())
             result = subprocess.run(["bash", str(root / "scripts/build-mac-preview.sh")],
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -42,8 +56,16 @@ class PreviewReleaseTest(unittest.TestCase):
             self.assertEqual(info["CFBundleIdentifier"], "dev.simonvanlaak.apparent.preview")
             self.assertEqual(info["CFBundleShortVersionString"], "0.123.2")
             self.assertEqual(info["CFBundleVersion"], "123.2")
-            self.assertNotIn("SUFeedURL", info)
+            self.assertIn("preview-mac-feed/appcast.xml", info["SUFeedURL"])
+            self.assertEqual(info["SUPublicEDKey"], env["APPARENT_PREVIEW_PUBLIC_KEY"])
+            self.assertTrue((root / "dist/Apparent Preview.app/Contents/Frameworks/Sparkle.framework").is_dir())
+            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png"):
+                self.assertEqual(
+                    (root / "dist/Apparent Preview.app/Contents/Resources" / Path(asset).name).read_bytes(),
+                    (root / "assets" / asset).read_bytes(),
+                )
             self.assertTrue((root / "dist/Apparent-Preview-0.123.2-arm64.dmg.sha256").is_file())
+            self.assertTrue((root / "dist/Apparent-Preview-0.123.2-arm64.zip").is_file())
             self.assertTrue((root / "dist/preview-staging/Applications").is_symlink())
 
     def test_helper_embedded_identity_follows_preview_identity(self):
@@ -61,13 +83,16 @@ class PreviewReleaseTest(unittest.TestCase):
         self.assertIn('option_env!("APPARENT_PREVIEW_BUILD")', cli)
         self.assertIn('option_env!("APPARENT_PREVIEW_BUILD")', settings)
 
-    def test_preview_bundle_is_separate_and_has_no_production_updater(self):
+    def test_preview_bundle_has_its_own_sparkle_feed(self):
         script = (ROOT / "scripts/build-mac-preview.sh").read_text()
         self.assertIn("dev.simonvanlaak.apparent.preview", script)
         self.assertIn("Apparent Preview.app", script)
         self.assertNotIn("dev.kitlangton.apparent", script)
-        self.assertNotIn("SUFeedURL", script)
-        self.assertNotIn("Sparkle.framework", script)
+        self.assertIn("Sparkle.framework", script)
+        self.assertIn("SUFeedURL", script)
+        self.assertIn("preview-mac-feed/appcast.xml", script)
+        self.assertIn("APPARENT_PREVIEW_PUBLIC_KEY", script)
+        self.assertNotIn("apparent.kitlangton.com/appcast.xml", script)
         self.assertNotIn("notarytool", script)
         self.assertNotIn("site/public", script)
         self.assertIn("codesign --verify", script)
@@ -85,6 +110,13 @@ class PreviewReleaseTest(unittest.TestCase):
         self.assertIn("--latest=false", workflow)
         self.assertIn("gh release create", workflow)
         self.assertLess(workflow.index("build-mac-preview.sh"), workflow.index("gh release create"))
+        self.assertIn("SPARKLE_PREVIEW_PRIVATE_KEY", workflow)
+        self.assertIn("SPARKLE_PREVIEW_PUBLIC_KEY", workflow)
+        self.assertIn("sign_update", workflow)
+        self.assertIn("swift scripts/verify-preview-sparkle-key.swift", workflow)
+        self.assertIn("scripts/preview_appcast.py", workflow)
+        self.assertLess(workflow.index("gh release create"), workflow.index("scripts/preview_appcast.py"))
+        self.assertIn("preview-mac-feed", workflow)
         self.assertRegex(workflow, r'--target "\$GITHUB_SHA"')
         self.assertNotIn("--clobber", workflow)
         self.assertNotIn("release-app.sh", workflow)

@@ -31,6 +31,8 @@ chmod +x "${APP_BUNDLE}/Contents/MacOS/apparent" "${APP_BUNDLE}/Contents/MacOS/a
 if [[ -f "${REPO_DIR}/assets/Apparent.icns" ]]; then
   cp -f "${REPO_DIR}/assets/Apparent.icns" "${APP_BUNDLE}/Contents/Resources/Apparent.icns"
 fi
+cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${APP_BUNDLE}/Contents/Resources/HostGrotesk-Variable.ttf"
+cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${APP_BUNDLE}/Contents/Resources/apparent-wordmark.png"
 
 /usr/bin/ditto "${SPARKLE_DIR}/Sparkle.framework" "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
 
@@ -72,7 +74,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<PLIST
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Apparent transcribes your narration on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Apparent reads the address of the browser tab you captured, to send a capture of a dev site to its project's session.</string>
+  <string>Apparent reads the address of the browser tab you captured to record its context.</string>
   <key>SUEnableAutomaticChecks</key>
   <true/>
   <key>SUAutomaticallyUpdate</key>

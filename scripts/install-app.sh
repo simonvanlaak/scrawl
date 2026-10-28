@@ -75,7 +75,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Apparent transcribes your narration on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Apparent reads the address of the browser tab you captured, to send a capture of a dev site to its project's session.</string>
+  <string>Apparent reads the address of the browser tab you captured to record its context.</string>
   <key>SUEnableAutomaticChecks</key>
   <false/>
   <key>SUAutomaticallyUpdate</key>

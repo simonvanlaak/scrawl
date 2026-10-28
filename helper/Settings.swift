@@ -8,7 +8,7 @@ import SwiftUI
 // `apparent-helper settings [--pane P] [--icon PNG] [--render DIR]`: the Settings window.
 // Apparent decides everything (`src/settings.rs`) and sends what to show as JSON lines on stdin:
 //   {"type":"state","version":"0.3.2","login":{"on":false,"available":true,"needsApproval":false},
-//    "autoSend":true,"shortcuts":[{"kind":"record","title":"Record","label":"⌥⇧S","key":"S",
+//    "shortcuts":[{"kind":"record","title":"Record","label":"⌥⇧S","key":"S",
 //    "shift":true,"control":false,"option":true,"command":false,"isDefault":true,
 //    "recording":false,"error":null},…],"microphone":{"selected":"default","value":"System default",
 //    "options":[{"id":"default","title":"System default (…)","enabled":true},{"id":"-",…},…],
@@ -18,7 +18,7 @@ import SwiftUI
 //    "updates":true}
 //   {"type":"show","pane":"permissions"}  {"type":"request"|"open-settings","permission":"…"}
 //   {"type":"close"}
-// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"autoSend","value":false},
+// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"remotePhoneIngest","value":false},
 // {"action":"record-shortcut","kind":"record"}, {"action":"shortcut","kind":"record",
 // "keyCode":15,"modifiers":6144,"key":"r","reserved":false}, {"action":"cancel-shortcut"},
 // {"action":"reset-shortcut","kind":"paste"}, {"action":"clear-shortcut","kind":"paste"},
@@ -151,7 +151,7 @@ struct SettingsCommandLine: Decodable, Equatable {
 struct SettingsState: Decodable, Equatable {
   var version = "0.3.2"
   var login = SettingsLogin()
-  var autoSend = true
+  var agentDemoVideo = true
   var remotePhoneIngest = false
   var shortcuts: [SettingsShortcut] = [
     SettingsShortcut(),
@@ -935,10 +935,6 @@ struct SettingsView: View {
           SettingsSwitch(on: state.login.on, enabled: state.login.available) { model.set("launchAtLogin", $0) }
         }
         SettingsSeparator()
-        SettingsRow(title: "Send dev-site captures to OpenCode") {
-          SettingsSwitch(on: state.autoSend) { model.set("autoSend", $0) }
-        }
-        SettingsSeparator()
         SettingsRow(title: "Allow phone uploads from other devices") {
           SettingsSwitch(on: state.remotePhoneIngest) { model.set("remotePhoneIngest", $0) }
         }
@@ -1106,6 +1102,12 @@ struct SettingsView: View {
     let theme = SettingsTheme(scheme)
     let cli = state.commandLine
     return VStack(spacing: 0) {
+      SettingsGroup {
+        SettingsRow(title: "Ask for an Apparent video on complex changes") {
+          SettingsSwitch(on: state.agentDemoVideo) { model.set("agentDemoVideo", $0) }
+        }
+      }
+      SettingsCaption(text: "Adds a video request to copied and pasted captures when the agent can record the result. On by default.")
       SettingsGroup {
         HStack(spacing: 12) {
           VStack(alignment: .leading, spacing: 1) {

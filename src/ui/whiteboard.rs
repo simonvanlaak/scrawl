@@ -259,6 +259,21 @@ pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
     platform::take_keys(cx);
 }
 
+/// Snapshot the paper at Stop before the UI is dismissed; the bundle worker uses this copy.
+pub(super) fn finish_snapshot(board: &Rc<RefCell<Board>>, close: impl FnOnce()) -> Board {
+    let snapshot = board.borrow().clone();
+    close();
+    snapshot
+}
+
+pub(super) fn close(cx: &mut App) {
+    for handle in cx.windows() {
+        if handle.downcast::<WhiteboardWindow>().is_some() {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+}
+
 /// A paper export is optional. Never turn a finished screen recording into a failed capture.
 pub(super) fn finish_handoff(
     dir: &std::path::Path,
@@ -476,6 +491,20 @@ fn render_paper(strokes: &[Vec<[f32; 2]>], t_ms: u64) -> crate::model::RgbaFrame
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_closes_the_board_after_preserving_its_last_drawing() {
+        let board = Rc::new(RefCell::new(Board::default()));
+        board.borrow_mut().start([12.0, 18.0]);
+        board.borrow_mut().extend([32.0, 48.0]);
+        board.borrow_mut().finish();
+        let closed = std::cell::Cell::new(false);
+        let snapshot = finish_snapshot(&board, || closed.set(true));
+        assert!(closed.get(), "Stop must dismiss the visible whiteboard");
+        assert_eq!(snapshot.strokes, board.borrow().strokes);
+        board.borrow_mut().clear();
+        assert_eq!(snapshot.strokes.len(), 1, "export must survive the next session");
+    }
     use crate::model::KeyframeReason;
 
     #[test]

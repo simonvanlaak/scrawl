@@ -1,24 +1,40 @@
 # Releasing Apparent
 
-## Separate Mac preview for friends
+## Temporary Mac preview releases
 
-The fork's **Mac preview DMG** workflow (`.github/workflows/release-mac-preview.yml`) is a
-manual, Apple-silicon-only prototype path; it does **not** run the production steps below.
-After merging it into `tryapparent/apparent`'s `main`, choose **Actions → Mac preview DMG → Run
-workflow → main**. The job builds on `macos-26`, assigns version `0.<workflow run>.<attempt>` and
-tag `preview-mac-<run>-<attempt>`, and creates a GitHub **prerelease** with the DMG and SHA-256
-file. A re-run uses a new attempt number; an existing tag is never overwritten. Download it
-from the release assets, not from the Actions log.
+Until Developer ID signing is affordable, the fork's **Mac preview release** workflow
+(`.github/workflows/release-mac-preview.yml`) is the regular distribution path for Apple silicon.
+It is dispatched manually from `tryapparent/apparent`'s `main`: **Actions → Mac preview release →
+Run workflow → main**. It builds on `macos-26`, assigns version `0.<workflow run>.<attempt>` and
+tag `preview-mac-<run>-<attempt>`, and creates a GitHub prerelease with the DMG, its SHA-256 and
+a Sparkle ZIP. A re-run gets a new attempt number; existing tags are never overwritten. The
+first install uses the release DMG. Installed previews then check their own signed Sparkle feed
+(`preview-mac-feed/appcast.xml`), including Settings → About → Check for Updates….
+
+Before the first dispatch, generate a **dedicated preview** Sparkle EdDSA key pair on a Mac using
+the pinned `scripts/setup-sparkle.sh` tools. Run its `bin/generate_keys --account apparent-preview`
+in an interactive Mac login session, then `bin/generate_keys --account apparent-preview -p` to see
+the public key and `bin/generate_keys --account apparent-preview -x <private-file>` to export the
+private seed. Set repository Actions variable `SPARKLE_PREVIEW_PUBLIC_KEY` to the public base64
+string and secret `SPARKLE_PREVIEW_PRIVATE_KEY` to the **contents** of that exported file. Keep
+the exported file out of the repo and delete the extra copy after storing the secret safely.
+The workflow rejects missing/mismatched keys before publishing, signs the ZIP with the private
+key from stdin, and only moves the feed after the public asset is reachable. Keep this key for
+all later preview releases: replacing it breaks updates for installed copies. The production
+Sparkle key and production appcast are unrelated. Test an actual update between two previews on
+a Mac before announcing it; CI packaging and an appcast alone do not prove installation works.
 
 The app is named `Apparent Preview` with bundle ID `dev.simonvanlaak.apparent.preview`, so it
 does not overwrite `Apparent.app` or follow Kit's Sparkle feed. It is ad-hoc signed, **not
-notarized**: testers may have to use System Settings → Privacy & Security → Open Anyway.
-Updates are **manual downloads**, not in-app automatic updates. It still uses Apparent's normal
+notarized**: the first download may require System Settings → Privacy & Security → Open Anyway.
+Sparkle verifies subsequent ZIPs with the separate EdDSA key; this is not Apple notarization.
+It still uses Apparent's normal
 capture/config paths, so it is not a separate data profile: don't run it alongside production
 Apparent or assume their settings and hotkeys are independent. The preview cannot register itself
 at login or install the `apparent` command, to avoid replacing production integrations. Do not use
-this workflow for a production release; that still requires the Developer ID, notarization,
-Sparkle signing and the checks below.
+this workflow for a Developer ID/notarized release; that still requires the checks below. Moving
+users from the preview back to a signed stable app is a separate migration, not an update in this
+feed. The stable app's build-number ordering and bundle identity will need an explicit plan.
 
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
 is one Mac build (notarized DMG + Sparkle zip), one Windows zip and two Linux AppImages,

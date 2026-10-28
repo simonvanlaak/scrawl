@@ -1,6 +1,6 @@
 ---
 name: apparent
-description: Read and dig into Apparent screen captures, where someone recorded their screen while talking, clicking and drawing red marks on it. Use whenever a message contains a Apparent capture (a line like `[apparent 0:12 · App “Window” · /path/to/….apparent]`, a `.apparent` bundle path, or a contact-sheet.png from one), when the user says "look at my apparent" or refers to something they just recorded or drew, or when you need the `apparent` CLI to zoom into a moment, pull frames, send a capture to a session, or export one as video.
+description: Read and dig into Apparent screen captures, where someone recorded their screen while talking, clicking and drawing red marks on it. Use whenever a message contains an Apparent capture (a line like `[apparent 0:12 · App “Window” · /path/to/….apparent]`, a `.apparent` bundle path, or a contact-sheet.png from one), when the user says "look at my apparent" or refers to something they just recorded or drew, or when you need the `apparent` CLI to zoom into a moment, pull frames, copy a capture, or export one as video.
 ---
 
 # Apparent captures
@@ -23,7 +23,7 @@ Cropped to: the activity in OpenCode (full frames in frames-full/)
 - The next line asks you to open the images first. Do: the text is only what was said and done, and a problem can show in a frame without being marked or mentioned.
 - Each `#N (M:SS)` line is a keyframe: what they did at that moment in brackets, then what they said while it was on screen. A line with no quote has the action alone.
 - `⚑` means they flagged the moment on purpose. `⟨Name⟩` means the app reported a new screen. Lines starting `·` are events or values the app logged.
-- Optional lines near the top: `For session:` (where Apparent sent it), `Screen:` with app context, `Note:`, and `Cropped to:`.
+- Optional lines near the top: `Screen:` with app context, `Note:`, and `Cropped to:`. Older bundles may include `For session:` as recorded metadata; that does not authorize delivery.
 - Coordinates are fractions of the captured area, from the top left (x 0.51 is just right of centre).
 
 When you answer, refer to moments the same way, as in "#3 (0:10)", so the person can find them on the contact sheet.
@@ -73,13 +73,12 @@ apparent inspect <bundle>               # summary.md, the text above
 apparent inspect <bundle> --json        # apparent.json
 apparent inspect <bundle> --marks       # the marks, numbered as in the text [--json]
 apparent frames <bundle> --from 0:04 --to 0:06 [--fps 4]   # plain PNGs of a range; prints their paths
-apparent send <bundle> --session ses_…  # queue the capture into an OpenCode session
-apparent send <bundle> --clipboard      # copy the summary text to the clipboard
+apparent copy <bundle>                  # copy the capture to the clipboard
 apparent export <bundle> [--out demo.mp4] [--zoom] [--crop auto|full|x,y,w,h] [--size 1920]
 ```
 
 - `zoom` and `frames` write into `<bundle>/zoom/`. Leave the rest of the bundle as it is, because Apparent manages those files and cleans them up.
-- `send` without `--session` goes to the session the capture was addressed to (the `For session:` line), and otherwise to the most recently active session. With a recorded destination it refuses a different `--session` unless you pass `--reroute`, so check with the person before rerouting.
+- Apparent does not send captures to agent sessions. Use `copy` to put a finished capture on the clipboard.
 - `export` writes one `.mp4` with the ink and clicks burned in and the audio in sync (default `~/Movies/Apparent/<bundle>.mp4`). `--zoom` eases in toward the activity. `--no-ink`, `--no-clicks`, `--hevc` and `--fps` are also available.
 - On Linux, `apparent update status` prints JSON with the selected channel, the **live process** version (`running.version`, or `null` if none), the installed AppImage identity, and whether a restart is pending. The `running` object in `~/.config/apparent/config.json` is a launch record, not proof the process is still alive after a crash; use `status` to validate its PID and start time. `apparent update channel stable|main` chooses the feed; `apparent update check` checks and stages an update for the next launch (installed AppImages only).
 - Video and audio go to the Trash 7 days after a capture unless the person changed that in Settings. After that `zoom`, `frames` and `export` can't read the video, but `frames/`, the contact sheet and `apparent.json` remain.

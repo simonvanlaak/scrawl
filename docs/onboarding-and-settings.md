@@ -46,6 +46,8 @@ Launch at login writes `"launchAtLogin": true|false` to `config.json` before cha
 
 Agents › Command-line tool (`src/command_line.rs`) symlinks the app's own binary (its real path, which is how it finds the helper) as `apparent` into the first writable of `/opt/homebrew/bin`, `/usr/local/bin`, else `~/.local/bin`; it never asks for admin or replaces a different program. A bare `apparent` from a terminal prints help instead of starting a second app. Windows Settings writes `apparent.cmd` targeting the current executable. Agents › Agent skill shows `bunx skills add tryapparent/apparent` (`skills/apparent/SKILL.md`, also printed by `apparent skill`). This identity change does not migrate earlier captures, settings, OS permissions, or independently installed commands.
 
+Agents › Ask for a Apparent video on complex changes toggles `"experiments": {"agentDemoVideo": true|false}`. Absent is on; set it to false to disable. Settings preserves other experiment flags and config keys; the next copy or paste reads the file without a restart. It adds a conditional request to the copied/pasted agent prompt, not the archived `summary.md`; automatic session delivery has been removed. The agent should only demonstrate a result it can actually see and report if recording is unavailable.
+
 Render every pane (dark, light, each shortcut state: held, listening, partial, refused, accepted, custom; microphone chosen/missing/not allowed) with `apparent-helper settings --render DIR`, and one take on the shortcuts as 60 fps PNGs for a video with `--render DIR --shortcut-clip [--light]`; test with `cargo test settings::`.
 
 ## Lower other audio while recording (`src/playback.rs`, `helper/PlaybackVolume.swift`)

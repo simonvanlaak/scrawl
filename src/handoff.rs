@@ -268,7 +268,7 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
 
 pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = clipboard_summary(&bundle, &directory);
     #[cfg(target_os = "windows")]
     if experiment("clipboardImage")
         && let Ok(image) = fs::read(directory.join(&bundle.contact_sheet))
@@ -277,6 +277,27 @@ pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
         return Ok(());
     }
     copy_string_to_clipboard(&summary)
+}
+
+const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
+const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If you cannot record that screen, say so instead of claiming a video exists.";
+
+/// The request belongs to copy/paste, not the archived summary or automatic session message.
+/// Read config on each handoff so file edits take effect without a restart.
+pub(crate) fn clipboard_summary(bundle: &ApparentBundle, directory: &Path) -> String {
+    with_demo_video_request(
+        crate::sketch::summary_markdown(bundle, directory),
+        experiment(AGENT_DEMO_VIDEO),
+    )
+}
+
+fn with_demo_video_request(mut summary: String, request_video: bool) -> String {
+    if request_video {
+        summary.push('\n');
+        summary.push_str(DEMO_VIDEO_REQUEST);
+        summary.push('\n');
+    }
+    summary
 }
 
 /// Pastes both the contact-sheet image and the transcript/keyframe text into the active app
@@ -298,7 +319,7 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
     let sheet_path = directory.join(&bundle.contact_sheet);
     let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = clipboard_summary(&bundle, &directory);
 
     crate::capture::wait_for_modifiers_released(350);
 
@@ -361,7 +382,7 @@ pub(crate) fn paste_bundle_into_original_draft(
     let (directory, bundle) = load_bundle(bundle_dir)?;
     let sheet_path = directory.join(&bundle.contact_sheet);
     let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = clipboard_summary(&bundle, &directory);
     run_draft_handoff_at(
         &image,
         &summary,
@@ -857,7 +878,12 @@ pub fn experiment(name: &str) -> bool {
     if overridden || cfg!(test) {
         return overridden;
     }
-    config().experiments.get(name).copied().unwrap_or(false)
+    experiment_enabled_in(&config(), name)
+}
+
+/// Most experiments are opt-in. This one is on unless explicitly disabled.
+pub(crate) fn experiment_enabled_in(config: &Config, name: &str) -> bool {
+    config.experiments.get(name).copied().unwrap_or(name == AGENT_DEMO_VIDEO)
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -1129,6 +1155,26 @@ pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> 
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+/// Change one experiment without replacing unrelated flags or secret-bearing config keys.
+pub(crate) fn set_experiment_in(path: &Path, name: &str, on: bool) -> Result<()> {
+    let mut experiments = match fs::read(path) {
+        Ok(bytes) => {
+            let config: serde_json::Value = serde_json::from_slice(&bytes)
+                .with_context(|| format!("Invalid config at {}", path.display()))?;
+            ensure!(config.is_object(), "Config at {} must be an object", path.display());
+            match config.get("experiments") {
+                Some(serde_json::Value::Object(map)) => map.clone(),
+                None => serde_json::Map::new(),
+                Some(_) => bail!("Invalid experiments at {}", path.display()),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
+    };
+    experiments.insert(name.to_owned(), on.into());
+    set_config_value_in(path, "experiments", serde_json::Value::Object(experiments))
 }
 
 /// Bundle IDs whose `Documents/Apparent` (and legacy `Documents/Tether`) container the USB watcher
@@ -2782,6 +2828,38 @@ mod tests {
         assert!(!experiment("neverEnabled"));
         enable_experiment("enabledForThisTest");
         assert!(experiment("enabledForThisTest"));
+    }
+
+    #[test]
+    fn demo_video_request_is_only_added_to_enabled_copy_text() {
+        let original = "[apparent 0:03 · Display]\nWhat changed?\n".to_owned();
+        assert_eq!(with_demo_video_request(original.clone(), false), original);
+        let enabled = with_demo_video_request(original.clone(), true);
+        assert!(enabled.starts_with(&original));
+        assert!(enabled.contains("complex change"));
+        assert!(enabled.contains("recording.mp4"));
+        assert!(enabled.contains("If you cannot record that screen"));
+        assert_eq!(enabled.matches(DEMO_VIDEO_REQUEST).count(), 1);
+    }
+
+    #[test]
+    fn demo_video_setting_preserves_other_experiments_and_rejects_bad_config() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        assert!(experiment_enabled_in(&load_config_from(&path), AGENT_DEMO_VIDEO));
+        fs::write(&path, r#"{"ingestToken":"private","experiments":{"other":true}}"#).unwrap();
+        assert!(experiment_enabled_in(&load_config_from(&path), AGENT_DEMO_VIDEO));
+        set_experiment_in(&path, AGENT_DEMO_VIDEO, true).unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["ingestToken"], "private");
+        assert_eq!(raw["experiments"]["other"], true);
+        assert_eq!(load_config_from(&path).experiments.get(AGENT_DEMO_VIDEO), Some(&true));
+        set_experiment_in(&path, AGENT_DEMO_VIDEO, false).unwrap();
+        assert_eq!(load_config_from(&path).experiments.get(AGENT_DEMO_VIDEO), Some(&false));
+        assert!(!experiment_enabled_in(&load_config_from(&path), AGENT_DEMO_VIDEO));
+        fs::write(&path, b"{").unwrap();
+        assert!(set_experiment_in(&path, AGENT_DEMO_VIDEO, true).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"{");
     }
 
     #[test]

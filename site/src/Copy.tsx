@@ -1,17 +1,23 @@
 import { useState } from "react"
 
 export function Copy({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle")
   return (
     <button
+      type="button"
       className="copy"
-      onClick={() => {
-        navigator.clipboard?.writeText(text)
-        setDone(true)
-        setTimeout(() => setDone(false), 1400)
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          setStatus("copied")
+        } catch {
+          setStatus("failed")
+        }
+        setTimeout(() => setStatus("idle"), 1400)
       }}
+      aria-live="polite"
     >
-      {done ? "Copied" : "Copy"}
+      {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : "Copy"}
     </button>
   )
 }

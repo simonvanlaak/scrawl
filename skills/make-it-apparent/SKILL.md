@@ -1,11 +1,11 @@
 ---
 name: make-it-apparent
-description: Use when a visible change needs a short video proof.
+description: Use when told "make it apparent" or asked for video proof.
 ---
 
 # Make It Apparent: show the change
 
-Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and make a separate share copy only when it improves clarity. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
+When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and make a separate share copy only when it improves clarity. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
 
 ## Point out the claim
 
@@ -38,6 +38,8 @@ apparent record --window 'Window title or app' --duration 15 --out /absolute/pri
 ## Inspect and render the share copy
 
 Read `summary.md` and `apparent.json`; open `contact-sheet.png` and the relevant `frames/*.png`. Play the **whole raw** `recording.mp4` or `recording.mov`, including first paint, transitions and ending. Check that it shows the correct build/window, all three beats, readable result, correct audio if narrated, no private frames, no error toast or misleading splice. The contact sheet indexes moments but cannot certify the intervening video. If an automatic crop hides context, inspect full frames/source before approving it. Verify the result independently with the relevant test, app state or log where appropriate; the recording proves only what it visibly shows.
+
+For appearance changes, distinguish offscreen renders from a live window: render both schemes to inspect every state, then capture the exact running build opening while the OS is already dark and switching light→dark→light in the same process. Read back the OS appearance alongside screenshots; restore its original setting. A settled screenshot checks that frame, not every transition frame or a live permission grant.
 
 If export works on this host, use `--fps 30` (or `--fps 60` on explicit request) and add zoom only when it helps. Do not hand back a 60 fps original by accident:
 

@@ -10,6 +10,8 @@ Recording starts on the release rather than the press so nothing is captured whi
 
 During a screen recording, the capsule shows **Mic unavailable** if the input cannot open, **Mic stopped** if samples stop after a startup grace period, or **Mic very quiet** after sustained near-silent captured samples. Quiet input does not prove broken hardware. The warning is inline beside the timer; the red screen-recording cue and the recording controls remain in place, and the screen capture continues. Finish stays visible when the normal controls are shown; during the existing 3.5-second switch-chip reveal, Cancel is shown instead. The warning clears after sustained input recovery or when recording ends. Phone and simulated captures have no microphone warning, and an audio animation does not determine input health.
 
+The recording controls also open a floating **Whiteboard**. Its drawing survives closing and reopening the window during the same capture. Finish closes the window and adds the final drawing as a separate paper frame in the bundle; the next capture starts with an empty board.
+
 Carbon hotkeys and the key event tap report presses through `emit_capture_shortcut` (deduplicated within 90 ms); while a press waits for its release the UI loop polls the modifiers and takes Esc from the key tap (`tick_shortcut`, `take_escape`), so the release is seen whichever window has focus. Esc from the key tap also closes an open picker when another app has the keys.
 
 ## Mac captures (`src/capture.rs`)

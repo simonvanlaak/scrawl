@@ -2,12 +2,14 @@
 
 from pathlib import Path
 import base64
+import hashlib
 import os
 import plistlib
 import subprocess
 import tempfile
 import textwrap
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,7 +21,8 @@ class PreviewReleaseTest(unittest.TestCase):
             root = Path(tmp)
             (root / "scripts").mkdir()
             (root / "bin").mkdir()
-            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png"):
+            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png",
+                          "Apparent.icns"):
                 destination = root / "assets" / asset
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes((ROOT / "assets" / asset).read_bytes())
@@ -60,7 +63,8 @@ class PreviewReleaseTest(unittest.TestCase):
             self.assertIn("preview-mac-feed/appcast.xml", info["SUFeedURL"])
             self.assertEqual(info["SUPublicEDKey"], env["APPARENT_PREVIEW_PUBLIC_KEY"])
             self.assertTrue((root / "dist/Apparent Preview.app/Contents/Frameworks/Sparkle.framework").is_dir())
-            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png"):
+            for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png",
+                          "Apparent.icns"):
                 self.assertEqual(
                     (root / "dist/Apparent Preview.app/Contents/Resources" / Path(asset).name).read_bytes(),
                     (root / "assets" / asset).read_bytes(),
@@ -68,6 +72,34 @@ class PreviewReleaseTest(unittest.TestCase):
             self.assertTrue((root / "dist/Apparent-Preview-0.123.2-arm64.dmg.sha256").is_file())
             self.assertTrue((root / "dist/Apparent-Preview-0.123.2-arm64.zip").is_file())
             self.assertTrue((root / "dist/preview-staging/Applications").is_symlink())
+
+    def test_app_icon_uses_the_approved_boxed_a_not_the_wordmark_or_brush(self):
+        svg = '{http://www.w3.org/2000/svg}'
+        brand = ET.parse(ROOT / "assets/brand/apparent-wordmark.svg").getroot()
+        app_icon = ET.parse(ROOT / "assets/brand/apparent-app-icon.svg").getroot()
+        # Primary icon master: https://tryapparent.com/brand/assets/brand/apparent-icon.svg
+        self.assertEqual(app_icon.get("viewBox"), "0 0 512 512")
+        self.assertEqual(app_icon.findall(f"{svg}rect")[0].get("fill"), "#020102")
+        paths = app_icon.findall(f"{svg}path")
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(paths[0].get("fill"), "#B7A5D8")
+        self.assertEqual(paths[0].get("transform"), "translate(50.08 434.56) scale(.72 -.72)")
+        self.assertEqual(paths[0].get("d"), brand.findall(f"{svg}g/{svg}path")[0].get("d"))
+        # Pin the reviewed raster too: the vector alone does not reach the Mac bundle.
+        raster = (ROOT / "assets/app-icon.png").read_bytes()
+        self.assertEqual(hashlib.sha256(raster).hexdigest(),
+                         "328388f2e2743b72acafc7c4fdddafbefb3e8f7e221ab9b9808a00acf3db13de")
+        self.assertEqual(hashlib.sha256((ROOT / "assets/Apparent.icns").read_bytes()).hexdigest(),
+                         "f3028c57a513957454d2bb7caf720fcf77358b47dcf1f1c7fc78a39c46e99153")
+
+    def test_mac_status_item_uses_boxed_brand_icon(self):
+        # The status item must preserve the approved Carbon/Lilac box; template
+        # mode would erase its two-color identity.
+        source = (ROOT / "src/ui/macos.rs").read_text()
+        self.assertIn('include_bytes!("../../assets/menubar-icon@2x.png")', source)
+        self.assertIn('img.setTemplate(false)', source)
+        self.assertEqual(hashlib.sha256((ROOT / "assets/menubar-icon@2x.png").read_bytes()).hexdigest(),
+                         "4714f8ebbe8dd7816c7f7ab07ad98daa61fb4eee5fc3ed900af8f012b452dc07")
 
     def test_helper_embedded_identity_follows_preview_identity(self):
         script = (ROOT / "scripts/build-mac-preview.sh").read_text()

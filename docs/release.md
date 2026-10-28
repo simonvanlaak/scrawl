@@ -6,8 +6,7 @@ built from the same tagged commit.
 
 1. **Version:** bump `version` in `Cargo.toml` and `Cargo.lock` in a `release/<version>` PR, and in the
    same PR change every `"status": "main"` in `site/src/features.json` to `"stable@<version>"`.
-   To dry-run Windows packaging on the `release/**` branch, manually dispatch
-   `.github/workflows/release-windows.yml` without a tag. No push or PR runs CI automatically.
+   No push or PR runs CI automatically. Test the change locally before merging.
 2. **Mac build** (Studio, from that commit): `SCRAWL_BUILD_NUMBER=<n> SCRAWL_SPARKLE_DIR=~/.local/share/scrawl-release/sparkle-2.9.4 ./scripts/release-app.sh`.
    The build number goes up by one every release (Sparkle compares it, not the version). The script
    builds, signs, notarizes and staples `dist/Scrawl-<version>-arm64.dmg` and `.zip`. Its own

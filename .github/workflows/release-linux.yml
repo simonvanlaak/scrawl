@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build and attach to. Empty builds the branch without publishing.
+        description: Version tag to build and attach to its release. Leave empty only for a Main preview.
         required: false
         default: ""
       publish_main:
@@ -38,8 +38,8 @@ jobs:
     steps:
       - name: Validate release request
         run: |
-          if [[ "$PUBLISH_MAIN" == "true" && ( -n "$TAG" || "$GITHUB_REF" != "refs/heads/main" ) ]]; then
-            echo "Publish main requires the main branch and no release tag" >&2
+          if [[ ( "$PUBLISH_MAIN" == "true" && ( -n "$TAG" || "$GITHUB_REF" != "refs/heads/main" ) ) || ( "$PUBLISH_MAIN" != "true" && -z "$TAG" ) ]]; then
+            echo "Select exactly one: a release tag, or a Main preview on main" >&2
             exit 1
           fi
       - uses: actions/checkout@v5

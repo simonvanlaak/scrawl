@@ -1,16 +1,14 @@
 name: Release (Windows)
 
 # Builds the Windows zip for a version tag and attaches it to that tag's GitHub release
-# (creating the release if the Mac side hasn't yet). Dispatch it by hand with a tag to
-# release, or without one on a release/** branch to dry-run the zip as a workflow artifact.
+# (creating the release if the Mac side hasn't yet). Dispatch it by hand with a version tag.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build and attach the zip to (e.g. v0.3.6). Empty builds the branch without uploading.
-        required: false
-        default: ""
+        description: Version tag to build and attach the zip to (e.g. v0.3.6).
+        required: true
 
 permissions:
   contents: write
@@ -28,6 +26,9 @@ jobs:
       BUILD: --release --locked --target x86_64-pc-windows-msvc
       EXE: target\x86_64-pc-windows-msvc\release\scrawl.exe
     steps:
+      - name: Require a release tag
+        shell: bash
+        run: test -n "$TAG"
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}

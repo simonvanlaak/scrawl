@@ -173,9 +173,17 @@ struct ViewState {
     captures_size: Option<String>,
     permissions: Vec<PermissionRow>,
     updates: bool,
+    update_check: UpdateCheck,
     update_channel: String,
     main_updates: bool,
     skill_command: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+struct UpdateCheck {
+    checking: bool,
+    message: Option<String>,
 }
 
 impl ViewState {
@@ -1595,8 +1603,8 @@ impl SettingsWindow {
                             ),
                     )
                     .child(
-                        button(theme, "settings-updates", "Check for Updates…", state.updates)
-                            .when(state.updates, |d| {
+                        button(theme, "settings-updates", if state.update_check.checking { "Checking…" } else { "Check for Updates…" }, state.updates && !state.update_check.checking)
+                            .when(state.updates && !state.update_check.checking, |d| {
                                 d.on_click(
                                     cx.listener(|view, _, _, _| view.act(Action::CheckForUpdates)),
                                 )
@@ -1605,6 +1613,9 @@ impl SettingsWindow {
                     .into_any_element(),
             ],
         ));
+        if state.update_check.checking {
+            column = column.child(caption(theme, "Checking for updates…", false));
+        }
         if !state.updates {
             column = column.child(caption(
                 theme,
@@ -1663,6 +1674,28 @@ impl SettingsWindow {
                     .into_any_element(),
                 ],
             ))
+    }
+
+    fn update_result_layer(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let message = state.update_check.message.as_ref()?;
+        Some(div()
+            .id("settings-update-result-layer")
+            .absolute().top_0().left_0().size_full()
+            .occlude().bg(theme.ink(0.45))
+            .flex().items_center().justify_center()
+            .child(div()
+                .id("settings-update-result")
+                .w(px(340.0)).p(px(20.0))
+                .rounded(px(12.0)).bg(theme.menu())
+                .border_1().border_color(theme.control_line())
+                .flex().flex_col().gap(px(14.0))
+                .child(div().text_size(px(16.0)).font_weight(FontWeight::SEMIBOLD).child("Update check finished"))
+                .child(div().text_size(px(13.0)).child(message.clone()))
+                .child(div().flex().justify_end().child(
+                    button(theme, "settings-update-dismiss", "OK", true)
+                        .on_click(cx.listener(|view, _, _, _| view.act(Action::DismissUpdateCheck)))
+                )))
+        )
     }
 
     fn open_menu(
@@ -1885,6 +1918,7 @@ impl Render for SettingsWindow {
             .child(self.content(theme, &state, cx))
             .children(caption_buttons(theme))
             .children(self.menu_layer(theme, viewport, cx))
+            .children(self.update_result_layer(theme, &state, cx))
     }
 }
 
@@ -1909,5 +1943,19 @@ mod tests {
         .unwrap();
         assert_eq!(state.update_channel, "main");
         assert!(state.main_updates && state.updates);
+    }
+
+    #[test]
+    fn update_check_progress_and_result_reach_the_window() {
+        let checking: ViewState = serde_json::from_str(
+            r#"{"updateCheck":{"checking":true,"message":null}}"#,
+        ).unwrap();
+        assert!(checking.update_check.checking);
+        assert!(checking.update_check.message.is_none());
+        let finished: ViewState = serde_json::from_str(
+            r#"{"updateCheck":{"checking":false,"message":"No new update is available."}}"#,
+        ).unwrap();
+        assert!(!finished.update_check.checking);
+        assert_eq!(finished.update_check.message.as_deref(), Some("No new update is available."));
     }
 }

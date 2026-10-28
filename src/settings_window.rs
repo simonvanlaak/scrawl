@@ -173,6 +173,8 @@ struct ViewState {
     captures_size: Option<String>,
     permissions: Vec<PermissionRow>,
     updates: bool,
+    update_channel: String,
+    main_updates: bool,
     skill_command: String,
 }
 
@@ -1604,9 +1606,31 @@ impl SettingsWindow {
         if !state.updates {
             column = column.child(caption(
                 theme,
-                "Updates work in the installed Scrawl.app.",
+                if LINUX { "Update checks work when Scrawl runs from an AppImage." } else { "Updates work in the installed Scrawl.app." },
                 false,
             ));
+        }
+        if LINUX && state.main_updates {
+            let chosen = state.update_channel.clone();
+            column = column
+                .child(header(theme, "Updates"))
+                .child(group(theme, vec![row(
+                    theme,
+                    "Channel",
+                    true,
+                    popup(theme, "settings-update-channel", if chosen == "main" { "Latest main" } else { "Stable releases" })
+                        .on_click(cx.listener(move |view, event: &ClickEvent, _, cx| {
+                            view.open_menu(
+                                "updateChannel",
+                                vec![("stable".into(), "Stable releases".into(), true), ("main".into(), "Latest main".into(), true)],
+                                Some(chosen.clone()),
+                                event,
+                            );
+                            cx.notify();
+                        })),
+                )
+                .into_any_element()]))
+                .child(caption(theme, "Stable follows reviewed Linux releases. Main follows checked builds from every main commit. Updates install on the next launch.", false));
         }
         column
             .child(header(theme, "Links"))
@@ -1873,5 +1897,15 @@ mod tests {
         assert_eq!(t.engine, "command");
         assert_eq!(t.command.as_deref(), Some("whisper-scrawl"));
         assert_eq!(Transcriber::default().command, None);
+    }
+
+    #[test]
+    fn the_linux_update_channel_is_read_from_the_view() {
+        let state: ViewState = serde_json::from_str(
+            r#"{"type":"state","updateChannel":"main","mainUpdates":true,"updates":true}"#,
+        )
+        .unwrap();
+        assert_eq!(state.update_channel, "main");
+        assert!(state.main_updates && state.updates);
     }
 }

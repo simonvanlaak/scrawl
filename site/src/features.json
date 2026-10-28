@@ -861,8 +861,21 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "On Windows and Linux, Check for Updates… opens the releases page.",
+      "note": "On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
+    },
+    {
+      "id": "linux-appimage-updates",
+      "group": "install",
+      "name": "Linux AppImage update channels",
+      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or latest main, a manual check, and live version status.",
+      "status": "main",
+      "platforms": ["linux"],
+      "config": [
+        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux update feed" },
+        { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with scrawl update status" }
+      ],
+      "docs": ["docs/linux.md"]
     },
     {
       "id": "windows-zip",

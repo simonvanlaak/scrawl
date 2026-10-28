@@ -123,13 +123,13 @@ pub(super) fn reduce_motion() -> bool {
     })
 }
 
-/// Updates come from GitHub releases on Linux; the menu item opens the page.
-pub(super) fn start_updates() {}
+/// Only installed AppImages are eligible; debug builds stay untouched.
+pub(super) fn start_updates() {
+    crate::linux::update::start();
+}
 
 pub(super) fn check_for_updates() {
-    let _ = crate::handoff::open_path(Path::new(
-        "https://github.com/kitlangton/scrawl/releases/latest",
-    ));
+    std::thread::spawn(crate::linux::update::check_now);
 }
 
 pub(super) fn open_overlay(

@@ -12,7 +12,7 @@ on:
       - .cargo/config.toml
   push:
     tags: ["v*"]
-    branches: ["release/**"]
+    branches: ["release/**", "main"]
   workflow_dispatch:
     inputs:
       tag:
@@ -55,6 +55,7 @@ jobs:
       - run: cargo build --release --locked
       - name: Unit tests and model test executable
         run: |
+          cargo test --release --locked -- --test-threads=2
           cargo test --release --locked speech:: -- --nocapture
           cargo test --release --locked --bin scrawl --no-run --message-format=json > target/test-artifacts.jsonl
           test=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "scrawl" and .profile.test) | .executable // empty' target/test-artifacts.jsonl)
@@ -118,3 +119,51 @@ jobs:
             gh release create "$TAG" --verify-tag --title "Scrawl ${TAG#v}" --notes "Release notes to follow." || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" dist/* --clobber
+
+  main-feed:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: Scrawl-*.AppImage
+          path: dist
+          merge-multiple: true
+      - name: Publish both checked AppImages before updating the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="linux-main-$GITHUB_SHA"
+          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Linux main ${GITHUB_SHA:0:12}" \
+            --notes "Automatic Linux preview from main; not a stable release."
+          # An older queued run must not replace a newer main pointer.
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            echo "Main moved to $head; leaving its feed alone"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          files = sorted(pathlib.Path('dist').glob('*.AppImage'))
+          assert len(files) == 2, files
+          assets = {('aarch64' if 'aarch64' in f.name else 'x86_64'): {
+              'name': f.name, 'sha256': hashlib.sha256(f.read_bytes()).hexdigest()
+          } for f in files}
+          assert set(assets) == {'aarch64', 'x86_64'}, assets
+          pathlib.Path('main-updates.json').write_text(json.dumps({'sha': os.environ['GITHUB_SHA'], 'assets': assets}))
+          PY
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/linux-main-feed" >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/heads/linux-main-feed -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json?ref=linux-main-feed" --jq .sha 2>/dev/null || true)
+          content=$(base64 -w0 main-updates.json)
+          if [[ -n "$current" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json" --method PUT \
+              -f branch=linux-main-feed -f message="Linux main feed $GITHUB_SHA" -f content="$content" -f sha="$current" >/dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json" --method PUT \
+              -f branch=linux-main-feed -f message="Linux main feed $GITHUB_SHA" -f content="$content" >/dev/null
+          fi

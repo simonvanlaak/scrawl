@@ -2589,10 +2589,26 @@ mod tests {
             port, &mut listener, &mut bound, true, &mut last_wanted, bind_ingest_listener,
         ).unwrap();
         assert_eq!(bound, Some(true));
-        queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        assert!(matches!(queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
-        still_queued.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        assert!(matches!(still_queued.read(&mut [0_u8; 1]), Ok(0) | Err(_)));
+        // macOS rejects SO_RCVTIMEO on a connection left in a closed
+        // listener's accept queue. Poll nonblocking instead, and do not
+        // mistake WouldBlock (still connected) for a closed old socket.
+        let expect_closed = |stream: &mut std::net::TcpStream| {
+            stream.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                match stream.read(&mut [0_u8; 1]) {
+                    Ok(0) => break,
+                    Err(ref error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                    Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(std::time::Instant::now() < deadline, "old connection stayed open");
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    result => panic!("old connection was not closed: {result:?}"),
+                }
+            }
+        };
+        expect_closed(&mut queued);
+        expect_closed(&mut still_queued);
         let fresh = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let (accepted, _) = listener.as_ref().unwrap().accept().unwrap();
         assert_eq!(accepted.peer_addr().unwrap(), fresh.local_addr().unwrap());

@@ -20,14 +20,14 @@ use gpui::{
 mod platform;
 #[cfg(target_os = "linux")]
 mod whiteboard;
+#[cfg(target_os = "linux")]
+pub(crate) use platform::set_app_icon;
 use platform::{
     PillChrome, install_status_bar, pointer_on_hud_pill, reduce_motion, set_status_inbox_count,
     set_status_text,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
-#[cfg(target_os = "linux")]
-pub(crate) use platform::set_app_icon;
 
 use crate::audio::AudioRecorder;
 use crate::capture::{
@@ -39,13 +39,13 @@ use crate::capture::{
 use crate::helper::PhoneDevice;
 #[cfg(target_os = "macos")]
 use crate::laser_overlay::MetalLaserOverlay as LaserOverlay;
+#[cfg(target_os = "linux")]
+use crate::linux::overlay::InkOverlay as LaserOverlay;
 use crate::model::{CaptureMode, ScrawlBundle, TargetFrame, TargetInfo, format_clock};
 use crate::phone::PhoneSession;
 use crate::sketch::timeline;
 #[cfg(target_os = "windows")]
 use crate::win::overlay::InkOverlay as LaserOverlay;
-#[cfg(target_os = "linux")]
-use crate::linux::overlay::InkOverlay as LaserOverlay;
 
 const SIDEBAR_BG: u32 = 0x111111;
 const CANVAS_BG: u32 = 0x161616;
@@ -668,8 +668,6 @@ struct ActiveRecording {
     target: TargetInfo,
     bundle_dir: PathBuf,
     source: CaptureSource,
-    #[cfg(target_os = "linux")]
-    auto_paste: Option<crate::linux::auto_paste::Attempt>,
     _metal_overlay: Option<LaserOverlay>,
 }
 
@@ -742,8 +740,6 @@ pub struct ScrawlCoordinator {
     display_rect: [f32; 4],
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
-    #[cfg(target_os = "linux")]
-    pending_auto_paste: Option<crate::linux::auto_paste::Attempt>,
     review_bundle: Option<(PathBuf, ScrawlBundle)>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
@@ -844,8 +840,6 @@ impl ScrawlCoordinator {
             display_rect: [0.0, 0.0, 1440.0, 900.0],
             paste_drag_start: None,
             recording_shortcut_key: false,
-            #[cfg(target_os = "linux")]
-            pending_auto_paste: None,
             review_bundle: initial_bundle,
             review_status: None,
             selected_tab: ReviewTab::ContactSheet,
@@ -934,7 +928,13 @@ impl ScrawlCoordinator {
             if let Err(err) = crate::handoff::paste_bundle_image_and_text(&dir) {
                 scrawl_log(format!("paste_bundle_image_and_text error: {err}"));
                 #[cfg(target_os = "linux")]
-                crate::linux::shell::notify("Paste stopped", &format!("{err:#}. Manually attach the contact sheet and paste summary.md from {}", dir.display()));
+                crate::linux::shell::notify(
+                    "Paste stopped",
+                    &format!(
+                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
+                        dir.display()
+                    ),
+                );
             }
         });
     }
@@ -1258,23 +1258,7 @@ impl ScrawlCoordinator {
                 self.playback.take();
             }
             Action::RecordScreen => {
-                #[cfg(target_os = "linux")]
-                {
-                    self.pending_auto_paste =
-                        (crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
-                            && crate::linux::hyprland::running()
-                            && crate::linux::wayland_session()
-                            && !self.lab)
-                            .then(|| crate::linux::auto_paste::Attempt::new(
-                                crate::linux::hyprland::focused_window()
-                                    .map_err(|error| format!("No original chat window: {error:#}")),
-                            ));
-                }
                 self.record_screen_now(cx);
-                #[cfg(target_os = "linux")]
-                if !self.is_recording() {
-                    self.pending_auto_paste = None;
-                }
             }
             Action::RecordSelected => self.record_selected_mode(cx),
             Action::Finish => self.finish_recording(cx),
@@ -1950,7 +1934,11 @@ impl ScrawlCoordinator {
         }
     }
 
-    fn apply_pill_action(&mut self, action: crate::native::pill::PillAction, cx: &mut Context<Self>) {
+    fn apply_pill_action(
+        &mut self,
+        action: crate::native::pill::PillAction,
+        cx: &mut Context<Self>,
+    ) {
         use crate::native::pill::PillAction;
         match action {
             PillAction::SelectMode(mode) => self.click_selection_mode(mode, cx),
@@ -2033,7 +2021,13 @@ impl ScrawlCoordinator {
             if let Err(err) = crate::handoff::paste_bundle_at_target(&dir, click_target) {
                 scrawl_log(format!("paste_bundle_at_target error: {err}"));
                 #[cfg(target_os = "linux")]
-                crate::linux::shell::notify("Paste stopped", &format!("{err:#}. Manually attach the contact sheet and paste summary.md from {}", dir.display()));
+                crate::linux::shell::notify(
+                    "Paste stopped",
+                    &format!(
+                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
+                        dir.display()
+                    ),
+                );
             }
         });
     }
@@ -2186,9 +2180,11 @@ impl ScrawlCoordinator {
         let spawned = std::thread::Builder::new()
             .name("scrawl-send".into())
             .spawn(move || {
-                if let Err(err) = crate::handoff::load_bundle(&send_dir).and_then(|(_, mut bundle)| {
-                    crate::routing::record_destination(&send_dir, &mut bundle, dest.clone())
-                }) {
+                if let Err(err) =
+                    crate::handoff::load_bundle(&send_dir).and_then(|(_, mut bundle)| {
+                        crate::routing::record_destination(&send_dir, &mut bundle, dest.clone())
+                    })
+                {
                     scrawl_log(format!("routing: couldn't record the destination: {err:#}"));
                 }
                 let _ = sender.send(crate::delivery::deliver(
@@ -2255,6 +2251,7 @@ impl ScrawlCoordinator {
         let dt = (real * motion::time_scale()).min(0.025);
         if let IslandPhase::Completed { finished_at, .. } = self.island_phase
             && finished_at.elapsed() >= Duration::from_millis(25_000)
+            && self.completed_note.as_deref() != Some("Saved · check draft")
         {
             self.set_island_phase(IslandPhase::Dismissing);
         }
@@ -2309,10 +2306,7 @@ impl ScrawlCoordinator {
                 .native_pill
                 .as_ref()
                 .map_or_else(pointer_on_hud_pill, |p| p.pointer_on_pill());
-            if self
-                .reveal
-                .tick(reveal_clock_ms(), on_pill, activity)
-            {
+            if self.reveal.tick(reveal_clock_ms(), on_pill, activity) {
                 self.play_fold();
             }
         }
@@ -2644,8 +2638,6 @@ impl ScrawlCoordinator {
                 audio: audio_recorder,
                 windows: window_log,
             },
-            #[cfg(target_os = "linux")]
-            auto_paste: self.pending_auto_paste.take(),
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -2688,8 +2680,6 @@ impl ScrawlCoordinator {
             target,
             bundle_dir: PathBuf::new(),
             source: CaptureSource::Lab,
-            #[cfg(target_os = "linux")]
-            auto_paste: None,
             _metal_overlay: None,
         });
         self.present_recording_island(cx);
@@ -2789,8 +2779,6 @@ impl ScrawlCoordinator {
             target,
             bundle_dir,
             source: CaptureSource::Phone(session),
-            #[cfg(target_os = "linux")]
-            auto_paste: None,
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -2831,14 +2819,11 @@ impl ScrawlCoordinator {
             return;
         };
         #[cfg(target_os = "linux")]
-        let auto_paste = rec.auto_paste.and_then(|mut attempt| {
-            attempt.take_ready(|original| {
-                crate::handoff::draft_receiver_preflight(original)
-                    .map_err(|error| format!("{error:#}"))
-            })
-        });
-        #[cfg(target_os = "linux")]
-        let auto_active = auto_paste.as_ref().is_some_and(Result::is_ok);
+        let auto_active = crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
+            && crate::linux::hyprland::running()
+            && crate::linux::wayland_session()
+            && !self.lab
+            && matches!(&rec.source, CaptureSource::Screen { .. });
         #[cfg(not(target_os = "linux"))]
         let auto_active = false;
         let (events, strokes) = self.telemetry.finish_session();
@@ -2992,40 +2977,32 @@ impl ScrawlCoordinator {
                         }
                     };
                     let frame_count = bundle.keyframes.len();
-                    if !auto_active {
-                        let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
-                    }
+                    // Leave the summary on the clipboard. If automatic delivery fails,
+                    // ordinary Ctrl+V still pastes the handoff; do not restore old content.
+                    let clipboard_ready = crate::handoff::copy_bundle_to_clipboard(&dir)
+                        .map_err(|error| scrawl_log(format!("Copy handoff failed: {error:#}")))
+                        .is_ok();
                     #[cfg(target_os = "linux")]
-                    if let Some(target) = auto_paste {
-                        match target {
-                            Ok(original) => {
-                                let handoff_dir = dir.clone();
-                                std::thread::spawn(move || {
-                                    if let Err(error) = crate::handoff::paste_bundle_into_original_draft(
-                                        &handoff_dir, &original,
-                                    ) {
-                                        scrawl_log(format!("Automatic draft paste skipped: {error:#}"));
-                                        crate::linux::shell::notify(
-                                            "Draft paste skipped",
-                                            &format!("{error:#}. Manually attach contact-sheet.png and paste summary.md from {}", handoff_dir.display()),
-                                        );
-                                    }
-                                });
-                            }
-                            Err(reason) => {
+                    if auto_active && clipboard_ready {
+                        let handoff_dir = dir.clone();
+                        std::thread::spawn(move || {
+                            if let Err(error) = crate::linux::auto_paste::paste_bundle(&handoff_dir) {
+                                scrawl_log(format!("Automatic draft paste skipped: {error:#}"));
                                 crate::linux::shell::notify(
                                     "Draft paste skipped",
-                                    &format!("{reason}. Manually attach contact-sheet.png and paste summary.md from {}", dir.display()),
+                                    &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", handoff_dir.display()),
                                 );
                             }
-                        }
+                        });
+                    } else if auto_active {
+                        crate::linux::shell::notify("Draft paste skipped", "Could not copy the handoff. Use the saved bundle from the paper tile.");
                     }
                     coord.completed_dir = Some(dir.clone());
                     coord.last_local_capture_ms = crate::now_epoch_ms();
                     if auto_active {
-                        // The current Linux receiver deliberately refuses without an attachment
-                        // observer. Never say "Copied" when the user's clipboard was preserved.
-                        coord.completed_note = Some("Saved · paste unavailable".into());
+                        // A dispatched shortcut is not proof that the editor accepted either
+                        // paste. Keep the paper tile and give the user the final say.
+                        coord.completed_note = Some("Saved · check draft".into());
                     }
                     if route.is_some() || look.is_some() {
                         coord.routing = Some(dir.clone());
@@ -3075,12 +3052,7 @@ impl ScrawlCoordinator {
 
     /// Acts on a local capture's route once it's worked out, unless ✕ or Paste on the Completed
     /// island kept the capture on the clipboard first.
-    fn route_arrived(
-        &mut self,
-        dir: PathBuf,
-        route: RouteOutcome,
-        cx: &mut Context<Self>,
-    ) {
+    fn route_arrived(&mut self, dir: PathBuf, route: RouteOutcome, cx: &mut Context<Self>) {
         if self.routing.as_deref() != Some(dir.as_path()) {
             if !matches!(route, RouteOutcome::None) {
                 scrawl_log(format!(
@@ -3489,21 +3461,18 @@ impl Render for HudPillWindow {
                         .map(|(i, key)| Some((key, alpha(i))))
                         .collect(),
                 )
-                .children(
-                    SelectionMode::available(has_iphone)
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &segment)| {
-                            let c_segment = self.coordinator.clone();
-                            mode_segment_level(segment, highlight(segment, mode))
-                                .opacity(alpha(i))
-                                .on_click(move |_, _, cx| {
-                                    c_segment.update(cx, |coord, cx| {
-                                        coord.click_selection_mode(segment, cx)
-                                    });
-                                })
-                        }),
-                )
+                .children(SelectionMode::available(has_iphone).iter().enumerate().map(
+                    |(i, &segment)| {
+                        let c_segment = self.coordinator.clone();
+                        mode_segment_level(segment, highlight(segment, mode))
+                            .opacity(alpha(i))
+                            .on_click(move |_, _, cx| {
+                                c_segment.update(cx, |coord, cx| {
+                                    coord.click_selection_mode(segment, cx)
+                                });
+                            })
+                    },
+                ))
                 .when(record, |row| {
                     row.child(
                         primary_chip("sel-record", "Record")
@@ -3907,16 +3876,14 @@ impl HudPillWindow {
         }
         let c_cancel = self.coordinator.clone();
         let c_finish = self.coordinator.clone();
-        let group = group
-            .child(
-                pill_chip("hud-cancel", "Cancel")
-                    .opacity(alpha(0))
-                    .when(interactive, |d| {
-                        d.on_click(move |_, _, cx| {
-                            c_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
-                        })
-                    }),
-            );
+        let group = group.child(pill_chip("hud-cancel", "Cancel").opacity(alpha(0)).when(
+            interactive,
+            |d| {
+                d.on_click(move |_, _, cx| {
+                    c_cancel.update(cx, |coord, cx| coord.cancel_recording(cx));
+                })
+            },
+        ));
         #[cfg(target_os = "linux")]
         let group = group.when(whiteboard_enabled(), |group| {
             let c_board = self.coordinator.clone();
@@ -3931,16 +3898,15 @@ impl HudPillWindow {
                     }),
             )
         });
-        group
-            .child(
-                primary_chip("hud-done", "Finish")
-                    .opacity(alpha(if whiteboard_enabled() { 2 } else { 1 }))
-                    .when(interactive, |d| {
-                        d.on_click(move |_, _, cx| {
-                            c_finish.update(cx, |coord, cx| coord.finish_recording(cx));
-                        })
-                    }),
-            )
+        group.child(
+            primary_chip("hud-done", "Finish")
+                .opacity(alpha(if whiteboard_enabled() { 2 } else { 1 }))
+                .when(interactive, |d| {
+                    d.on_click(move |_, _, cx| {
+                        c_finish.update(cx, |coord, cx| coord.finish_recording(cx));
+                    })
+                }),
+        )
     }
 }
 
@@ -4164,7 +4130,12 @@ impl Render for TargetPickerWindow {
                 let w = (a[0] - b[0]).abs().max(1.0);
                 let h = (a[1] - b[1]).abs().max(1.0);
                 (
-                    [(a[0].min(b[0]) - origin[0]) * k, (a[1].min(b[1]) - origin[1]) * k, w * k, h * k],
+                    [
+                        (a[0].min(b[0]) - origin[0]) * k,
+                        (a[1].min(b[1]) - origin[1]) * k,
+                        w * k,
+                        h * k,
+                    ],
                     format!("{} × {}", w.round() as i32, h.round() as i32),
                 )
             }),
@@ -4186,7 +4157,10 @@ impl Render for TargetPickerWindow {
                     t.frame.width as f32,
                     t.frame.height as f32,
                 ]);
-                ([(rx - origin[0]) * k, (ry - origin[1]) * k, rw * k, rh * k], title)
+                (
+                    [(rx - origin[0]) * k, (ry - origin[1]) * k, rw * k, rh * k],
+                    title,
+                )
             }),
             SelectionMode::Screen => Some((
                 [0.0, 0.0, screen[0], screen[1]],
@@ -4787,19 +4761,23 @@ impl Render for BundleReviewWindow {
                                     .items_center()
                                     .gap_2()
                                     .when_some(newer, |d, path| {
-                                        d.child(action_button("review-newer", "← Newer", false)
-                                            .on_click(move |_, _, cx| {
-                                                open_review_capture(&c_newer, &path, cx);
-                                            }))
+                                        d.child(
+                                            action_button("review-newer", "← Newer", false)
+                                                .on_click(move |_, _, cx| {
+                                                    open_review_capture(&c_newer, &path, cx);
+                                                }),
+                                        )
                                     })
                                     .when_some(history_position, |d, index| {
                                         d.child(format!("{} / {}", index + 1, history_count))
                                     })
                                     .when_some(older, |d, path| {
-                                        d.child(action_button("review-older", "Older →", false)
-                                            .on_click(move |_, _, cx| {
-                                                open_review_capture(&c_older, &path, cx);
-                                            }))
+                                        d.child(
+                                            action_button("review-older", "Older →", false)
+                                                .on_click(move |_, _, cx| {
+                                                    open_review_capture(&c_older, &path, cx);
+                                                }),
+                                        )
                                     }),
                             )
                             .child(
@@ -4891,19 +4869,16 @@ impl Render for BundleReviewWindow {
                     )
                     .children(platform::caption_buttons()),
             )
-            .when_some(
-                review_notice,
-                |root, message| {
-                    root.child(
-                        div()
-                            .px_5()
-                            .py_2()
-                            .text_size(px(12.0))
-                            .text_color(rgb(TEXT_COLOR))
-                            .child(message),
-                    )
-                },
-            )
+            .when_some(review_notice, |root, message| {
+                root.child(
+                    div()
+                        .px_5()
+                        .py_2()
+                        .text_size(px(12.0))
+                        .text_color(rgb(TEXT_COLOR))
+                        .child(message),
+                )
+            })
             .child(
                 // Main Workspace: Stage on Left + Timeline Sidebar on Right
                 div()
@@ -5610,7 +5585,8 @@ pub fn run_app(
         scrawl_log(format!("run_app started pid={}", std::process::id()));
         platform::keep_alive(cx);
         // ⌘W, Esc, the close button or Scrawl itself: every way a window closes ends up here.
-        cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys)).detach();
+        cx.on_window_closed(|cx| cx.defer(platform::hand_back_keys))
+            .detach();
         let (ui_sender, ui_receiver) = flume::unbounded();
         crate::phone::start_ingest_server(ui_sender.clone());
         let telemetry = SharedCaptureTelemetry::new(ui_sender);
@@ -5825,12 +5801,19 @@ mod tests {
 
     #[test]
     fn review_history_stops_at_both_ends() {
-        let paths = vec![PathBuf::from("new"), PathBuf::from("middle"), PathBuf::from("old")];
+        let paths = vec![
+            PathBuf::from("new"),
+            PathBuf::from("middle"),
+            PathBuf::from("old"),
+        ];
         assert_eq!(review_neighbor(&paths, &paths[0], true), Some(&paths[1]));
         assert_eq!(review_neighbor(&paths, &paths[1], false), Some(&paths[0]));
         assert_eq!(review_neighbor(&paths, &paths[2], true), None);
         assert_eq!(review_neighbor(&paths, &paths[0], false), None);
-        assert_eq!(review_neighbor(&paths, &PathBuf::from("elsewhere"), true), None);
+        assert_eq!(
+            review_neighbor(&paths, &PathBuf::from("elsewhere"), true),
+            None
+        );
     }
 
     #[test]
@@ -5850,7 +5833,9 @@ mod tests {
         assert_eq!(whiteboard_enabled(), cfg!(target_os = "linux"));
         let controls = trail_keys(false, false, &[], "hud-");
         assert_eq!(
-            controls.iter().any(|item| item.as_ref().is_some_and(|(name, _)| name == "hud-whiteboard")),
+            controls.iter().any(|item| item
+                .as_ref()
+                .is_some_and(|(name, _)| name == "hud-whiteboard")),
             cfg!(target_os = "linux")
         );
     }

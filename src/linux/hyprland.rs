@@ -74,13 +74,71 @@ pub struct FocusedWindow {
 
 pub fn focused_window() -> Result<FocusedWindow> {
     let value: serde_json::Value = serde_json::from_str(&request("j/activewindow")?)?;
-    let address = value["address"].as_str().filter(|s| !s.is_empty() && *s != "0x0")
-        .context("No focused window")?.to_owned();
-    let pid = value["pid"].as_u64().and_then(|n| u32::try_from(n).ok())
-        .filter(|n| *n != 0).context("Focused window has no PID")?;
-    let class = value["class"].as_str().filter(|s| !s.is_empty())
-        .context("Focused window has no class")?.to_owned();
-    Ok(FocusedWindow { address, pid, class })
+    let address = value["address"]
+        .as_str()
+        .filter(|s| !s.is_empty() && *s != "0x0")
+        .context("No focused window")?
+        .to_owned();
+    let pid = value["pid"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n != 0)
+        .context("Focused window has no PID")?;
+    let class = value["class"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .context("Focused window has no class")?
+        .to_owned();
+    Ok(FocusedWindow {
+        address,
+        pid,
+        class,
+    })
+}
+
+fn target_address(window: &FocusedWindow) -> Result<&str> {
+    anyhow::ensure!(
+        window.address.starts_with("0x")
+            && window.address.len() > 2
+            && window.address[2..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()),
+        "Invalid Hyprland window address"
+    );
+    Ok(&window.address)
+}
+
+pub fn check_window(original: &FocusedWindow) -> Result<()> {
+    let address = target_address(original)?;
+    let clients: Vec<serde_json::Value> = serde_json::from_str(&request("j/clients")?)?;
+    anyhow::ensure!(
+        clients.iter().any(|client| {
+            client["address"].as_str() == Some(address)
+                && client["pid"].as_u64() == Some(u64::from(original.pid))
+                && client["class"].as_str() == Some(original.class.as_str())
+        }),
+        "Paste target is gone or changed"
+    );
+    Ok(())
+}
+
+pub fn targeted_paste_supported(original: &FocusedWindow) -> Result<()> {
+    anyhow::ensure!(
+        syntax()? == Syntax::Lua,
+        "Targeted paste needs Hyprland Lua dispatchers"
+    );
+    target_address(original)?;
+    Ok(())
+}
+
+pub fn paste_into_focused(original: &FocusedWindow, terminal: bool) -> Result<()> {
+    targeted_paste_supported(original)?;
+    anyhow::ensure!(focused_window()? == *original, "Paste target lost focus");
+    let mods = if terminal { "CTRL SHIFT" } else { "CTRL" };
+    run(&format!(
+        "dispatch hl.dsp.send_shortcut({{ mods = \"{mods}\", key = \"V\", window = \"address:{}\" }})",
+        target_address(original)?
+    ))
 }
 
 fn syntax() -> Result<Syntax> {
@@ -224,7 +282,9 @@ pub fn float_whiteboard() -> Result<()> {
     if board["floating"].as_bool() == Some(true) {
         return Ok(());
     }
-    let address = board["address"].as_str().context("Whiteboard window has no address")?;
+    let address = board["address"]
+        .as_str()
+        .context("Whiteboard window has no address")?;
     match syntax()? {
         Syntax::Lua => run(&format!(
             "eval local w = hl.get_windows({{ title = 'Scrawl Whiteboard' }})[1]; \
@@ -235,7 +295,9 @@ pub fn float_whiteboard() -> Result<()> {
         ))?,
         Syntax::Hyprlang => {
             run(&format!("dispatch setfloating address:{address}"))?;
-            run(&format!("dispatch resizewindowpixel exact 560 460,address:{address}"))?;
+            run(&format!(
+                "dispatch resizewindowpixel exact 560 460,address:{address}"
+            ))?;
         }
     }
     Ok(())

@@ -287,7 +287,7 @@
       "id": "auto-paste-draft",
       "group": "finish",
       "name": "Paste a finished capture into its original draft",
-      "says": "Scaffolds a one-use handoff bound to the recording's original window. Unsupported receivers retain normal routing and Copy; automatic draft paste is not working yet.",
+      "says": "Off-by-default T3 Code trial on Hyprland: restore the user-chosen window after Finish and try image-first, text-second paste. Leaves the paper visible because acceptance cannot be verified; never sends the draft.",
       "status": "experiment:autoPasteDraft",
       "platforms": ["linux"],
       "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]

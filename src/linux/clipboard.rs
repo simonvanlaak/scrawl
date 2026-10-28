@@ -3,7 +3,7 @@
 //! data-control protocol (bundled in the AppImage). Both backends keep an owner alive to serve
 //! the data.
 
-use std::io::{Read as _, Write as _};
+use std::io::{BufRead as _, Read as _, Write as _};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
@@ -28,42 +28,171 @@ fn native_wayland_clipboard() -> bool {
 }
 
 pub struct TextSnapshot {
-    mime: String,
-    bytes: Vec<u8>,
+    entries: Vec<(String, Vec<u8>)>,
 }
 
 fn plain_text_mime(types: &str) -> Result<&str> {
     let offered: Vec<_> = types.lines().collect();
-    anyhow::ensure!(
-        !offered.is_empty()
-            && offered.iter().all(|mime| matches!(
-                *mime,
-                "text/plain" | "text/plain;charset=utf-8" | "UTF8_STRING" | "STRING" | "TEXT"
-            )),
-        "Only plain-text clipboards can be restored by draft handoff"
-    );
-    offered.iter().copied()
+    anyhow::ensure!(!offered.is_empty(), "Clipboard has no offered MIME types");
+    offered
+        .iter()
+        .copied()
         .find(|mime| *mime == "text/plain;charset=utf-8")
         .or_else(|| offered.iter().copied().find(|mime| *mime == "text/plain"))
-        .context("Clipboard has no plain-text MIME type")
+        .or_else(|| offered.first().copied())
+        .context("Clipboard has no MIME type")
 }
 
 pub fn snapshot_text_wayland() -> Result<TextSnapshot> {
-    anyhow::ensure!(native_wayland_clipboard(), "Draft clipboard restoration requires KDE or Hyprland Wayland");
+    anyhow::ensure!(
+        native_wayland_clipboard(),
+        "Draft clipboard restoration requires KDE or Hyprland Wayland"
+    );
     let types = read_wayland(&["--list-types"], 8192)?;
     let types = std::str::from_utf8(&types).context("Invalid clipboard types")?;
-    let mime = plain_text_mime(types)?.to_owned();
-    let bytes = read_wayland(&["--no-newline", "--type", &mime], 4 * 1024 * 1024)?;
-    Ok(TextSnapshot { mime, bytes })
+    if types.is_empty() {
+        return Ok(TextSnapshot {
+            entries: Vec::new(),
+        });
+    }
+    let _ = plain_text_mime(types)?;
+    let mimes: Vec<_> = types.lines().collect();
+    anyhow::ensure!(
+        mimes.len() <= 32,
+        "Clipboard has too many MIME types to preserve"
+    );
+    let mut entries = Vec::with_capacity(mimes.len());
+    let mut size = 0usize;
+    for mime in mimes {
+        anyhow::ensure!(
+            !mime.is_empty() && mime.len() <= 256,
+            "Invalid clipboard MIME type"
+        );
+        let bytes = read_wayland(&["--no-newline", "--type", mime], 16 * 1024 * 1024 - size)?;
+        size += bytes.len();
+        entries.push((mime.to_owned(), bytes));
+    }
+    anyhow::ensure!(
+        read_wayland(&["--list-types"], 8192)? == types.as_bytes(),
+        "Clipboard changed during snapshot"
+    );
+    if entries.len() > 1 {
+        let helper = restore_helper();
+        anyhow::ensure!(
+            helper.is_file(),
+            "Rich clipboard restore helper is missing; original clipboard untouched"
+        );
+        let check = Command::new("timeout")
+            .args(["3s", "python3"])
+            .arg(&helper)
+            .arg("--check")
+            .env("GDK_BACKEND", "wayland")
+            .env(
+                "WAYLAND_DISPLAY",
+                super::wayland_display().context("No Wayland display")?,
+            )
+            .output()
+            .context("Checking rich clipboard restoration")?;
+        anyhow::ensure!(
+            check.status.success() && check.stdout == b"READY\n",
+            "Rich clipboard restoration is unavailable; original clipboard untouched"
+        );
+    }
+    Ok(TextSnapshot { entries })
 }
 
 pub fn restore_text_wayland(snapshot: TextSnapshot, offered: Option<(&str, &[u8])>) -> Result<()> {
-    let Some((mime, expected)) = offered else { return Ok(()); };
+    let Some((mime, expected)) = offered else {
+        return Ok(());
+    };
     anyhow::ensure!(
         still_ours(mime, expected)?,
         "Clipboard changed during handoff; leaving the newer content untouched"
     );
-    copy_wayland(&snapshot.mime, &snapshot.bytes)
+    match snapshot.entries.as_slice() {
+        [] => clear_wayland(),
+        [(mime, bytes)] => copy_wayland(mime, bytes),
+        _ => copy_multi_wayland(&snapshot.entries),
+    }
+}
+
+fn restore_helper() -> std::path::PathBuf {
+    let adjacent = std::env::current_exe().ok().and_then(|exe| {
+        exe.parent()
+            .map(|dir| dir.join("scrawl-restore-clipboard.py"))
+    });
+    if let Some(path) = adjacent.filter(|path| path.is_file()) {
+        return path;
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/scrawl-restore-clipboard.py")
+}
+
+fn copy_multi_wayland(entries: &[(String, Vec<u8>)]) -> Result<()> {
+    let mut child = Command::new("python3")
+        .arg(restore_helper())
+        .env("GDK_BACKEND", "wayland")
+        .env(
+            "WAYLAND_DISPLAY",
+            super::wayland_display().context("No Wayland display")?,
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Rich clipboard restore requires Python GTK4")?;
+    let write = (|| -> Result<()> {
+        let mut stdin = child.stdin.take().context("No restore input")?;
+        stdin.write_all(&(entries.len() as u32).to_be_bytes())?;
+        for (mime, bytes) in entries {
+            stdin.write_all(&(mime.len() as u32).to_be_bytes())?;
+            stdin.write_all(mime.as_bytes())?;
+            stdin.write_all(&(bytes.len() as u32).to_be_bytes())?;
+            stdin.write_all(bytes)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = write {
+        let _ = child.kill();
+        return Err(error);
+    }
+    let mut stdout = child.stdout.take().context("No restore confirmation")?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let read = std::io::BufReader::new(&mut stdout).read_line(&mut line);
+        let _ = sender.send((read, line));
+    });
+    let confirmation = receiver.recv_timeout(std::time::Duration::from_secs(4));
+    if !matches!(confirmation, Ok((Ok(_), line)) if line == "READY\n") {
+        let _ = child.kill();
+        anyhow::bail!("Rich clipboard restore was not confirmed");
+    }
+    let offered = (|| -> Result<bool> {
+        for (mime, bytes) in entries {
+            if !still_ours(mime, bytes)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })();
+    if !matches!(offered, Ok(true)) {
+        let _ = child.kill();
+        anyhow::bail!("Rich clipboard restore did not own the expected data");
+    }
+    Ok(())
+}
+
+fn clear_wayland() -> Result<()> {
+    let status = Command::new("wl-copy")
+        .arg("--clear")
+        .env(
+            "WAYLAND_DISPLAY",
+            super::wayland_display().context("No Wayland display")?,
+        )
+        .status()
+        .context("Clearing original empty clipboard")?;
+    anyhow::ensure!(status.success(), "Could not restore empty clipboard");
+    Ok(())
 }
 
 pub fn still_ours(mime: &str, expected: &[u8]) -> Result<bool> {
@@ -72,31 +201,49 @@ pub fn still_ours(mime: &str, expected: &[u8]) -> Result<bool> {
     if !offered.lines().any(|item| item == mime) {
         return Ok(false);
     }
-    Ok(read_wayland(&["--no-newline", "--type", mime], 4 * 1024 * 1024)? == expected)
+    Ok(read_wayland(&["--no-newline", "--type", mime], 16 * 1024 * 1024)? == expected)
 }
 
 fn read_wayland(args: &[&str], limit: usize) -> Result<Vec<u8>> {
-    let bundled = std::env::current_exe().ok()
+    let bundled = std::env::current_exe()
+        .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("wl-paste")))
         .filter(|path| path.is_file());
     let mut child = Command::new("timeout")
         .arg("3s")
         .arg(bundled.unwrap_or_else(|| "wl-paste".into()))
         .args(args)
-        .env("WAYLAND_DISPLAY", super::wayland_display().context("No Wayland display")?)
+        .env(
+            "WAYLAND_DISPLAY",
+            super::wayland_display().context("No Wayland display")?,
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn().context("Native Wayland clipboard needs wl-paste and timeout")?;
+        .spawn()
+        .context("Native Wayland clipboard needs wl-paste and timeout")?;
     let mut bytes = Vec::new();
-    let read = child.stdout.take().context("No clipboard output")?
-        .take(limit as u64 + 1).read_to_end(&mut bytes);
+    let read = child
+        .stdout
+        .take()
+        .context("No clipboard output")?
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes);
     if bytes.len() > limit || read.is_err() {
         let _ = child.kill();
     }
     let status = child.wait().context("Waiting for wl-paste")?;
     read.context("Reading clipboard")?;
-    anyhow::ensure!(bytes.len() <= limit, "Clipboard too large to restore safely");
-    anyhow::ensure!(status.success(), "Could not read clipboard (wl-paste: {status})");
+    anyhow::ensure!(
+        bytes.len() <= limit,
+        "Clipboard too large to restore safely"
+    );
+    if args == ["--list-types"] && status.code() == Some(1) && bytes.is_empty() {
+        return Ok(bytes);
+    }
+    anyhow::ensure!(
+        status.success(),
+        "Could not read clipboard (wl-paste: {status})"
+    );
     Ok(bytes)
 }
 
@@ -166,11 +313,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn snapshot_policy_accepts_only_plain_text_and_rejects_rich_or_image_clipboards() {
-        assert_eq!(plain_text_mime("text/plain;charset=utf-8\ntext/plain\n" ).unwrap(), "text/plain;charset=utf-8");
-        assert!(plain_text_mime("text/plain\nimage/png\n").is_err());
-        assert!(plain_text_mime("text/html\ntext/plain\n").is_err());
-        assert!(plain_text_mime("image/png\n").is_err());
+    fn snapshot_policy_accepts_rich_and_image_clipboards_without_losing_their_types() {
+        assert_eq!(
+            plain_text_mime("text/plain;charset=utf-8\ntext/plain\n").unwrap(),
+            "text/plain;charset=utf-8"
+        );
+        assert!(plain_text_mime("text/plain\nimage/png\n").is_ok());
+        assert!(plain_text_mime("text/html\ntext/plain\n").is_ok());
+        assert!(plain_text_mime("image/png\n").is_ok());
         assert!(plain_text_mime("").is_err());
     }
 
@@ -182,25 +332,107 @@ mod tests {
         let original = b"synthetic original\n";
         copy_wayland("text/plain;charset=utf-8", original).unwrap();
         let snapshot = snapshot_text_wayland().unwrap();
-        assert_eq!(snapshot.bytes, original);
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|(mime, bytes)| mime == "text/plain;charset=utf-8" && bytes == original)
+        );
         let mut png = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut png, 1, 1);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
-            encoder.write_header().unwrap().write_image_data(&[255, 0, 0, 255]).unwrap();
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0, 255])
+                .unwrap();
         }
         copy_wayland("image/png", &png).unwrap();
-        assert!(snapshot_text_wayland().is_err(), "image clipboard is not restorable as text");
+        assert!(
+            snapshot_text_wayland()
+                .unwrap()
+                .entries
+                .iter()
+                .any(|(mime, bytes)| mime == "image/png" && bytes == &png)
+        );
         restore_text_wayland(snapshot, Some(("image/png", &png))).unwrap();
-        assert_eq!(read_wayland(&["--no-newline", "--type", "text/plain;charset=utf-8"], 1024).unwrap(), original);
+        assert_eq!(
+            read_wayland(
+                &["--no-newline", "--type", "text/plain;charset=utf-8"],
+                1024
+            )
+            .unwrap(),
+            original
+        );
         let snapshot = snapshot_text_wayland().unwrap();
         copy_wayland("image/png", &png).unwrap();
         copy_wayland("text/plain;charset=utf-8", b"newer synthetic clipboard").unwrap();
         assert!(restore_text_wayland(snapshot, Some(("image/png", &png))).is_err());
         assert_eq!(
-            read_wayland(&["--no-newline", "--type", "text/plain;charset=utf-8"], 1024).unwrap(),
+            read_wayland(
+                &["--no-newline", "--type", "text/plain;charset=utf-8"],
+                1024
+            )
+            .unwrap(),
             b"newer synthetic clipboard"
         );
+    }
+
+    #[test]
+    fn isolated_wayland_preserves_rich_clipboard_after_two_offers() {
+        if std::env::var_os("SCRAWL_TEST_RICH_WAYLAND_CLIPBOARD").is_none() {
+            return;
+        }
+        let original = snapshot_text_wayland().unwrap();
+        let html = b"<strong>synthetic</strong>";
+        let plain = b"synthetic";
+        let marker = b"scrawl-rich-restore-test-marker";
+        let image = b"synthetic-image";
+        let mut offered: (&str, &[u8]) = ("text/html", html);
+        let probe = (|| -> Result<()> {
+            copy_multi_wayland(&[
+                ("text/html".into(), html.to_vec()),
+                ("text/plain".into(), plain.to_vec()),
+            ])?;
+            let rich = snapshot_text_wayland()?;
+            anyhow::ensure!(
+                rich.entries
+                    .iter()
+                    .any(|(mime, bytes)| mime == "text/html" && bytes == html),
+                "HTML not offered: {:?}",
+                rich.entries
+                    .iter()
+                    .map(|(mime, bytes)| (mime, bytes.len()))
+                    .collect::<Vec<_>>()
+            );
+            anyhow::ensure!(
+                rich.entries
+                    .iter()
+                    .any(|(mime, bytes)| mime == "text/plain" && bytes == plain),
+                "Plain text not offered"
+            );
+            offered = ("image/png", image);
+            copy_wayland("image/png", image)?;
+            offered = ("text/plain;charset=utf-8", marker);
+            copy_wayland("text/plain;charset=utf-8", marker)?;
+            restore_text_wayland(rich, Some(("text/plain;charset=utf-8", marker)))?;
+            offered = ("text/html", html);
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            anyhow::ensure!(
+                read_wayland(&["--no-newline", "--type", "text/html"], 1024)? == html,
+                "HTML not restored"
+            );
+            anyhow::ensure!(
+                read_wayland(&["--no-newline", "--type", "text/plain"], 1024)? == plain,
+                "Plain text not restored"
+            );
+            Ok(())
+        })();
+        if still_ours(offered.0, offered.1).unwrap_or(false) {
+            restore_text_wayland(original, Some(offered)).unwrap();
+        }
+        probe.unwrap();
     }
 }

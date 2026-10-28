@@ -716,7 +716,6 @@ pub const SKILL_COMMAND: &str = "bunx skills add kitlangton/scrawl";
 pub struct View {
     pub version: String,
     pub login: LoginView,
-    pub auto_send: bool,
     pub remote_phone_ingest: bool,
     pub shortcuts: Vec<ShortcutView>,
     pub microphone: MicrophoneView,
@@ -1061,7 +1060,7 @@ fn shortcut_view(
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum Action {
-    /// A settings control: `launchAtLogin`, `autoSend`, `remotePhoneIngest`, `videoExport`, `lowerPlayback` (bool),
+    /// A settings control: `launchAtLogin`, `remotePhoneIngest`, `videoExport`, `lowerPlayback` (bool),
     /// `playbackLevel` (u8), `microphone` ("default" or a device id), `transcriber`
     /// ("apple"/"hex"/"command"), `hexModel` (an id), `hexLanguage` (a code), `appleLocale`
     /// (a locale id or "auto"), `retention` (a preset id).
@@ -1316,7 +1315,7 @@ impl Panel {
                     crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
                 }
             }
-            ("autoSend" | "videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
+            ("videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
                 write(key, (*on).into())
             }
             ("updateChannel", serde_json::Value::String(channel))
@@ -1461,7 +1460,6 @@ impl Panel {
                 available: login != LoginItem::Unavailable,
                 needs_approval: login == LoginItem::NeedsApproval,
             },
-            auto_send: config.auto_send.unwrap_or(true),
             remote_phone_ingest: config.remote_phone_ingest.unwrap_or(false),
             shortcuts: ShortcutKind::ALL
                 .into_iter()
@@ -2514,7 +2512,6 @@ mod tests {
                 host,
             )
         };
-        assert!(panel.view(&host).auto_send);
         #[cfg(target_os = "linux")]
         assert!(panel.view(&host).main_updates, "Linux must show the channel choice");
         assert_eq!(serde_json::to_value(panel.view(&host)).unwrap()["updateChannel"], "stable");
@@ -2532,7 +2529,6 @@ mod tests {
         set(&mut panel, &mut host, "playbackLevel", 0.5.into());
         assert!(Panel::default().view(&host).lower_playback);
         assert_eq!(Panel::default().view(&host).playback_level, 35);
-        set(&mut panel, &mut host, "autoSend", false.into());
         set(&mut panel, &mut host, "remotePhoneIngest", true.into());
         set(&mut panel, &mut host, "videoExport", true.into());
         set(&mut panel, &mut host, "transcriber", "hex".into());
@@ -2542,8 +2538,11 @@ mod tests {
         );
         set(&mut panel, &mut host, "transcriber", "nonsense".into());
         let view = panel.view(&host);
-        assert!(!view.auto_send && view.video_export);
+        assert!(view.video_export);
         assert!(view.remote_phone_ingest);
+        assert!(serde_json::to_value(&view).unwrap().get("autoSend").is_none());
+        set(&mut panel, &mut host, "autoSend", true.into());
+        assert!(read_json(&host.path).get("autoSend").is_none());
         assert_eq!(view.retention.preset, Some("month"));
         assert_eq!(
             view.retention.note,

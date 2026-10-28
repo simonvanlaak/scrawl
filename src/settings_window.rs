@@ -164,7 +164,6 @@ struct PermissionRow {
 struct ViewState {
     version: String,
     login: Login,
-    auto_send: bool,
     remote_phone_ingest: bool,
     shortcuts: Vec<Shortcut>,
     transcriber: Transcriber,
@@ -897,7 +896,6 @@ impl SettingsWindow {
 
     fn general(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
         let login_on = state.login.on;
-        let auto_send = state.auto_send;
         let remote_phone_ingest = state.remote_phone_ingest;
         let mut column = div().flex().flex_col().child(group(
             theme,
@@ -914,15 +912,6 @@ impl SettingsWindow {
                             }))
                         },
                     ),
-                )
-                .into_any_element(),
-                row(
-                    theme,
-                    "Send dev-site captures to OpenCode",
-                    true,
-                    switch(theme, "settings-auto-send", auto_send, true).on_click(cx.listener(
-                        move |view, _, _, _| view.set("autoSend", (!auto_send).into()),
-                    )),
                 )
                 .into_any_element(),
                 row(

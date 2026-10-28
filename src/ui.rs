@@ -271,33 +271,6 @@ fn completed_status_label(inbox_count: usize, note: Option<&str>, no_words: bool
     }
 }
 
-/// How long a smart-routed capture waits, showing "Sending to …", before it is sent.
-const SMART_SEND_UNDO: Duration = Duration::from_millis(3_000);
-
-fn truncate_title(title: &str, max: usize) -> String {
-    if title.chars().count() > max {
-        format!(
-            "{}…",
-            title.chars().take(max - 1).collect::<String>().trim_end()
-        )
-    } else {
-        title.to_owned()
-    }
-}
-
-/// A session title short enough for the island.
-fn island_title(title: &str) -> String {
-    truncate_title(title, 24)
-}
-
-/// The Completed island's lead once a local capture's send is done.
-fn completed_delivery_note(delivery: &crate::delivery::Delivery, title: &str) -> String {
-    match delivery {
-        crate::delivery::Delivery::Sent { .. } => format!("Sent to {title}"),
-        crate::delivery::Delivery::Queued { .. } => format!("Copied · couldn't reach {title}"),
-        crate::delivery::Delivery::Saved => "Copied".to_owned(),
-    }
-}
 
 /// Inner width of the Selecting row: mode segments, an optional Record chip, divider, and ✕.
 fn selecting_row_width(label_widths: &[f32], record_width: Option<f32>) -> f32 {
@@ -421,7 +394,6 @@ fn island_content_width(
     completed_note: Option<&str>,
     no_words: bool,
     live_no_words: bool,
-    routes: &[String],
 ) -> f32 {
     let divider = 1.0 + 2.0 * DIVIDER_MX;
     let inner = match phase {
@@ -485,10 +457,6 @@ fn island_content_width(
                 + LEAD_TRAIL
                 + divider
                 + chip_width(window, "Paste", FontWeight::SEMIBOLD)
-                + routes
-                    .iter()
-                    .map(|label| chip_width(window, label, FontWeight::MEDIUM) + CHIP_GAP)
-                    .sum::<f32>()
                 + chip_width(window, "Inspect", FontWeight::MEDIUM)
                 + CHIP_H
                 + 3.0 * CHIP_GAP
@@ -812,18 +780,8 @@ pub struct ScrawlCoordinator {
     iphone: Option<PhoneDevice>,
     /// The bundle the Completed island is showing.
     completed_dir: Option<PathBuf>,
-    /// The Completed island's lead text for a local capture sent to a session ("Sent to …"),
-    /// instead of "Copied".
+    /// The Completed island's lead text.
     completed_note: Option<String>,
-    /// A smart-routed capture waiting out its undo window before it's sent; ✕ or Paste on the
-    /// Completed island cancels it.
-    pending_send: Option<PathBuf>,
-    /// A local capture copied while its route is still being worked out; ✕ or Paste clears it,
-    /// keeping the capture on the clipboard whatever the route says.
-    routing: Option<PathBuf>,
-    /// Sessions the Completed island offers one click away (smart routing): when it asks, the
-    /// suggestion then a runner-up; during the undo window, the runner-up to switch to.
-    route_chips: Vec<RouteChip>,
     /// When this Mac last finished a capture, so ⌥⇧V prefers it over older inbox items.
     last_local_capture_ms: u64,
     inbox: crate::inbox::Inbox,
@@ -912,9 +870,6 @@ impl ScrawlCoordinator {
             iphone: None,
             completed_dir: None,
             completed_note: None,
-            pending_send: None,
-            routing: None,
-            route_chips: Vec::new(),
             last_local_capture_ms: 0,
             inbox: crate::inbox::Inbox::load_default(),
             last_mode: SelectionMode::load_last_used(),
@@ -985,7 +940,6 @@ impl ScrawlCoordinator {
             return;
         }
         let dir = self.take_paste_target();
-        self.keep_pending_send(&dir);
         if matches!(self.island_phase, IslandPhase::Completed { .. }) {
             self.dismiss_island(cx);
         }
@@ -2004,7 +1958,7 @@ impl ScrawlCoordinator {
                     self.completed_note.as_deref(),
                     self.completed_has_no_words(),
                 ),
-                routes: self.route_chip_labels(),
+                routes: Vec::new(),
             },
         };
         PillSnapshot {
@@ -2040,7 +1994,7 @@ impl ScrawlCoordinator {
             PillAction::Paste(target) => self.paste_completed_bundle(target, cx),
             PillAction::Inspect => self.inspect_completed_bundle(cx),
             PillAction::DismissCompleted => self.dismiss_completed_bundle(cx),
-            PillAction::Route(index) => self.choose_route(index, cx),
+            PillAction::Route(_) => {}
         }
     }
 
@@ -2070,7 +2024,6 @@ impl ScrawlCoordinator {
 
     pub fn dismiss_completed_bundle(&mut self, cx: &mut Context<Self>) {
         if let Some(dir) = self.completed_dir.clone() {
-            self.keep_pending_send(&dir);
             self.mark_handled(&dir);
         }
         self.dismiss_island(cx);
@@ -2099,7 +2052,6 @@ impl ScrawlCoordinator {
             .completed_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("latest"));
-        self.keep_pending_send(&dir);
         self.dismiss_island(cx);
         if !crate::capture::accessibility_granted() {
             scrawl_log("Paste chip without Accessibility; asking for it");
@@ -2123,193 +2075,6 @@ impl ScrawlCoordinator {
         });
     }
 
-    /// Acts on smart routing's decision for a finished local capture (the clipboard already has
-    /// it): a send waits out the undo window first, with the runner-up one click away; an offer
-    /// asks on the Completed island ("Send to DESKTOP" beside Paste) and sends nothing until a
-    /// session is picked.
-    fn act_on_route(
-        &mut self,
-        dir: PathBuf,
-        judgement: crate::routing::smart::Judgement,
-        url: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::routing::smart::Decision;
-        let showing = self.completed_dir.as_deref() == Some(dir.as_path());
-        match &judgement.decision {
-            Decision::Send { to, instead } => {
-                if showing {
-                    self.route_chips = RouteChip::switches(instead, url.as_deref());
-                }
-                self.send_after_undo(
-                    dir,
-                    crate::routing::smart::destination_of(to, url.as_deref()),
-                    cx,
-                );
-            }
-            Decision::Offer { choices } => {
-                if showing {
-                    self.route_chips = RouteChip::asks(choices, url.as_deref());
-                }
-                let names: Vec<String> = choices
-                    .iter()
-                    .map(|c| island_title(c.candidate.label()))
-                    .collect();
-                if self
-                    .review_bundle
-                    .as_ref()
-                    .is_some_and(|(shown, _)| *shown == dir)
-                {
-                    self.review_status = Some(format!("Copied · for {}?", names.join(" or ")));
-                }
-            }
-            Decision::Keep { .. } => {}
-        }
-    }
-
-    /// The labels of the Completed island's route chips.
-    fn route_chip_labels(&self) -> Vec<String> {
-        self.route_chips
-            .iter()
-            .map(|chip| chip.label.clone())
-            .collect()
-    }
-
-    /// A route chip on the Completed island was clicked: the capture goes to that session now,
-    /// as Kit's choice (it replaces a send waiting out its undo window).
-    pub fn choose_route(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(dir) = self.completed_dir.clone() else {
-            return;
-        };
-        let Some(chip) = self.route_chips.get(index).cloned() else {
-            return;
-        };
-        self.route_chips.clear();
-        self.routing = None;
-        self.pending_send = None;
-        self.mark_handled(&dir);
-        scrawl_log(format!(
-            "routing (smart): chose {} ({}) for {}",
-            chip.dest.title,
-            chip.dest.session,
-            dir.display()
-        ));
-        self.send_completed(dir, chip.dest, cx);
-        cx.notify();
-    }
-
-    /// Shows "Sending to …" for `SMART_SEND_UNDO`, then records the destination and sends,
-    /// unless ✕ or Paste cancelled it (nothing has left the Mac until then).
-    fn send_after_undo(
-        &mut self,
-        dir: PathBuf,
-        dest: crate::model::Destination,
-        cx: &mut Context<Self>,
-    ) {
-        self.pending_send = Some(dir.clone());
-        if self.completed_dir.as_deref() == Some(dir.as_path()) {
-            self.completed_note = Some(format!("Sending to {}…", island_title(&dest.title)));
-        }
-        cx.spawn(async move |entity, cx| {
-            cx.background_executor().timer(SMART_SEND_UNDO).await;
-            let _ = entity.update(cx, |coord, cx| {
-                if coord.pending_send.as_deref() != Some(dir.as_path()) {
-                    return;
-                }
-                coord.pending_send = None;
-                coord.route_chips.clear();
-                coord.send_completed(dir, dest, cx);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// Cancels an automatic send of `dir` (while its route is worked out or during its undo window).
-    fn keep_pending_send(&mut self, dir: &std::path::Path) {
-        if self.completed_dir.as_deref() == Some(dir) {
-            self.route_chips.clear();
-        }
-        if self.routing.as_deref() == Some(dir) {
-            self.routing = None;
-            scrawl_log(format!(
-                "routing: kept {} on the clipboard while its route was worked out",
-                dir.display()
-            ));
-        }
-        if self.pending_send.as_deref() == Some(dir) {
-            self.pending_send = None;
-            self.completed_note = None;
-            scrawl_log(format!(
-                "routing (smart): kept {} on the clipboard",
-                dir.display()
-            ));
-        }
-    }
-
-    /// Sends a finished local capture to the session it was routed to, and says how that went
-    /// on the Completed island and in the review window.
-    fn send_completed(
-        &mut self,
-        dir: PathBuf,
-        dest: crate::model::Destination,
-        cx: &mut Context<Self>,
-    ) {
-        let title = island_title(&dest.title);
-        if self.completed_dir.as_deref() == Some(dir.as_path()) {
-            self.completed_note = Some(format!("Sending to {title}…"));
-        }
-        if self
-            .review_bundle
-            .as_ref()
-            .is_some_and(|(shown, _)| *shown == dir)
-        {
-            self.review_status = Some(format!("Sending to {title}…"));
-        }
-        let (sender, receiver) = flume::bounded(1);
-        let send_dir = dir.clone();
-        let spawned = std::thread::Builder::new()
-            .name("scrawl-send".into())
-            .spawn(move || {
-                if let Err(err) =
-                    crate::handoff::load_bundle(&send_dir).and_then(|(_, mut bundle)| {
-                        crate::routing::record_destination(&send_dir, &mut bundle, dest.clone())
-                    })
-                {
-                    scrawl_log(format!("routing: couldn't record the destination: {err:#}"));
-                }
-                let _ = sender.send(crate::delivery::deliver(
-                    &send_dir,
-                    &dest.session,
-                    &dest.title,
-                    None,
-                    crate::handoff::send_bundle_to_session,
-                ));
-            });
-        if spawned.is_err() {
-            self.completed_note = None;
-            return;
-        }
-        cx.spawn(async move |entity, cx| {
-            let Ok(delivery) = receiver.recv_async().await else {
-                return;
-            };
-            let _ = entity.update(cx, |coord, cx| {
-                if coord.completed_dir.as_deref() == Some(dir.as_path()) {
-                    coord.completed_note = Some(completed_delivery_note(&delivery, &title));
-                }
-                if coord
-                    .review_bundle
-                    .as_ref()
-                    .is_some_and(|(shown, _)| *shown == dir)
-                {
-                    coord.review_status = Some(delivery.status("Copied to clipboard"));
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
 
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
@@ -2933,7 +2698,6 @@ impl ScrawlCoordinator {
         drop(rec._metal_overlay);
         self.set_island_phase(IslandPhase::Processing);
         self.completed_note = None;
-        self.route_chips.clear();
         cx.notify();
         if matches!(source, CaptureSource::Lab) {
             let duration_ms = rec.started.elapsed().as_millis() as u64;
@@ -2954,35 +2718,10 @@ impl ScrawlCoordinator {
             return;
         }
 
-        // A capture that ends on a dev site goes to its project's session; work that out (reading
-        // the browser tab, the port's process, the sessions) while the bundle is built.
-        let smart = crate::handoff::experiment(crate::routing::SMART_ROUTING);
         let screen = matches!(source, CaptureSource::Screen { .. });
-        // A window capture is of that window's app, whatever is in front at the end.
-        let front = screen
-            .then(|| {
-                (target.mode != CaptureMode::Window)
-                    .then(crate::capture::frontmost_app_info)
-                    .flatten()
-                    .and_then(|(_, _, id)| id)
-            })
-            .flatten();
-        let captured = target.bundle_id.clone();
-        let finish_started = Instant::now();
         #[cfg(target_os = "linux")]
         let final_whiteboard = screen.then(|| {
             whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx))
-        });
-        let route = (screen && !smart && !auto_active).then(|| {
-            let (front, captured) = (front.clone(), captured.clone());
-            std::thread::spawn(move || {
-                crate::routing::route_capture(front.as_deref(), captured.as_deref())
-            })
-        });
-        let look = (screen && smart && !auto_active).then(|| {
-            std::thread::spawn(move || {
-                crate::routing::look_capture(front.as_deref(), captured.as_deref())
-            })
         });
 
         cx.spawn(async move |entity, cx| {
@@ -3056,13 +2795,9 @@ impl ScrawlCoordinator {
                 })
                 .await;
 
-            // The capture is copied and shown as done as soon as it's built; routing (the
-            // browser tab, the port's process, OpenCode's sessions) can take seconds, or longer
-            // when the server is down, so its outcome follows when it's ready.
-            let routed = entity
+            let _ = entity
                 .update(cx, |coord, cx| {
                     let (finalized, duration_ms) = result;
-                    let mut routed = None;
                     coord.completed_dir = None;
                     let (dir, bundle, _) = match finalized {
                         Ok(capture) => capture,
@@ -3072,7 +2807,7 @@ impl ScrawlCoordinator {
                             crate::linux::shell::notify("Capture failed", &error.to_string());
                             coord.set_island_phase(IslandPhase::Dismissing);
                             cx.notify();
-                            return None;
+                            return;
                         }
                     };
                     let frame_count = bundle.keyframes.len();
@@ -3111,10 +2846,6 @@ impl ScrawlCoordinator {
                         // paste. Keep the paper tile and give the user the final say.
                         coord.completed_note = Some("Saved · check draft".into());
                     }
-                    if route.is_some() || look.is_some() {
-                        coord.routing = Some(dir.clone());
-                        routed = Some((dir.clone(), look.is_some().then(|| bundle.clone())));
-                    }
                     coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
                     coord.set_island_phase(IslandPhase::Completed {
                         finished_at: Instant::now(),
@@ -3123,120 +2854,12 @@ impl ScrawlCoordinator {
                         inbox_count: 0,
                     });
                     cx.notify();
-                    routed
-                })
-                .ok()
-                .flatten();
-            let copied_ms = finish_started.elapsed().as_millis();
-            let Some((dir, bundle)) = routed else {
-                return;
-            };
-            let route_dir = dir.clone();
-            let route = cx
-                .background_executor()
-                .spawn(async move {
-                    if let Some(dest) = route.and_then(|route| route.join().ok().flatten()) {
-                        return RouteOutcome::Send(dest);
-                    }
-                    if let (Some(bundle), Some(live)) =
-                        (bundle, look.and_then(|look| look.join().ok().flatten()))
-                    {
-                        let (judgement, url) =
-                            crate::routing::judge_capture(&route_dir, &bundle, live);
-                        return RouteOutcome::Judged(judgement, url);
-                    }
-                    RouteOutcome::None
-                })
-                .await;
-            scrawl_log(format!(
-                "finish: copied at {copied_ms}ms · routed at {}ms",
-                finish_started.elapsed().as_millis()
-            ));
-            let _ = entity.update(cx, |coord, cx| coord.route_arrived(dir, route, cx));
+                });
         })
         .detach();
     }
-
-    /// Acts on a local capture's route once it's worked out, unless ✕ or Paste on the Completed
-    /// island kept the capture on the clipboard first.
-    fn route_arrived(&mut self, dir: PathBuf, route: RouteOutcome, cx: &mut Context<Self>) {
-        if self.routing.as_deref() != Some(dir.as_path()) {
-            if !matches!(route, RouteOutcome::None) {
-                scrawl_log(format!(
-                    "routing: {} was kept on the clipboard before its route arrived",
-                    dir.display()
-                ));
-            }
-            return;
-        }
-        self.routing = None;
-        match route {
-            RouteOutcome::None => return,
-            RouteOutcome::Send(dest) => self.send_completed(dir, dest, cx),
-            RouteOutcome::Judged(judgement, url) => self.act_on_route(dir, judgement, url, cx),
-        }
-        cx.notify();
-    }
 }
 
-/// A session offered one click away on the Completed island.
-#[derive(Clone, Debug)]
-struct RouteChip {
-    label: String,
-    dest: crate::model::Destination,
-}
-
-impl RouteChip {
-    /// How many fit beside Paste.
-    const MAX: usize = 2;
-
-    fn chosen(scored: &crate::routing::smart::Scored, url: Option<&str>, label: String) -> Self {
-        let mut dest = crate::routing::smart::destination_of(scored, url);
-        dest.via = "chosen".into();
-        Self { label, dest }
-    }
-
-    /// An offer's chips: "Send to DESKTOP", then the runner-up by name.
-    fn asks(choices: &[crate::routing::smart::Scored], url: Option<&str>) -> Vec<Self> {
-        choices
-            .iter()
-            .take(Self::MAX)
-            .enumerate()
-            .map(|(i, scored)| {
-                let title = chip_title(scored.candidate.label());
-                let label = if i == 0 {
-                    format!("Send to {title}")
-                } else {
-                    title
-                };
-                Self::chosen(scored, url, label)
-            })
-            .collect()
-    }
-
-    /// The undo window's chip beside "Sending to DESKTOP…": "Send to OPENCODE IOS" instead.
-    fn switches(instead: &[crate::routing::smart::Scored], url: Option<&str>) -> Vec<Self> {
-        instead
-            .iter()
-            .take(1)
-            .map(|scored| {
-                let label = format!("Send to {}", chip_title(scored.candidate.label()));
-                Self::chosen(scored, url, label)
-            })
-            .collect()
-    }
-}
-
-/// A session title short enough for a chip.
-fn chip_title(title: &str) -> String {
-    truncate_title(title, 16)
-}
-
-enum RouteOutcome {
-    None,
-    Send(crate::model::Destination),
-    Judged(crate::routing::smart::Judgement, Option<String>),
-}
 
 pub struct HudPillWindow {
     coordinator: Entity<ScrawlCoordinator>,
@@ -3347,7 +2970,6 @@ impl Render for HudPillWindow {
         let completed_note = coord.completed_note.clone();
         let completed_no_words = coord.completed_has_no_words();
         let live_no_words = coord.recording_has_no_words() && !coord.reveal.is_open();
-        let routes = coord.route_chip_labels();
         // The Recording capsule's trailing group: switch chips or controls, and the swap between.
         let chips = if matches!(phase, IslandPhase::Recording) {
             coord.reveal.is_open()
@@ -3376,7 +2998,6 @@ impl Render for HudPillWindow {
             completed_note.as_deref(),
             completed_no_words,
             live_no_words,
-            &routes,
         );
         let snap_initial_width =
             phase_age < 0.025 && matches!(phase, IslandPhase::Selecting { .. }) && opacity < 0.35;
@@ -3489,7 +3110,6 @@ impl Render for HudPillWindow {
         let c_paste_out = self.coordinator.clone();
         let c_inspect = self.coordinator.clone();
         let c_dismiss = self.coordinator.clone();
-        let c_route = self.coordinator.clone();
         let c_record = self.coordinator.clone();
         let c_sel_cancel = self.coordinator.clone();
 
@@ -3648,7 +3268,6 @@ impl Render for HudPillWindow {
                 ["done.lead", "divider.lead", "paste"]
                     .into_iter()
                     .map(str::to_owned)
-                    .chain((0..routes.len()).map(|i| format!("route:{i}")))
                     .chain(["inspect".to_owned(), "close".to_owned()])
                     .map(|name| Some((name, 1.0)))
                     .collect(),
@@ -3718,12 +3337,6 @@ impl Render for HudPillWindow {
                         });
                     }),
             )
-            .children(routes.iter().enumerate().map(|(i, label)| {
-                let c_route = c_route.clone();
-                pill_chip(("hud-route", i), label.clone()).on_click(move |_, _, cx| {
-                    c_route.update(cx, |coord, cx| coord.choose_route(i, cx));
-                })
-            }))
             .child(
                 pill_chip("hud-inspect", "Inspect").on_click(move |_, _, cx| {
                     c_inspect.update(cx, |coord, cx| coord.inspect_completed_bundle(cx));
@@ -5995,7 +5608,6 @@ pub fn run_app(
                                 let duration_ms = bundle.duration_ms;
                                 let inbox_count = coord.add_to_inbox(&dir, &bundle);
                                 coord.completed_dir = Some(dir.clone());
-                                coord.route_chips.clear();
                                 coord.set_review_bundle((dir, *bundle), status);
                                 coord.set_island_phase(IslandPhase::Completed {
                                     finished_at: Instant::now(),
@@ -6403,26 +6015,5 @@ mod tests {
             "Sent to SCRAWL · No words"
         );
         assert_eq!(completed_status_label(0, None, false), "Copied");
-        assert_eq!(island_title("SCRAWL"), "SCRAWL");
-        assert_eq!(
-            island_title("Make Mac captures route to the site session"),
-            "Make Mac captures route…"
-        );
-        assert_eq!(
-            chip_title("Make Mac captures route to the site session"),
-            "Make Mac captur…"
-        );
-        let queued = crate::delivery::Delivery::Queued {
-            title: "SCRAWL".into(),
-            error: "offline".into(),
-        };
-        assert_eq!(
-            completed_delivery_note(&queued, "SCRAWL"),
-            "Copied · couldn't reach SCRAWL"
-        );
-        let sent = crate::delivery::Delivery::Sent {
-            title: "SCRAWL".into(),
-        };
-        assert_eq!(completed_delivery_note(&sent, "SCRAWL"), "Sent to SCRAWL");
     }
 }

@@ -560,39 +560,11 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         repeat: u32,
     },
-    /// Copy a `.scrawl` bundle to the clipboard or send it to an OpenCode V2 session.
-    Send {
+    /// Copy a `.scrawl` bundle to the clipboard.
+    Copy {
         /// Path to `.scrawl` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
-        /// Target OpenCode session ID (`ses_...`). If omitted, an iPhone recording goes to the
-        /// session it was addressed to, a Mac capture of a dev site to the session it was routed
-        /// to, anything else to the most recent active session.
-        #[arg(long)]
-        session: Option<String>,
-        /// Send an iPhone recording to `--session` even though it was addressed to another.
-        #[arg(long)]
-        reroute: bool,
-        /// Copy to the macOS clipboard instead of posting to OpenCode.
-        #[arg(long)]
-        clipboard: bool,
-    },
-    /// Print which OpenCode session a capture of a browser tab would be sent to, without
-    /// sending: a page registered through `/sdk.js`, else the project serving a localhost port.
-    ///
-    /// With `--explain <bundle>`, prints the evidence smart routing sees for that capture, the
-    /// sessions it weighed and their scores, and its decision (read-only). `--url` stands in for
-    /// the tab when the bundle didn't save one.
-    Route {
-        /// The tab's URL.
-        #[arg(long, conflicts_with = "browser")]
-        url: Option<String>,
-        /// Read the front tab of this browser instead (bundle ID, e.g. `com.brave.Browser`).
-        #[arg(long)]
-        browser: Option<String>,
-        /// A `.scrawl` bundle (or `latest`) to explain.
-        #[arg(long, value_name = "BUNDLE")]
-        explain: Option<PathBuf>,
     },
     /// Open a `.scrawl` bundle in the native GPUI review window.
     Preview {
@@ -612,9 +584,6 @@ enum Command {
         /// Scrawl ingest base URL(s); defaults to this Mac's Tailscale and LAN IPs on `--port`.
         #[arg(long = "url")]
         urls: Vec<String>,
-        /// Optional OpenCode session ID (`ses_...`) to route captures from this app to.
-        #[arg(long)]
-        session: Option<String>,
         /// Ingest port used when discovering default Tailscale / LAN URLs.
         #[arg(long, default_value_t = phone::DEFAULT_INGEST_PORT)]
         port: u16,
@@ -627,9 +596,6 @@ enum Command {
         /// Also poll cabled iPhones over USB (`devicectl`) for apps listed in `usbApps`.
         #[arg(long)]
         usb: bool,
-        /// Build bundles without posting them to an OpenCode session.
-        #[arg(long)]
-        no_opencode: bool,
     },
     /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add kitlangton/scrawl` installs it).
     Skill,
@@ -2439,47 +2405,10 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
-        Command::Send {
-            bundle,
-            session,
-            reroute,
-            clipboard,
-        } => {
+        Command::Copy { bundle } => {
             let dir = handoff::resolve_bundle_dir(&bundle)?;
-            if clipboard {
-                handoff::copy_bundle_to_clipboard(&dir)?;
-                println!("Copied {} to clipboard", dir.display());
-            } else {
-                let target_session = handoff::send_to_opencode(&dir, session.as_deref(), reroute)?;
-                println!(
-                    "Sent {} to OpenCode session {target_session}",
-                    dir.display()
-                );
-            }
-            Ok(())
-        }
-        Command::Route {
-            url,
-            browser,
-            explain,
-        } => {
-            let url = match (url, browser) {
-                (Some(url), _) => Some(url),
-                (None, Some(browser)) => Some(
-                    routing::browser_tab_url(&browser)
-                        .with_context(|| format!("Couldn't read the front tab of {browser}"))?,
-                ),
-                (None, None) => None,
-            };
-            if let Some(bundle) = explain {
-                print!("{}", routing::explain_bundle(&bundle, url.as_deref())?);
-                return Ok(());
-            }
-            let url = url.context("Pass --url or --browser")?;
-            match routing::route(&url, &routing::Hooks::default()) {
-                Ok(dest) => println!("{}", serde_json::to_string_pretty(&dest)?),
-                Err(reason) => println!("{url}: clipboard only ({reason})"),
-            }
+            handoff::copy_bundle_to_clipboard(&dir)?;
+            println!("Copied {} to clipboard", dir.display());
             Ok(())
         }
         Command::Preview {
@@ -2497,7 +2426,6 @@ fn main() -> Result<()> {
         Command::Link {
             scheme,
             urls,
-            session,
             port,
         } => {
             let token = handoff::ensure_ingest_token()?;
@@ -2510,19 +2438,14 @@ fn main() -> Result<()> {
                 !resolved_urls.is_empty(),
                 "Could not discover a Tailscale or LAN IP; pass --url http://<host>:{port}"
             );
-            let link =
-                phone::format_setup_link(&scheme, &resolved_urls, &token, session.as_deref())?;
+            let link = phone::format_setup_link(&scheme, &resolved_urls, &token, None)?;
             println!("{link}");
             if let Ok(qr) = helper::qr(&link) {
                 eprintln!("\n{qr}");
             }
             Ok(())
         }
-        Command::Serve {
-            port,
-            usb,
-            no_opencode,
-        } => phone::run_ingest_server(port, usb, no_opencode),
+        Command::Serve { port, usb } => phone::run_ingest_server(port, usb),
         Command::Skill => {
             print!("{SKILL}");
             Ok(())

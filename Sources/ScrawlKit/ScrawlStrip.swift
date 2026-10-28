@@ -370,8 +370,8 @@
         Text("Sent to \(Self.shortened(title))")
       case let .queued(title):
         noticeText(Notice("On your Mac", detail: "Sends to \(Self.shortened(title, to: 24)) when it can"))
-      case let .processing(title):
-        noticeText(Notice("On your Mac", detail: "Sending to \(Self.shortened(title, to: 30))…"))
+      case .processing:
+        noticeText(Notice("On your Mac", detail: "Processing…"))
       case .saved:
         Text("Saved on your Mac")
       }

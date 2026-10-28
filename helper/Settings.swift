@@ -7,7 +7,7 @@ import SwiftUI
 // `scrawl-helper settings [--pane P] [--icon PNG] [--render DIR]`: the Settings window.
 // Scrawl decides everything (`src/settings.rs`) and sends what to show as JSON lines on stdin:
 //   {"type":"state","version":"0.3.2","login":{"on":false,"available":true,"needsApproval":false},
-//    "autoSend":true,"shortcuts":[{"kind":"record","title":"Record","label":"⌥⇧S","key":"S",
+//    "shortcuts":[{"kind":"record","title":"Record","label":"⌥⇧S","key":"S",
 //    "shift":true,"control":false,"option":true,"command":false,"isDefault":true,
 //    "recording":false,"error":null},…],"microphone":{"selected":"default","value":"System default",
 //    "options":[{"id":"default","title":"System default (…)","enabled":true},{"id":"-",…},…],
@@ -17,7 +17,7 @@ import SwiftUI
 //    "updates":true}
 //   {"type":"show","pane":"permissions"}  {"type":"request"|"open-settings","permission":"…"}
 //   {"type":"close"}
-// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"autoSend","value":false},
+// Clicks and key presses go back on stdout, e.g. {"action":"set","key":"remotePhoneIngest","value":false},
 // {"action":"record-shortcut","kind":"record"}, {"action":"shortcut","kind":"record",
 // "keyCode":15,"modifiers":6144,"key":"r","reserved":false}, {"action":"cancel-shortcut"},
 // {"action":"reset-shortcut","kind":"paste"}, {"action":"clear-shortcut","kind":"paste"},
@@ -150,7 +150,6 @@ struct SettingsCommandLine: Decodable, Equatable {
 struct SettingsState: Decodable, Equatable {
   var version = "0.3.2"
   var login = SettingsLogin()
-  var autoSend = true
   var remotePhoneIngest = false
   var shortcuts: [SettingsShortcut] = [
     SettingsShortcut(),
@@ -915,10 +914,6 @@ struct SettingsView: View {
       SettingsGroup {
         SettingsRow(title: "Launch at login", enabled: state.login.available) {
           SettingsSwitch(on: state.login.on, enabled: state.login.available) { model.set("launchAtLogin", $0) }
-        }
-        SettingsSeparator()
-        SettingsRow(title: "Send dev-site captures to OpenCode") {
-          SettingsSwitch(on: state.autoSend) { model.set("autoSend", $0) }
         }
         SettingsSeparator()
         SettingsRow(title: "Allow phone uploads from other devices") {

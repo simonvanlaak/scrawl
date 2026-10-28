@@ -1,4 +1,7 @@
-# Smart routing
+# Archived smart routing design (inactive)
+
+Scrawl no longer routes or sends captures to OpenCode. This document describes the old
+implementation for historical reference, not an available experiment or current user workflow.
 
 Read this before changing `src/routing/smart.rs` or `src/routing/look.rs`. The ladder that runs when the experiment is off is described in `docs/iphone-and-routing.md`, and the words used here are defined in `CONTEXT.md`.
 

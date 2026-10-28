@@ -73,13 +73,12 @@ scrawl inspect <bundle>               # summary.md, the text above
 scrawl inspect <bundle> --json        # scrawl.json
 scrawl inspect <bundle> --marks       # the marks, numbered as in the text [--json]
 scrawl frames <bundle> --from 0:04 --to 0:06 [--fps 4]   # plain PNGs of a range; prints their paths
-scrawl send <bundle> --session ses_…  # queue the capture into an OpenCode session
-scrawl send <bundle> --clipboard      # copy the summary text to the clipboard
+scrawl copy <bundle>                  # copy the capture to the clipboard
 scrawl export <bundle> [--out demo.mp4] [--zoom] [--crop auto|full|x,y,w,h] [--size 1920]
 ```
 
 - `zoom` and `frames` write into `<bundle>/zoom/`. Leave the rest of the bundle as it is, because Scrawl manages those files and cleans them up.
-- `send` without `--session` goes to the session the capture was addressed to (the `For session:` line), and otherwise to the most recently active session. With a recorded destination it refuses a different `--session` unless you pass `--reroute`, so check with the person before rerouting.
+- Scrawl does not send captures to agent sessions. Use `copy` to place a finished bundle on the clipboard.
 - `export` writes one `.mp4` with the ink and clicks burned in and the audio in sync (default `~/Movies/Scrawl/<bundle>.mp4`). `--zoom` eases in toward the activity. `--no-ink`, `--no-clicks`, `--hevc` and `--fps` are also available.
 - On Linux, `scrawl update status` prints JSON with the selected channel, the **live process** version (`running.version`, or `null` if none), the installed AppImage identity, and whether a restart is pending. The `running` object in `~/.config/scrawl/config.json` is a launch record, not proof the process is still alive after a crash; use `status` to validate its PID and start time. `scrawl update channel stable|main` chooses the feed; `scrawl update check` checks and stages an update for the next launch (installed AppImages only).
 - Video and audio go to the Trash 7 days after a capture unless the person changed that in Settings. After that `zoom`, `frames` and `export` can't read the video, but `frames/`, the contact sheet and `scrawl.json` remain.

@@ -56,7 +56,7 @@ With the skill, an agent that gets a Scrawl paste reads the contact sheet and tr
 keyframes the narration points at, and uses the command to look closer: `scrawl zoom <bundle> --at
 0:12` (or `--at "a phrase you said"`, or `--mark 2` for the mark the text shows as ✎②; `scrawl
 inspect --marks` lists them) makes a dense sheet of frames around a moment, `scrawl
-frames` pulls a range, `scrawl send` queues a capture into an OpenCode session, and `scrawl export`
+frames` pulls a range, `scrawl copy` puts a capture on the clipboard, and `scrawl export`
 makes a shareable `.mp4`. `scrawl skill` prints the skill without installing anything.
 
 ## Usage
@@ -78,12 +78,8 @@ cargo run -- inspect /tmp/demo.scrawl --json
 # Extract frames in a time window for an agent to look closer
 cargo run -- frames /tmp/demo.scrawl --from 0:02 --to 0:07
 
-# Copy contact-sheet.png + summary.md to the clipboard or send to OpenCode V2
-cargo run -- send /tmp/demo.scrawl --clipboard
-cargo run -- send /tmp/demo.scrawl --session ses_...
-
-# Which session a capture of a dev site would go to (without sending)
-cargo run -- route --url http://localhost:5173/
+# Copy contact-sheet.png + summary.md to the clipboard
+cargo run -- copy /tmp/demo.scrawl
 
 # Capture a cabled iPhone for 8 seconds from the terminal (mirror window + native video)
 cargo run -- record --iphone --duration 8
@@ -183,7 +179,7 @@ granted and each on-demand sheet: `target/debug/scrawl-helper onboarding --rende
 
 **Settings…** in the menu bar (⌘, while the menu is open) opens a small window with six panes:
 
-- **General**: Launch at login, Send dev-site captures to OpenCode, and the two shortcuts, Record
+- **General**: Launch at login, phone uploads, and the two shortcuts, Record
   (`⌥⇧S`) and Paste last capture (`⌥⇧V`, which can be turned off).
 - **Recording**: the microphone, with its input level, the transcriber (Apple Speech with its
   language, Hex while it runs, with its model and language, or Command when it's configured) and,
@@ -242,66 +238,8 @@ While picking a target, the island shows the modes **Area**, **Window**, **Scree
   clicking the selected mode again starts recording (`⏎`/`⌥⇧S` record the full screen from Area and
   Window too)
 
-## Sending captures of a dev site to its session
-
-A capture that ends with a browser in front showing a project's dev site goes straight to that
-project's OpenCode session, the same way iPhone recordings do. It is still copied to the clipboard.
-The island says "Sending to SCRAWL…", then "Sent to SCRAWL", or "Copied · couldn't reach SCRAWL"
-when OpenCode didn't take it (the app retries it, as for iPhone recordings). Window captures use the
-captured window's app instead of the one in front. Brave, Chrome, Arc, Edge, Vivaldi, Chromium, and
-Safari work; macOS asks once whether Scrawl may control the browser, so it can read the tab's
-address. If you decline, captures stay on the clipboard.
-
-Scrawl picks the session in this order:
-
-1. **The page registered itself.** Add one dev-only line to the page:
-
-   ```html
-   <script src="http://127.0.0.1:47777/sdk.js" data-session="ses_…"></script>
-   ```
-
-   or `data-directory="/abs/path/to/project"` to use that project's most recently active session.
-   The script comes from Scrawl itself. It registers the tab, sends a heartbeat every 30 s while the
-   tab is visible, and unregisters when the tab closes (a registration lasts 2 minutes after its
-   last heartbeat). With Vite, inject it only in dev:
-
-   ```ts
-   // vite.config.ts
-   plugins: [{
-     name: "scrawl",
-     apply: "serve",
-     transformIndexHtml: () => [{
-       tag: "script",
-       attrs: { src: "http://127.0.0.1:47777/sdk.js", "data-directory": process.cwd() },
-       injectTo: "head",
-     }],
-   }]
-   ```
-
-   The script does nothing unless the page is on `localhost`, `*.localhost`, `127.x`, or `[::1]`.
-   Scrawl accepts a registration without a token only from a loopback origin calling from this Mac,
-   and only for that origin. A page anywhere else (a `*.ts.net` dev host, say) must also set
-   `data-token` to the ingest token (`ingestToken` in `~/.config/scrawl/config.json`).
-2. **Zero setup for localhost.** If the tab is on a loopback host and no page registered, Scrawl
-   finds the process listening on that port (`lsof`), its working directory and that directory's
-   git root, and sends to the most recently active open root session in the repository (any folder
-   in it). Outside a git repository only a session in that exact folder counts.
-3. Otherwise the capture is copied to the clipboard only, as before.
-
-The destination is recorded in `scrawl.json` (`destination: {session, title, via: "sdk" |
-"localhost", url, directory}`) and on the second line of `summary.md`
-(`For session: SCRAWL (ses_…) · page http://localhost:5173/`). `scrawl send` without `--session`
-sends to it again, and refuses a different `--session` unless you pass `--reroute`.
-
-To see where a capture of a URL would go, without sending anything:
-
-```sh
-scrawl route --url http://localhost:5173/
-scrawl route --browser com.brave.Browser   # the browser's front tab
-```
-
-Turn it off with **Send dev-site captures to OpenCode** in Settings › General, or `"autoSend": false` in
-`~/.config/scrawl/config.json`. `SCRAWL_NO_OPENCODE=1` also turns it off.
+Captures are saved as `.scrawl` bundles and copied to the clipboard. Scrawl does not select an
+OpenCode session or send captures automatically. Use `scrawl copy <bundle>` to copy an older bundle.
 
 ## Auto-crop (Screen captures)
 
@@ -484,14 +422,14 @@ overlay window, network calls, files, or background `URLSession`). To pair your 
 terminal QR code) and open it on the phone:
 
 ```sh
-scrawl link --scheme updown [--session ses_…]
+scrawl link --scheme updown
 # updown://scrawl?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=…
 ```
 
 `scrawl link` reads (or generates with mode `0600`) `ingestToken` in
 `~/.config/scrawl/config.json` and defaults to this Mac's Tailscale and LAN IPs on port `47777`.
 In Settings › General, enable **Allow phone uploads from other devices** before using the LAN or
-Tailscale URLs. It is off by default: the GUI keeps port 47777 on loopback for dev-page routing,
+Tailscale URLs. It is off by default: the GUI keeps port 47777 on loopback,
 and switching it off again closes the all-interfaces listener without a restart. The cabled
 iPhone mirror and USB fallback still work. `scrawl serve` is an explicit remote listener and does
 not follow this GUI setting.
@@ -499,21 +437,16 @@ Opening `<scheme>://scrawl?reset=1` on the phone clears its Keychain config (`de
 For cabled USB fallback via `devicectl` (`Documents/Scrawl`), list the app bundle IDs in
 `~/.config/scrawl/config.json` under `"usbApps": ["com.kitlangton.UpDown"]`.
 
-The Mac answers an upload once it has built the bundle and queued it into the OpenCode session (or
-after up to 45 s), so the strip says what happened:
+The Mac answers an upload once it has built the bundle (or after up to 45 s), so the strip says what happened:
 
 | On the Mac | Reply | The strip |
 | --- | --- | --- |
-| Queued into the session | `delivered: true, state: "sent"` | Sent to UP DOWN |
-| Bundle saved, OpenCode didn't take it (retried from the Mac) | `delivered: false, state: "queued"` | On your Mac · Sends to UP DOWN when it can |
-| Still building or sending when the wait ran out | `delivered: false, state: "processing"` | On your Mac · Sending to UP DOWN… |
-| Bundle saved, no session for this app (or routing off) | `delivered: false, state: "saved"` | Saved on your Mac |
+| Bundle saved | `delivered: false, state: "saved"` | Saved on your Mac |
+| Still building when the wait ran out | `delivered: false, state: "processing"` | On your Mac · Processing… |
 | Bundle couldn't be built | HTTP 500 | Mac didn't answer · Share |
 
-A queued bundle gets `.deliver.json` and the Mac retries it every 15 s, backing off to 30 min, for
-a day (then it's renamed `.deliver-failed.json`; both are logged to `~/Library/Logs/Scrawl/scrawl.log`).
-The phone doesn't upload it again. Over USB the Mac writes the same reply to `<stamp>.delivery`
-before `<stamp>.sent`. Replies without `delivered` (Macs from before this) read as sent.
+The phone does not upload a saved bundle again. Over USB the Mac writes the same reply to
+`<stamp>.delivery` before `<stamp>.sent`.
 
 You can also AirDrop the `.mp4` and `.json` pair to the Mac and run `scrawl import`:
 
@@ -523,18 +456,11 @@ You can also AirDrop the `.mp4` and `.json` pair to the Mac and run `scrawl impo
 - App events (`Scrawl.event("Done tapped")`) appear in `summary.md` under the keyframe that was on
   screen when they happened (`  · 0:12 app: Done tapped`).
 
-#### Destination and recovery
+#### Recorded session metadata
 
-The original `timeline.json` stores the paired destination in its top-level `session` field.
-`context.session`, when the app supplies it, describes the session being viewed and does not choose
-the recipient. For example, recording OpenCode Settings while viewing another project's session
-can still send to the paired OpenCode iOS coordinator. Automatic Mac ingest resolves the top-level
-destination first; without one, it uses the app/session fallback in `resolve_opencode_session`.
-
-When recovering a failed delivery, read that original top-level field and check whether the capture
-already arrived before sending again. `scrawl send --session` explicitly overrides the recipient;
-do not fill it from `context.session`. If there is no recorded destination and ownership is unclear,
-ask before forwarding. Keep private-project endpoints and recipients unchanged.
+An imported `timeline.json` can still name a session in its top-level `session` field, while
+`context.session` names the session visible on screen. Scrawl preserves these facts in the bundle
+but does not use them to forward the capture.
 
 #### Sending to an HTTPS endpoint
 
@@ -617,7 +543,7 @@ The most recently appeared screen that is still visible wins, so pushed screens,
 work. The timeline gets `shortVersion`, `context` (values at the start), `contextChanges`
 (`[{"t", "key", "value"}]`, `null` when cleared), and `screens` (`[{"t", "name"}]`, the first at `0`).
 The bundle keeps them as `context`, `contextChanges`, and `screens` spans (`{t0, t1, name}`), and
-`summary.md` (and the prompt queued into OpenCode) shows them:
+`summary.md` shows them:
 
 ```
 [scrawl 0:25 · iPhone · OpenCode 1.4 (354) · /…/20261014-101500.scrawl]
@@ -631,8 +557,7 @@ Screen: Sessions · server: studio · session: ses_3f…
 ### Headless ingest server (`scrawl serve`)
 
 On an always-on Mac (such as a Mac Studio reachable over Tailscale), run `scrawl serve` to accept
-authenticated ScrawlKit uploads, build `.scrawl` bundles, and route them straight into local
-OpenCode sessions without running the GUI app:
+authenticated ScrawlKit uploads and build `.scrawl` bundles without running the GUI app:
 
 ```sh
 scrawl serve [--port 47777] [--usb]

@@ -302,6 +302,15 @@
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
+      "id": "agent-demo-video",
+      "group": "finish",
+      "name": "Ask the agent for a Scrawl video",
+      "says": "When enabled, a copied or pasted capture asks an agent to demonstrate complex changes in a short Scrawl video if it can access the screen.",
+      "status": "experiment:agentDemoVideo",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md", "docs/onboarding-and-settings.md"]
+    },
+    {
       "id": "clipboard-image",
       "group": "finish",
       "name": "Image and text on one clipboard",

@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-#[cfg(target_os = "linux")]
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
@@ -18,7 +17,6 @@ use gpui::{
 #[cfg_attr(target_os = "windows", path = "ui/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "ui/linux.rs")]
 mod platform;
-#[cfg(target_os = "linux")]
 mod whiteboard;
 #[cfg(target_os = "linux")]
 pub(crate) use platform::set_app_icon;
@@ -348,7 +346,7 @@ fn recording_trail_widths(window: &Window, chips: bool, iphone: bool) -> Vec<f32
 }
 
 fn whiteboard_enabled() -> bool {
-    cfg!(target_os = "linux")
+    true
 }
 
 /// Trace names for a Recording capsule's trailing group, with each item's opacity.
@@ -758,7 +756,6 @@ impl ActiveRecording {
 /// Shared coordinator owned by the GPUI app.
 pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
-    #[cfg(target_os = "linux")]
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
     last_live_no_words: bool,
@@ -866,7 +863,6 @@ impl ApparentCoordinator {
         crate::playback::warm_up();
         Self {
             telemetry,
-            #[cfg(target_os = "linux")]
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
             last_live_no_words: false,
@@ -2033,6 +2029,10 @@ impl ApparentCoordinator {
             PillAction::SwitchRecording(mode) => self.switch_recording(mode, cx),
             PillAction::RecordSelected => self.record_selected_mode(cx),
             PillAction::Cancel => self.cancel_recording(cx),
+            PillAction::Whiteboard => {
+                let coord = cx.entity().clone();
+                cx.defer(move |cx| whiteboard::open(&coord, cx));
+            }
             PillAction::Finish => self.finish_recording(cx),
             PillAction::Paste(target) => self.paste_completed_bundle(target, cx),
             PillAction::Inspect => self.inspect_completed_bundle(cx),
@@ -2447,8 +2447,7 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
-        #[cfg(target_os = "linux")]
-        self.whiteboard.borrow_mut().clear();
+        whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         let started = Instant::now();
         apparent_log(format!(
@@ -2572,6 +2571,7 @@ impl ApparentCoordinator {
     /// `apparent lab pill`: a pretend recording with no capture, microphone, files or overlay, so
     /// the capsule goes through exactly the states a real one does.
     fn start_lab_recording(&mut self, target: TargetInfo, cx: &mut Context<Self>) {
+        whiteboard::reset_for_capture(&self.whiteboard);
         if let IslandPhase::Selecting { mode } = self.island_phase {
             motion::trace_event(format!("record:{}", mode.label()));
         }
@@ -2605,6 +2605,7 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
+        whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         self.remember_mode(SelectionMode::Iphone);
         self.recording_shortcut_key = false;
@@ -2713,6 +2714,7 @@ impl ApparentCoordinator {
         self.playback.take();
         apparent_log("cancel_recording invoked");
         self.discard_recording();
+        cx.defer(whiteboard::close);
         self.dismiss_island(cx);
     }
 
@@ -2742,6 +2744,7 @@ impl ApparentCoordinator {
         self.completed_note = None;
         cx.notify();
         if matches!(source, CaptureSource::Lab) {
+            cx.defer(whiteboard::close);
             let duration_ms = rec.started.elapsed().as_millis() as u64;
             let wait = Duration::from_secs_f32(lab::PROCESSING_S / motion::time_scale());
             cx.spawn(async move |entity, cx| {
@@ -2760,10 +2763,7 @@ impl ApparentCoordinator {
             return;
         }
 
-        let screen = matches!(source, CaptureSource::Screen { .. });
-        #[cfg(target_os = "linux")]
-        let final_whiteboard =
-            screen.then(|| whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx)));
+        let final_whiteboard = whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx));
 
         cx.spawn(async move |entity, cx| {
             let result = cx
@@ -2784,6 +2784,11 @@ impl ApparentCoordinator {
                                     strokes,
                                     None,
                                 )
+                            }).map(|(dir, bundle, summary)| {
+                                let (bundle, summary) = whiteboard::finish_handoff(
+                                    &dir, bundle, summary, &final_whiteboard,
+                                );
+                                (dir, bundle, summary)
                             });
                             if let Err(error) = &finalized {
                                 apparent_log(format!("iPhone capture failed: {error:#}"));
@@ -2825,11 +2830,9 @@ impl ApparentCoordinator {
                         activity,
                     )
                     .map(|(dir, bundle, summary)| {
-                        #[cfg(target_os = "linux")]
-                        let (bundle, summary) = match &final_whiteboard {
-                            Some(board) => whiteboard::finish_handoff(&dir, bundle, summary, board),
-                            None => (bundle, summary),
-                        };
+                        let (bundle, summary) = whiteboard::finish_handoff(
+                            &dir, bundle, summary, &final_whiteboard,
+                        );
                         (dir, bundle, summary)
                     });
                     (finalized, duration_ms)
@@ -3794,7 +3797,6 @@ impl HudPillWindow {
                     })
                 }),
         );
-        #[cfg(target_os = "linux")]
         let group = group.when(whiteboard_enabled(), |group| {
             let c_board = self.coordinator.clone();
             group.child(
@@ -6037,14 +6039,14 @@ mod tests {
     }
 
     #[test]
-    fn recording_controls_offer_whiteboard_by_default_on_linux() {
-        assert_eq!(whiteboard_enabled(), cfg!(target_os = "linux"));
+    fn recording_controls_offer_whiteboard_on_every_desktop() {
+        assert!(whiteboard_enabled());
         let controls = trail_keys(false, false, &[], "hud-");
         assert_eq!(
             controls.iter().any(|item| item
                 .as_ref()
                 .is_some_and(|(name, _)| name == "hud-whiteboard")),
-            cfg!(target_os = "linux")
+            true
         );
     }
 

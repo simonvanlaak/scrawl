@@ -94,6 +94,25 @@ pub(super) fn move_picker_window(frame: [f64; 4], cx: &mut App) {
 /// The picker takes the keys itself (`configure_picker_window`).
 pub(super) fn take_keys(_cx: &mut App) {}
 
+/// Hyprland tiles ordinary GPUI windows; float the mapped paper without changing its UI.
+pub(super) fn float_whiteboard(cx: &mut App) {
+    if !crate::linux::hyprland::running() {
+        return;
+    }
+    cx.spawn(async move |cx| {
+        let mut last_error = None;
+        for _ in 0..8 {
+            cx.background_executor().timer(Duration::from_millis(120)).await;
+            match crate::linux::hyprland::float_whiteboard() {
+                Ok(()) => return,
+                Err(error) => last_error = Some(error),
+            }
+        }
+        crate::capture::apparent_log(format!("Whiteboard: could not float Hyprland window: {last_error:?}"));
+    })
+    .detach();
+}
+
 /// The window manager focuses the window below when Apparent's closes.
 pub(super) fn hand_back_keys(_cx: &mut App) {}
 

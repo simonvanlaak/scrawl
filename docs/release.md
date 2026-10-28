@@ -38,8 +38,8 @@ feed. The stable app's build-number ordering and bundle identity will need an ex
 
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
 is one Mac build (notarized DMG + Sparkle zip) and two Linux AppImages, built from the same tagged
-commit. Windows releases are paused until native GUI testing resumes. Keep the Windows code and
-packaging recipe, but do not dispatch the disabled Windows workflow or publish a new Windows zip.
+commit. Windows is not a supported release target. Do not dispatch the retained Windows workflow
+or publish a Windows zip.
 
 1. **Version:** bump `version` in `Cargo.toml` and `Cargo.lock` in a `release/<version>` PR, and in the
    same PR change every `"status": "main"` in `site/src/features.json` to `"stable@<version>"`.
@@ -73,6 +73,6 @@ it's unset.
 
 Check after deploying: the live DMG, Sparkle zip and newest delta match the release's sha256s,
 the live appcast's signature verifies, `spctl` accepts the downloaded DMG and the app in it,
-the site shows the new Mac version and says Windows releases are paused. Do not publish a new
-Windows zip or point the site to an older one.
+the site shows the new Mac version and identifies Windows as unsupported. Do not publish a Windows
+zip or point the site to an older one.
 Check both Linux AppImages and their `.sha256` assets on the tagged release before advertising them.

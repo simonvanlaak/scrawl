@@ -95,9 +95,6 @@ export function audit(now = new Date()): Audit {
       if (release.version && compareVersions(status.version, release.version) > 0) {
         issues.push({ feature: f.id, text: `says stable@${status.version}, but the newest release is ${release.version}` })
       }
-      if (f.group !== "platforms" && !f.platforms.includes("windows") && !f.note) {
-        issues.push({ feature: f.id, text: "is stable but not on Windows, with no note saying why" })
-      }
     }
     if (status.kind === "main" && f.added && release.date && f.added < release.date) {
       issues.push({ feature: f.id, text: `landed ${f.added}, before ${release.version} (${release.date}); stable@${release.version}?` })

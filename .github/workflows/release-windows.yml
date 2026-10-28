@@ -1,7 +1,6 @@
 name: Release (Windows)
 
-# Builds the Windows zip for a version tag and attaches it to that tag's GitHub release
-# (creating the release if the Mac side hasn't yet). Dispatch it by hand with a version tag.
+# Historical Windows packaging recipe. Windows is unsupported; do not dispatch or publish it.
 
 on:
   workflow_dispatch:
@@ -19,8 +18,7 @@ concurrency:
 jobs:
   windows:
     name: Windows x64
-    # Windows releases are paused until native GUI verification is available.
-    # Keep the packaging recipe, but never publish an unverified zip.
+    # Windows is unsupported. Keep the packaging recipe disabled.
     if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 90

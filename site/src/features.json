@@ -351,8 +351,8 @@
     {
       "id": "missing-transcript-warning",
       "group": "finish",
-      "name": "Warn when saved audio has no transcribed words",
-      "says": "After Stop, the completed capsule and Review distinguish an empty recognized transcript from a speech-model failure without guessing the cause.",
+      "name": "Explain missing audio or transcription",
+      "says": "After Stop, the completed capsule and Review distinguish missing microphone audio, saved audio with no recognized words, and a transcription failure. The handoff text reports the outcome too, without treating input level as intelligibility.",
       "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md"]

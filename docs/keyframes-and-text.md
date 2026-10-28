@@ -46,7 +46,7 @@ Dev pages that load `/sdk.js` add what only the page knows (`src/page.rs`, `src/
 
 ## Missing transcript warning (`src/ui.rs`)
 
-On by default. After a completed capture saves an audio file, if transcription succeeds but returns no words, the Completed capsule keeps its Copy/Send status and adds “No words” with an amber warning icon (also in the Mac native pill). Review explains: “No words transcribed. Your audio was saved—check it or try again closer to the microphone.” It does not diagnose background noise or claim that speech was present. A failed or unavailable speech model shows its own reason in Review, not the no-words warning. No audio file means no saved-audio claim. The separate live warning during recording remains off by default.
+On by default. After a local capture, the Completed capsule keeps its Copy/Send status and uses an amber warning icon for three distinct outcomes: no microphone samples (including a zero-sample WAV header or a missing file: “No audio”), saved samples with a successful empty transcript (“No words”), or saved samples whose transcription failed or did not run (“Transcript unavailable”). Review and the handoff text explain the corresponding outcome; a failed or unavailable speech model retains its reason rather than posing as silence. Neither the microphone meter nor the audio level proves intelligible speech: silent samples still count as recorded audio. iPhone bundles do not use this local-microphone warning. The separate live warning during recording remains off by default.
 
 ## Experiment `liveWordWarning` (`src/live_word_probe.rs`, `src/live_word_warning.rs`)
 

@@ -184,7 +184,7 @@
       "group": "record",
       "name": "Microphone input warning",
       "says": "During a screen recording, the capsule says Mic unavailable, Mic stopped, or Mic very quiet when input fails, samples stop, or captured sound stays near silent. Screen recording continues; the warning does not replace recording controls.",
-      "status": "review:#22",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "note": "Near-silence is not a diagnosis of microphone failure; the warning does not depend on an audio animation.",
       "docs": ["docs/capture.md"]

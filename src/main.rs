@@ -1181,10 +1181,17 @@ pub fn build_bundle_from_parts(
         };
         let selected_at = std::time::Instant::now();
 
-        let crop_settings = match extras.autocrop {
-            Some(settings) => settings,
-            None if target.mode == CaptureMode::Display => autocrop::Settings::configured(),
-            None => None,
+        // A failed or partial MP4 decode leaves only small candidates. Their coarse change
+        // regions can miss the actual activity and make an idle cursor look like the target.
+        // Keep the whole candidate in the agent-facing images until full decode succeeds.
+        let crop_settings = if keyframe_warning.is_some() {
+            None
+        } else {
+            match extras.autocrop {
+                Some(settings) => settings,
+                None if target.mode == CaptureMode::Display => autocrop::Settings::configured(),
+                None => None,
+            }
         };
         let (mut annotated_frames, mut cropped) = autocrop::annotate_and_crop(
             selected,
@@ -2556,5 +2563,129 @@ mod tests {
         assert!(regenerated.contains("Image quality: Full-quality keyframes could not be decoded"));
         assert!(regenerated.contains("Note: a later edit"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn decoder_fallback_keeps_moving_target_in_agent_images() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let bundle_dir = root.join("fallback.apparent");
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 480.0, height: 300.0, scale: 1.0 },
+        };
+        let frame = |t, x: usize| {
+            let mut rgba = vec![255; 480 * 300 * 4];
+            for y in 30..110 {
+                for xx in x..x + 80 {
+                    let pixel = (y * 480 + xx) * 4;
+                    rgba[pixel..pixel + 3].copy_from_slice(&[220, 0, 0]);
+                }
+            }
+            RgbaFrame::new(t, 480, 300, rgba)
+        };
+        let frames = vec![frame(0, 20), frame(1_000, 40)];
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &bundle_dir, target, 1_100, frames, vec![], vec![],
+            TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|_| anyhow::bail!("decoder missing"))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                activity: windows::ActivityLog {
+                    cursor: vec![windows::CursorSample(0, 0.9, 0.85), windows::CursorSample(1_100, 0.9, 0.85)],
+                    ..Default::default()
+                },
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(summary.contains("Image quality:"));
+        assert!(!bundle.keyframes.is_empty());
+        assert!(bundle.autocrop.is_none(), "fallback frames must not be cursor-cropped");
+        // The idle pointer is at bottom-right; the moving target is at top-left.
+        for key in &bundle.keyframes {
+            let bytes = std::fs::read(bundle_dir.join(&key.file)).unwrap();
+            let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+            let mut reader = decoder.read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!((info.width, info.height), (480, 300));
+            assert!(pixels[..info.buffer_size()].chunks_exact(4).any(|p| p[0] > 150 && p[1] < 40 && p[2] < 40));
+        }
+        let sheet = std::fs::read(bundle_dir.join("contact-sheet.png")).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(sheet)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert!(pixels[..info.buffer_size()].chunks_exact(4).any(|p| p[0] > 150 && p[1] < 40 && p[2] < 40));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn successful_full_decode_keeps_normal_autocrop() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
+        };
+        let candidate = RgbaFrame::new(0, 320, 200, vec![128; 320 * 200 * 4]);
+        let (_, bundle, _) = build_bundle_from_parts(
+            &root, target, 1_000, vec![candidate], vec![], vec![],
+            TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|times| Ok(times.iter().map(|&t| {
+                    RgbaFrame::new(t, 1280, 800, vec![128; 1280 * 800 * 4])
+                }).collect()))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                activity: windows::ActivityLog {
+                    cursor: vec![windows::CursorSample(0, 0.5, 0.5)],
+                    ..Default::default()
+                },
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(bundle.image_quality_warning.is_none());
+        assert!(bundle.autocrop.is_some(), "normal decode should still autocrop");
+        assert!(root.join("frames-full/frame-01.png").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn partial_full_decode_keeps_both_resolutions_uncropped() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
+        };
+        let candidate = |t| RgbaFrame::new(t, 480, 300, vec![180; 480 * 300 * 4]);
+        let click = |t| model::InteractionEvent::Click {
+            t, x: 0.1, y: 0.1, button: None, label: None, role: None,
+        };
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &root, target, 10_000, vec![candidate(0), candidate(5_000)],
+            vec![], vec![click(0), click(5_000)], TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|times| Ok(vec![RgbaFrame::new(
+                    times[0], 1280, 800, vec![180; 1280 * 800 * 4],
+                )]))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(summary.contains("Image quality:"));
+        assert_eq!(bundle.keyframes.len(), 2, "one decoded and one candidate keyframe");
+        assert!(bundle.autocrop.is_none());
+        let sizes: Vec<_> = bundle.keyframes.iter().map(|key| {
+            let bytes = std::fs::read(root.join(&key.file)).unwrap();
+            let reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+            (reader.info().width, reader.info().height)
+        }).collect();
+        assert!(sizes.contains(&(1280, 800)), "decoded full frame must survive: {sizes:?}");
+        assert!(sizes.contains(&(480, 300)), "fallback candidate must survive: {sizes:?}");
+        assert!(root.join("contact-sheet.png").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

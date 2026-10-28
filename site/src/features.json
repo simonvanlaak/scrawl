@@ -323,10 +323,9 @@
       "id": "clipboard-image",
       "group": "finish",
       "name": "Image and text on one clipboard",
-      "says": "Copies the contact sheet with the text, so one Ctrl+V attaches the image in a browser or Electron composer.",
+      "says": "Off by default: offers contact-sheet PNG and summary text together on Mac and KDE/Hyprland Wayland. Other Linux sessions copy text only. The receiver may paste only one format; inspect the unsent draft or use the explicit Paste chip and manual attachment fallback.",
       "status": "experiment:clipboardImage",
-      "platforms": ["windows"],
-      "note": "Historical experiment in retained Windows code; Windows is no longer supported.",
+      "platforms": ["mac", "linux"],
       "added": "2026-10-20",
       "pr": 68,
       "docs": ["docs/keyframes-and-text.md"]

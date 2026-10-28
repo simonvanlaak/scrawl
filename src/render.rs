@@ -448,7 +448,6 @@ pub fn annotate_keyframe_marks_in_place(
     }
 
     let in_top_left = |[x, y]: [f32; 2]| x < 0.30 && y < 0.18;
-    let in_top_right = |[x, y]: [f32; 2]| x > 0.70 && y < 0.18;
     let focus_pt = keyframe.cursor.or(click);
     let stroke_in_tl = strokes.iter().enumerate().any(|(idx, s)| {
         !s.laser
@@ -461,8 +460,7 @@ pub fn annotate_keyframe_marks_in_place(
                 .any(|(x, y, t)| t <= keyframe.t && in_top_left([x, y]))
     });
     let busy_top_left = focus_pt.is_some_and(in_top_left) || stroke_in_tl;
-    let busy_top_right = focus_pt.is_some_and(in_top_right);
-    frame.badge_top_right = busy_top_left && !busy_top_right;
+    frame.badge_bottom_left = busy_top_left;
 }
 
 pub fn stamp_keyframe_badge_in_place(frame: &mut RgbaFrame, keyframe: &Keyframe) {
@@ -472,7 +470,7 @@ pub fn stamp_keyframe_badge_in_place(frame: &mut RgbaFrame, keyframe: &Keyframe)
         return;
     }
     let badge_k = (h / 480.0).min(w / 280.0).max(0.45);
-    let dodge = frame.badge_top_right;
+    let dodge = frame.badge_bottom_left;
     draw_keyframe_badge(frame, [0.0, 0.0, w, h], keyframe, badge_k, dodge);
 }
 
@@ -491,7 +489,7 @@ const DIGIT_MIDDLE: f32 = if cfg!(target_os = "macos") {
 };
 
 /// The keyframe's number, bold black on a small white rounded square with a thin dark ring,
-/// inset from the top-left corner of `rect` (top-right when ink, a click or the cursor is there).
+/// inset from the top-left corner of `rect` (bottom-left when ink or the cursor is there).
 /// `k` scales it: 1 is a 24 px square. A shaped container keeps a model from reading it as a
 /// number on the screen, and summary.md carries the time.
 fn draw_keyframe_badge(
@@ -499,7 +497,7 @@ fn draw_keyframe_badge(
     rect: [f32; 4],
     keyframe: &Keyframe,
     k: f32,
-    dodge_top_right: bool,
+    dodge_top_left: bool,
 ) {
     let [rx, ry, rw, rh] = rect;
     if rw <= 0.0 || rh <= 0.0 {
@@ -514,13 +512,10 @@ fn draw_keyframe_badge(
     let inset = 5.0 * k;
     let ring = (1.4 * k).max(1.0);
     let radius = size * 0.3;
-    let dodge = dodge_top_right || keyframe.cursor.is_some_and(|[x, y]| x < 0.30 && y < 0.18);
-    let x = if dodge {
-        (rx + rw - w - inset).max(rx + inset)
-    } else {
-        rx + inset
-    };
-    let y = ry + inset;
+    let dodge = dodge_top_left || keyframe.cursor.is_some_and(|[x, y]| x < 0.30 && y < 0.18);
+    let x = rx + inset;
+    // Never jump to the top-right: a captured app's Copy/action button often lives there.
+    let y = if dodge { (ry + rh - h - inset).max(ry + inset) } else { ry + inset };
     rounded(
         dst,
         [x - ring, y - ring, w + 2.0 * ring, h + 2.0 * ring],
@@ -978,7 +973,7 @@ pub fn render_contact_sheet_for_duration(
     for (i, rect) in cells {
         let (kf, image) = &frames[i];
         blit_scaled(&mut sheet, image, rect, 0.0);
-        draw_keyframe_badge(&mut sheet, rect, kf, SHEET_CHIP_K, image.badge_top_right);
+        draw_keyframe_badge(&mut sheet, rect, kf, SHEET_CHIP_K, image.badge_bottom_left);
     }
     sheet
 }
@@ -2106,21 +2101,20 @@ mod tests {
     }
 
     #[test]
-    fn the_chip_moves_to_the_top_right_when_ink_or_the_cursor_is_top_left() {
+    fn the_chip_avoids_top_right_controls_when_ink_or_cursor_is_top_left() {
         let base = solid(1280, 800, [120, 130, 140, 255]);
         let mut inked = base.clone();
-        inked.badge_top_right = true;
+        inked.badge_bottom_left = true;
         stamp_keyframe_badge_in_place(&mut inked, &key(3));
         let mut pointed = base.clone();
         let mut keyframe = key(3);
         keyframe.cursor = Some([0.1, 0.05]);
         stamp_keyframe_badge_in_place(&mut pointed, &keyframe);
         for frame in [&inked, &pointed] {
-            let [x0, y0, x1, _] = changed_box(frame, &base).unwrap();
+            let [x0, _, _, y1] = changed_box(frame, &base).unwrap();
             let k = 800.0 / 480.0;
-            assert!(x0 > 1200, "chip at x {x0}");
-            assert!((1279.0 - x1 as f32 - 3.6 * k).abs() <= 1.5);
-            assert!((y0 as f32 - 3.6 * k).abs() <= 1.5);
+            assert!(x0 < 30, "chip at x {x0}");
+            assert!((799.0 - y1 as f32 - 3.6 * k).abs() <= 1.5);
         }
     }
 
@@ -2132,7 +2126,7 @@ mod tests {
             .map(|i| {
                 let (w, h) = dims[i % dims.len()];
                 let mut frame = solid(w, h, [120, 130, 140, 255]);
-                frame.badge_top_right = i % 3 == 0;
+                frame.badge_bottom_left = i % 3 == 0;
                 (key(i), frame)
             })
             .collect();

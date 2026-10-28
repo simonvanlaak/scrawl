@@ -888,7 +888,7 @@ impl ApparentCoordinator {
             review_audio_issue: initial_bundle.as_ref().and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
-            selected_tab: ReviewTab::ContactSheet,
+            selected_tab: ReviewTab::Keyframes,
             selected_keyframe: 0,
             iphone: None,
             completed_dir: None,
@@ -1453,7 +1453,7 @@ impl ApparentCoordinator {
         self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
-        self.selected_tab = ReviewTab::ContactSheet;
+        self.selected_tab = ReviewTab::Keyframes;
         self.selected_keyframe = 0;
     }
 
@@ -4249,6 +4249,34 @@ fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<St
         .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
 }
 
+/// Pair the frame with its words; stack them when the window cannot fit both.
+fn review_workspace_widths(window_width: f32) -> (f32, f32) {
+    if window_width < 800.0 {
+        ((window_width - 40.0).max(1.0), window_width)
+    } else {
+        let words = (window_width * 0.4).clamp(320.0, 520.0);
+        ((window_width - words - 40.0).max(1.0), words)
+    }
+}
+
+fn review_frame_speech<'a>(frames: &[Option<&'a str>], selected: usize) -> &'a str {
+    frames
+        .get(selected)
+        .and_then(|said| *said)
+        .filter(|said| !said.trim().is_empty())
+        .unwrap_or("No words at this moment.")
+}
+
+fn review_speech_status(no_words: bool, missing_reason: Option<&str>) -> Option<String> {
+    if let Some(reason) = missing_reason {
+        Some(format!("Transcription unavailable: {reason}"))
+    } else if no_words {
+        Some("No words transcribed. Your audio was saved—check it or try again closer to the microphone.".into())
+    } else {
+        None
+    }
+}
+
 /// A point dragged past the picker's display (global points), pulled back onto its edge: an
 /// area belongs to the display the drag started on, which the picker stays on while dragging.
 fn clamp_point([x, y]: [f32; 2], [dx, dy, dw, dh]: [f32; 4]) -> [f32; 2] {
@@ -4361,7 +4389,11 @@ impl BundleReviewWindow {
 
 impl Render for BundleReviewWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stage_w = (f32::from(window.bounds().size.width) - 320.0 - 44.0).max(320.0);
+        let (stage_w, words_w) =
+            review_workspace_widths(f32::from(window.bounds().size.width));
+        let narrow = f32::from(window.bounds().size.width) < 800.0;
+        let compact = f32::from(window.bounds().size.width) < 600.0;
+        let narrow_stage_height = (f32::from(window.bounds().size.height) * 0.46).max(220.0);
         let coord_read = self.coordinator.read(cx);
         let state = coord_read.review_bundle.clone();
         let audio_issue = coord_read.review_audio_issue;
@@ -4446,6 +4478,42 @@ impl Render for BundleReviewWindow {
             .and_then(|_| review_neighbor(&self.history, &dir, true))
             .cloned();
         let history_count = self.history.len();
+        let frame_rows = bundle.keyframes.iter().enumerate().map(|(idx, frame)| {
+            let c_select = self.coordinator.clone();
+            div()
+                .id(("review-frame-row", idx))
+                .w_full()
+                .p_3()
+                .rounded(px(8.0))
+                .bg(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                    SURFACE_BG
+                } else {
+                    SIDEBAR_BG
+                }))
+                .border_1()
+                .border_color(rgb(if tab == ReviewTab::Keyframes && idx == selected_kf {
+                    ACCENT_COLOR
+                } else {
+                    LINE_COLOR
+                }))
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    c_select.update(cx, |coord, cx| {
+                        coord.selected_tab = ReviewTab::Keyframes;
+                        coord.selected_keyframe = idx;
+                        cx.notify();
+                    });
+                })
+                .child(format!("{}  ·  {}", frame.index, format_clock(frame.t)))
+                .child(
+                    div()
+                        .mt_1()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_COLOR))
+                        .child(frame.event.clone()),
+                )
+        }).collect::<Vec<_>>();
+        let frame_words = bundle.keyframes.iter().map(|kf| kf.said.as_deref()).collect::<Vec<_>>();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
         let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
         let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
@@ -4453,6 +4521,13 @@ impl Render for BundleReviewWindow {
             bundle.transcript.missing.as_ref()
         } else {
             None
+        };
+        let speech_status = if no_audio {
+            Some("No microphone audio was saved. The screen capture is still available—check the microphone and try again.".into())
+        } else if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) && missing_reason.is_none() {
+            Some("Transcription unavailable: recognition did not run".into())
+        } else {
+            review_speech_status(no_words, missing_reason.map(|missing| missing.reason.as_str()))
         };
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
@@ -4503,6 +4578,21 @@ impl Render for BundleReviewWindow {
                     }
                     if coord.handle_app_key(&event.keystroke, cx) {
                         return true;
+                    }
+                    if !mods.platform && !mods.control && !mods.alt && !mods.shift
+                        && coord.selected_tab == ReviewTab::Keyframes
+                    {
+                        let count = coord.review_bundle.as_ref().map_or(0, |(_, b)| b.keyframes.len());
+                        let next = match key {
+                            "left" => coord.selected_keyframe.checked_sub(1),
+                            "right" => coord.selected_keyframe.checked_add(1).filter(|&i| i < count),
+                            _ => None,
+                        };
+                        if let Some(next) = next {
+                            coord.selected_keyframe = next;
+                            cx.notify();
+                            return true;
+                        }
                     }
                     if let Some(cfg) = shortcut_from_key_and_mods(
                         key,
@@ -4557,50 +4647,26 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(
-                                // Segmented control: R_outer 8 = R_tab 6 + border 1 + pad 1.
+                            .when(!compact, |header| header.child(
                                 div()
                                     .flex_none()
-                                    .h(px(28.0))
-                                    .p(px(1.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .rounded(px(8.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .border_1()
-                                    .border_color(rgb(LINE_COLOR))
-                                    .child(
-                                        tab_chip(
-                                            "tab-contact-sheet",
-                                            "Contact Sheet",
-                                            tab == ReviewTab::ContactSheet,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_sheet.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::ContactSheet;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        tab_chip(
-                                            "tab-keyframes",
-                                            "Keyframes",
-                                            tab == ReviewTab::Keyframes,
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                c_tab_frames.update(cx, |coord, cx| {
-                                                    coord.selected_tab = ReviewTab::Keyframes;
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    ),
-                            )
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(14.0))
+                                    .child("Capture review"),
+                            ))
+                            .when(!compact, |header| header.child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(MUTED_COLOR))
+                                    .child(format!(
+                                        "{} · {} · {} frames",
+                                        target_label,
+                                        format_clock(bundle.duration_ms),
+                                        bundle.keyframes.len(),
+                                    )),
+                            ))
                             .child(
                                 div()
                                     .flex_none()
@@ -4609,41 +4675,23 @@ impl Render for BundleReviewWindow {
                                     .gap_2()
                                     .when_some(newer, |d, path| {
                                         d.child(
-                                            action_button("review-newer", "← Newer", false)
+                                            action_button("review-newer", if compact { "←" } else { "← Newer" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_newer, &path, cx);
                                                 }),
                                         )
                                     })
-                                    .when_some(history_position, |d, index| {
+                                    .when_some(history_position.filter(|_| !compact), |d, index| {
                                         d.child(format!("{} / {}", index + 1, history_count))
                                     })
                                     .when_some(older, |d, path| {
                                         d.child(
-                                            action_button("review-older", "Older →", false)
+                                            action_button("review-older", if compact { "→" } else { "Older →" }, false)
                                                 .on_click(move |_, _, cx| {
                                                     open_review_capture(&c_older, &path, cx);
                                                 }),
                                         )
                                     }),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED_COLOR))
-                                    .child(format!(
-                                        "{} · {} · {} {}",
-                                        target_label,
-                                        format_clock(bundle.duration_ms),
-                                        bundle.keyframes.len(),
-                                        if bundle.keyframes.len() == 1 {
-                                            "keyframe"
-                                        } else {
-                                            "keyframes"
-                                        }
-                                    )),
                             ),
                     )
                     .child(
@@ -4652,43 +4700,6 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                hint_button(
-                                    "btn-shortcut",
-                                    if recording_shortcut {
-                                        "Press shortcut…"
-                                    } else {
-                                        "Shortcut"
-                                    },
-                                    (!recording_shortcut).then_some(shortcut_label),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    c_shortcut.update(cx, |coord, cx| {
-                                        coord.recording_shortcut_key =
-                                            !coord.recording_shortcut_key;
-                                        cx.notify();
-                                    });
-                                }),
-                            )
-                            .child(
-                                action_button(
-                                    "btn-reveal",
-                                    &format!("Show in {}", platform::FILE_MANAGER),
-                                    false,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    let res = crate::handoff::open_path(&send_dir);
-                                    let manager = platform::FILE_MANAGER;
-                                    c_send.update(cx, |coord, cx| {
-                                        coord.review_status = Some(match res {
-                                            Ok(()) => format!("Opened in {manager}"),
-                                            Err(e) => format!("Show in {manager} failed: {e}"),
-                                        });
-                                        cx.notify();
-                                    });
-                                }),
-                            )
                             .child(
                                 action_button(
                                     "btn-copy",
@@ -4716,6 +4727,85 @@ impl Render for BundleReviewWindow {
                     )
                     .children(platform::caption_buttons()),
             )
+            .child(
+                div()
+                    .h(px(if compact { 76.0 } else { 44.0 }))
+                    .flex_none()
+                    .px_5()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .when(compact, |toolbar| toolbar.flex_col().items_start().justify_center().gap_1())
+                    .border_b_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                tab_chip(
+                                    "tab-contact-sheet",
+                                    "Contact Sheet",
+                                    tab == ReviewTab::ContactSheet,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_tab_sheet.update(cx, |coord, cx| {
+                                        coord.selected_tab = ReviewTab::ContactSheet;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                tab_chip("tab-keyframes", "Keyframes", tab == ReviewTab::Keyframes)
+                                    .on_click(move |_, _, cx| {
+                                        c_tab_frames.update(cx, |coord, cx| {
+                                            coord.selected_tab = ReviewTab::Keyframes;
+                                            cx.notify();
+                                        });
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                hint_button(
+                                    "btn-shortcut",
+                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    (!recording_shortcut && !compact).then_some(shortcut_label),
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    c_shortcut.update(cx, |coord, cx| {
+                                        coord.recording_shortcut_key = !coord.recording_shortcut_key;
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                            .child(
+                                action_button(
+                                    "btn-reveal",
+                                    &if compact { "Show Files".to_owned() } else { format!("Show in {}", platform::FILE_MANAGER) },
+                                    false,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    let res = crate::handoff::open_path(&send_dir);
+                                    let manager = platform::FILE_MANAGER;
+                                    c_send.update(cx, |coord, cx| {
+                                        coord.review_status = Some(match res {
+                                            Ok(()) => format!("Opened in {manager}"),
+                                            Err(e) => format!("Show in {manager} failed: {e}"),
+                                        });
+                                        cx.notify();
+                                    });
+                                }),
+                            ),
+                    ),
+            )
             .when_some(review_notice, |root, message| {
                 root.child(
                     div()
@@ -4727,17 +4817,18 @@ impl Render for BundleReviewWindow {
                 )
             })
             .child(
-                // Main Workspace: Stage on Left + Timeline Sidebar on Right
+                // Keep the selected frame and its words together, even in a narrow window.
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .when(narrow, |workspace| workspace.flex_col())
                     .child(
                         div()
                             .id("review-stage-scroll")
-                            .flex_1()
                             .min_w_0()
-                            .h_full()
+                            .when(narrow, |stage| stage.h(px(narrow_stage_height)).flex_none())
+                            .when(!narrow, |stage| stage.flex_1().h_full())
                             .overflow_y_scroll()
                             .overflow_x_hidden()
                             .p_5()
@@ -4751,20 +4842,53 @@ impl Render for BundleReviewWindow {
                     .child(
                         div()
                             .id("review-timeline-sidebar")
-                            .w(px(320.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
+                            .when(narrow, |sidebar| sidebar.w_full().flex_1().min_h_0())
+                            .when(!narrow, |sidebar| sidebar.w(px(words_w)).h_full().flex_none())
                             .overflow_x_hidden()
                             .bg(rgb(SIDEBAR_BG))
-                            .border_l_1()
+                            .when(narrow, |sidebar| sidebar.border_t_1())
+                            .when(!narrow, |sidebar| sidebar.border_l_1())
                             .border_color(rgb(LINE_COLOR))
                             .px_4()
                             .py(px(18.0))
                             .flex()
                             .flex_col()
-                            .child(sidebar_heading("Transcript"))
-                            .when(no_words, |sidebar| {
+                            .child(sidebar_heading(if tab == ReviewTab::Keyframes {
+                                "WORDS AT THIS MOMENT"
+                            } else {
+                                "FULL TRANSCRIPT"
+                            }))
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.child(
+                                    div()
+                                        .id("review-selected-speech")
+                                        .p_4()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
+                                        .rounded(px(8.0))
+                                        .bg(rgb(SURFACE_BG))
+                                        .border_1()
+                                        .border_color(rgb(LINE_COLOR))
+                                        .text_size(px(15.0))
+                                        .line_height(relative(1.5))
+                                        .child(review_frame_speech(&frame_words, selected_kf).to_owned()),
+                                )
+                            })
+                            .when(tab == ReviewTab::Keyframes, |sidebar| {
+                                sidebar.when_some(speech_status, |sidebar, message| {
+                                    sidebar.child(
+                                        div()
+                                            .mt_3()
+                                            .p_3()
+                                            .rounded(px(8.0))
+                                            .bg(rgba(0xf5a62320))
+                                            .text_color(rgb(0xf5b544))
+                                            .text_size(px(13.0))
+                                            .child(message),
+                                    )
+                                })
+                            })
+                            .when(tab == ReviewTab::ContactSheet && no_words, |sidebar| {
                                 sidebar.child(
                                     div()
                                         .mt_3()
@@ -4776,7 +4900,7 @@ impl Render for BundleReviewWindow {
                                         .child("No words transcribed. Your audio was saved—check it or try again closer to the microphone."),
                                 )
                             })
-                            .when(no_audio, |sidebar| {
+                            .when(tab == ReviewTab::ContactSheet && no_audio, |sidebar| {
                                 sidebar.child(
                                     div().mt_3().p_3().rounded(px(8.0))
                                         .bg(rgba(0xf5a62320)).text_color(rgb(0xf5b544))
@@ -4784,10 +4908,13 @@ impl Render for BundleReviewWindow {
                                         .child("No microphone audio was saved. The screen capture is still available—check the microphone and try again."),
                                 )
                             })
-                            .when(!no_words && (!no_audio || !bundle.transcript.text.trim().is_empty()), |sidebar| {
+                            .when(tab == ReviewTab::ContactSheet && !no_words && (!no_audio || !bundle.transcript.text.trim().is_empty()), |sidebar| {
                                 sidebar.child(
                                     div()
+                                        .id("review-full-transcript")
                                         .p_3()
+                                        .max_h(px(240.0))
+                                        .overflow_y_scroll()
                                         .rounded(px(8.0))
                                         .bg(rgb(SURFACE_BG))
                                         .border_1()
@@ -4812,14 +4939,23 @@ impl Render for BundleReviewWindow {
                                         }),
                                 )
                             })
-                            .child(div().mt(px(20.0)).child(sidebar_heading("Timeline")))
                             .child(
-                                div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
-                                    timeline
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(|(i, line)| timeline_row(i, &line)),
-                                ),
+                                div()
+                                    .id("review-evidence-list")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("FRAMES")))
+                                    .child(div().flex().flex_col().gap_2().children(frame_rows))
+                                    .child(div().mt(px(20.0)).child(sidebar_heading("TIMELINE")))
+                                    .child(
+                                        div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
+                                            timeline
+                                                .into_iter()
+                                                .enumerate()
+                                                .map(|(i, line)| timeline_row(i, &line)),
+                                        ),
+                                    ),
                             ),
                     ),
             )
@@ -4858,91 +4994,39 @@ impl BundleReviewWindow {
         selected_kf: usize,
         stage_w: f32,
     ) -> AnyElement {
-        // Card: border 1 + pad 8 around the frame, so R_card 12 = R_frame 3 + 9.
-        let card_img_w = (stage_w - 18.0).max(240.0);
-        let cards = bundle
-            .keyframes
-            .iter()
-            .enumerate()
-            .map(|(idx, kf)| {
-                let is_selected = idx == selected_kf;
-                let frame_img = self.cached_frames.get(idx).and_then(Clone::clone);
-                let c_select = self.coordinator.clone();
-                div()
-                    .id(("kf-card", idx))
-                    .p(px(8.0))
-                    .rounded(px(12.0))
-                    .bg(rgb(SURFACE_BG))
-                    .border_1()
-                    .border_color(if is_selected {
-                        rgb(ACCENT_COLOR)
-                    } else {
-                        rgb(LINE_COLOR)
-                    })
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .cursor_pointer()
-                    .when(!is_selected, |d| d.hover(|s| s.border_color(rgb(0x3a3a3a))))
-                    .on_click(move |_, _, cx| {
-                        c_select.update(cx, |coord, cx| {
-                            coord.selected_keyframe = idx;
-                            cx.notify();
-                        });
-                    })
-                    .when_some(frame_img, |d, image| {
-                        d.child(img(image).w(px(card_img_w)).rounded(px(3.0)))
-                    })
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .pb(px(2.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(12.5))
-                            .child(
-                                div()
-                                    .h(px(20.0))
-                                    .px(px(7.0))
-                                    .flex()
-                                    .flex_none()
-                                    .items_center()
-                                    .rounded(px(10.0))
-                                    .bg(rgb(CANVAS_BG))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(TEXT_COLOR))
-                                    .child(format!("#{} · {}", kf.index, format_clock(kf.t))),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(kf.event.clone()),
-                            ),
-                    )
-                    .when_some(kf.said.clone(), |d, said| {
-                        d.child(
-                            div()
-                                .px(px(4.0))
-                                .pb(px(2.0))
-                                .text_size(px(12.0))
-                                .line_height(relative(1.4))
-                                .text_color(rgb(MUTED_COLOR))
-                                .child(format!("“{said}”")),
-                        )
-                    })
-            })
-            .collect::<Vec<_>>();
-
+        let Some(frame) = bundle.keyframes.get(selected_kf) else {
+            return div().p_6().child("No frames in this capture.").into_any_element();
+        };
+        let image = self.cached_frames.get(selected_kf).and_then(Clone::clone);
         div()
             .w_full()
             .flex()
             .flex_col()
-            .gap_4()
-            .children(cards)
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_COLOR))
+                    .child(format!("Frame {} / {}", selected_kf + 1, bundle.keyframes.len()))
+                    .child(format_clock(frame.t))
+                    .child(frame.event.clone()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .rounded(px(10.0))
+                    .bg(rgb(SURFACE_BG))
+                    .border_1()
+                    .border_color(rgb(LINE_COLOR))
+                    .when_some(image, |d, image| {
+                        d.child(img(image).w(px(stage_w)).rounded(px(9.0)))
+                    }),
+            )
             .into_any_element()
     }
 }
@@ -5751,6 +5835,27 @@ mod tests {
             review_notice(Some("scan failed"), Some("Ready")),
             Some("Could not read captures: scan failed".to_owned())
         );
+    }
+
+    #[test]
+    fn review_workspace_gives_words_reading_room_without_cropping_the_stage() {
+        let (stage, words) = review_workspace_widths(1120.0);
+        assert!(words >= 420.0, "words panel too narrow: {words}");
+        assert!(stage >= 600.0, "image stage too narrow: {stage}");
+        let (stage, words) = review_workspace_widths(760.0);
+        assert_eq!((stage, words), (720.0, 760.0));
+        let (stage, words) = review_workspace_widths(320.0);
+        assert_eq!((stage, words), (280.0, 320.0));
+    }
+
+    #[test]
+    fn selected_frame_speech_follows_selection_not_the_whole_capture() {
+        let frames = [Some("first moment"), Some("second moment")];
+        assert_eq!(review_frame_speech(&frames, 1), "second moment");
+        assert_eq!(review_frame_speech(&frames, 2), "No words at this moment.");
+        assert_eq!(review_speech_status(false, None), None);
+        assert!(review_speech_status(true, None).unwrap().contains("audio was saved"));
+        assert_eq!(review_speech_status(false, Some("speech failed")), Some("Transcription unavailable: speech failed".into()));
     }
 
     #[test]

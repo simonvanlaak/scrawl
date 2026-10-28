@@ -245,27 +245,47 @@ fn completed_label(inbox_count: usize, note: Option<&str>) -> String {
     }
 }
 
-fn no_words_warning(
-    transcript: &crate::model::TranscriptData,
-    audio_saved: bool,
-) -> bool {
-    audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletedAudioIssue {
+    NoAudio,
+    NoWords,
+    TranscriptionUnavailable,
 }
 
-fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ApparentBundle) -> bool {
-    no_words_warning(
-        &bundle.transcript,
-        bundle
-            .audio
-            .as_ref()
-            .is_some_and(|file| dir.join(file).is_file()),
-    )
+impl CompletedAudioIssue {
+    fn label(self) -> &'static str {
+        match self {
+            Self::NoAudio => "No audio",
+            Self::NoWords => "No words",
+            Self::TranscriptionUnavailable => "Transcript unavailable",
+        }
+    }
 }
 
-fn completed_status_label(inbox_count: usize, note: Option<&str>, no_words: bool) -> String {
+fn completed_audio_issue(source: Option<&str>, transcript: &crate::model::TranscriptData, audio_saved: bool) -> Option<CompletedAudioIssue> {
+    if source == Some("iphone") {
+        return None;
+    }
+    if !audio_saved {
+        return Some(CompletedAudioIssue::NoAudio);
+    }
+    if !transcript.text.trim().is_empty() {
+        return None;
+    }
+    if transcript.missing.is_some() || transcript.source == "none" {
+        return Some(CompletedAudioIssue::TranscriptionUnavailable);
+    }
+    Some(CompletedAudioIssue::NoWords)
+}
+
+fn bundle_audio_issue(dir: &std::path::Path, bundle: &ApparentBundle) -> Option<CompletedAudioIssue> {
+    completed_audio_issue(bundle.source.as_deref(), &bundle.transcript, bundle.has_microphone_samples(dir))
+}
+
+fn completed_status_label(inbox_count: usize, note: Option<&str>, issue: Option<CompletedAudioIssue>) -> String {
     let label = completed_label(inbox_count, note);
-    if no_words {
-        format!("{label} · No words")
+    if let Some(issue) = issue {
+        format!("{label} · {}", issue.label())
     } else {
         label
     }
@@ -392,7 +412,7 @@ fn island_content_width(
     chips: bool,
     warning: Option<InputWarning>,
     completed_note: Option<&str>,
-    no_words: bool,
+    completed_issue: Option<CompletedAudioIssue>,
     live_no_words: bool,
 ) -> f32 {
     let divider = 1.0 + 2.0 * DIVIDER_MX;
@@ -450,7 +470,7 @@ fn island_content_width(
                 + 8.0
                 + measure_text(
                     window,
-                    &completed_status_label(inbox_count, completed_note, no_words),
+                    &completed_status_label(inbox_count, completed_note, completed_issue),
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 )
@@ -773,6 +793,8 @@ pub struct ApparentCoordinator {
     paste_drag_start: Option<[f32; 2]>,
     recording_shortcut_key: bool,
     review_bundle: Option<(PathBuf, ApparentBundle)>,
+    /// Read the WAV once when selecting a bundle, never on the capsule's animation tick.
+    review_audio_issue: Option<CompletedAudioIssue>,
     review_status: Option<String>,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
@@ -863,6 +885,7 @@ impl ApparentCoordinator {
             display_rect: [0.0, 0.0, 1440.0, 900.0],
             paste_drag_start: None,
             recording_shortcut_key: false,
+            review_audio_issue: initial_bundle.as_ref().and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
             selected_tab: ReviewTab::ContactSheet,
@@ -1439,6 +1462,7 @@ impl ApparentCoordinator {
     }
 
     pub fn set_review_bundle(&mut self, bundle: (PathBuf, ApparentBundle), status: Option<String>) {
+        self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
         self.selected_tab = ReviewTab::ContactSheet;
@@ -1913,12 +1937,10 @@ impl ApparentCoordinator {
         }
     }
 
-    fn completed_has_no_words(&self) -> bool {
+    fn completed_audio_issue(&self) -> Option<CompletedAudioIssue> {
         match (&self.completed_dir, &self.review_bundle) {
-            (Some(dir), Some((review_dir, bundle))) if dir == review_dir => {
-                bundle_no_words_warning(dir, bundle)
-            }
-            _ => false,
+            (Some(dir), Some((review_dir, _))) if dir == review_dir => self.review_audio_issue,
+            _ => None,
         }
     }
 
@@ -1951,15 +1973,14 @@ impl ApparentCoordinator {
                 has_iphone,
             },
             IslandPhase::Processing => Pres::Processing,
-            IslandPhase::Completed { inbox_count, .. } => Pres::Completed {
-                warning: self.completed_has_no_words(),
-                label: completed_status_label(
-                    inbox_count,
-                    self.completed_note.as_deref(),
-                    self.completed_has_no_words(),
-                ),
-                routes: Vec::new(),
-            },
+            IslandPhase::Completed { inbox_count, .. } => {
+                let issue = self.completed_audio_issue();
+                Pres::Completed {
+                    warning: issue.is_some(),
+                    label: completed_status_label(inbox_count, self.completed_note.as_deref(), issue),
+                    routes: Vec::new(),
+                }
+            }
         };
         PillSnapshot {
             pres,
@@ -2968,7 +2989,8 @@ impl Render for HudPillWindow {
         let clock = format_clock(elapsed_ms);
         let has_iphone = coord.iphone.is_some();
         let completed_note = coord.completed_note.clone();
-        let completed_no_words = coord.completed_has_no_words();
+        let completed_issue = coord.completed_audio_issue();
+        let completed_warning = completed_issue.is_some();
         let live_no_words = coord.recording_has_no_words() && !coord.reveal.is_open();
         // The Recording capsule's trailing group: switch chips or controls, and the swap between.
         let chips = if matches!(phase, IslandPhase::Recording) {
@@ -2996,7 +3018,7 @@ impl Render for HudPillWindow {
             chips,
             mic_warning,
             completed_note.as_deref(),
-            completed_no_words,
+            completed_issue,
             live_no_words,
         );
         let snap_initial_width =
@@ -3282,19 +3304,19 @@ impl Render for HudPillWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(rgba(if completed_no_words {
+                            .bg(rgba(if completed_warning {
                                 0xf5a6232e
                             } else {
                                 0x34c7592e
                             }))
-                            .text_color(rgb(if completed_no_words {
+                            .text_color(rgb(if completed_warning {
                                 0xf5b544
                             } else {
                                 POSITIVE_COLOR
                             }))
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .child(if completed_no_words { "!" } else { "✓" }),
+                            .child(if completed_warning { "!" } else { "✓" }),
                     )
                     .child(
                         div()
@@ -3304,7 +3326,7 @@ impl Render for HudPillWindow {
                             .child(completed_status_label(
                                 inbox_count,
                                 completed_note.as_deref(),
-                                completed_no_words,
+                                completed_issue,
                             )),
                     ),
             )
@@ -3594,7 +3616,7 @@ impl Render for HudPillWindow {
                     .when(!has_shell, |d| {
                         d.bg(rgba(0x141416f5))
                             .border_1()
-                            .border_color(if is_completed && completed_no_words {
+                            .border_color(if is_completed && completed_warning {
                                 rgba(0xf5b54480)
                             } else if is_completed {
                                 rgba(0x69d89f4d)
@@ -4354,6 +4376,7 @@ impl Render for BundleReviewWindow {
         let stage_w = (f32::from(window.bounds().size.width) - 320.0 - 44.0).max(320.0);
         let coord_read = self.coordinator.read(cx);
         let state = coord_read.review_bundle.clone();
+        let audio_issue = coord_read.review_audio_issue;
         let status = coord_read.review_status.clone();
         let tab = coord_read.selected_tab;
         let selected_kf = coord_read.selected_keyframe;
@@ -4436,9 +4459,13 @@ impl Render for BundleReviewWindow {
             .cloned();
         let history_count = self.history.len();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
-        let no_words = bundle_no_words_warning(&dir, &bundle);
-        let missing_reason = bundle.transcript.missing.as_ref()
-            .filter(|_| bundle.transcript.text.trim().is_empty());
+        let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
+        let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
+        let missing_reason = if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) {
+            bundle.transcript.missing.as_ref()
+        } else {
+            None
+        };
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
             (Some(app), Some(win)) if !win.is_empty() && win != app => {
@@ -4761,7 +4788,15 @@ impl Render for BundleReviewWindow {
                                         .child("No words transcribed. Your audio was saved—check it or try again closer to the microphone."),
                                 )
                             })
-                            .when(!no_words, |sidebar| {
+                            .when(no_audio, |sidebar| {
+                                sidebar.child(
+                                    div().mt_3().p_3().rounded(px(8.0))
+                                        .bg(rgba(0xf5a62320)).text_color(rgb(0xf5b544))
+                                        .text_size(px(13.0))
+                                        .child("No microphone audio was saved. The screen capture is still available—check the microphone and try again."),
+                                )
+                            })
+                            .when(!no_words && (!no_audio || !bundle.transcript.text.trim().is_empty()), |sidebar| {
                                 sidebar.child(
                                     div()
                                         .p_3()
@@ -4777,7 +4812,11 @@ impl Render for BundleReviewWindow {
                                                 d.text_color(rgb(MUTED_COLOR)).child(
                                                     missing_reason
                                                         .map(|missing| format!("Transcription unavailable: {}", missing.reason))
-                                                        .unwrap_or_else(|| "No speech".into()),
+                                                        .unwrap_or_else(|| match audio_issue {
+                                                            Some(CompletedAudioIssue::NoAudio) => "No audio",
+                                                            Some(CompletedAudioIssue::TranscriptionUnavailable) => "Transcription unavailable: recognition did not run",
+                                                            _ => "No speech",
+                                                        }.into()),
                                                 )
                                             } else {
                                                 d.text_color(rgb(TEXT_COLOR)).child(format!("“{text}”"))
@@ -5688,15 +5727,16 @@ mod tests {
     }
 
     #[test]
-    fn no_words_warning_requires_saved_audio_and_successful_empty_recognition() {
+    fn completed_capture_distinguishes_missing_audio_from_no_words_and_model_failure() {
         let empty = crate::model::TranscriptData::default();
-        assert!(no_words_warning(&empty, true));
-        assert!(!no_words_warning(&empty, false));
         let spoken = crate::model::TranscriptData {
             text: "hello".into(),
             ..Default::default()
         };
-        assert!(!no_words_warning(&spoken, true));
+        let skipped = crate::model::TranscriptData {
+            source: "none".into(),
+            ..Default::default()
+        };
         let unavailable = crate::model::TranscriptData {
             missing: Some(crate::model::MissingTranscript {
                 reason: "Model unavailable".into(),
@@ -5704,7 +5744,19 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!no_words_warning(&unavailable, true));
+        assert_eq!(completed_audio_issue(None, &empty, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &empty, true), Some(CompletedAudioIssue::NoWords));
+        assert_eq!(completed_audio_issue(None, &unavailable, true), Some(CompletedAudioIssue::TranscriptionUnavailable));
+        assert_eq!(completed_audio_issue(None, &unavailable, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &skipped, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_audio_issue(None, &skipped, true), Some(CompletedAudioIssue::TranscriptionUnavailable));
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, false), None);
+        assert_eq!(completed_audio_issue(Some("iphone"), &empty, true), None);
+        assert_eq!(completed_audio_issue(None, &spoken, true), None);
+        assert_eq!(completed_audio_issue(None, &spoken, false), Some(CompletedAudioIssue::NoAudio));
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoAudio)), "Copied · No audio");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)), "Copied · No words");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::TranscriptionUnavailable)), "Copied · Transcript unavailable");
     }
 
     #[test]
@@ -6017,11 +6069,11 @@ mod tests {
         assert_eq!(completed_label(0, Some("Sent to APPARENT")), "Sent to APPARENT");
         assert_eq!(completed_label(1, Some("Sent to APPARENT")), "From iPhone");
         assert_eq!(completed_label(3, None), "3 from iPhone");
-        assert_eq!(completed_status_label(0, None, true), "Copied · No words");
+        assert_eq!(completed_status_label(0, None, Some(CompletedAudioIssue::NoWords)), "Copied · No words");
         assert_eq!(
-            completed_status_label(0, Some("Sent to APPARENT"), true),
+            completed_status_label(0, Some("Sent to APPARENT"), Some(CompletedAudioIssue::NoWords)),
             "Sent to APPARENT · No words"
         );
-        assert_eq!(completed_status_label(0, None, false), "Copied");
+        assert_eq!(completed_status_label(0, None, None), "Copied");
     }
 }

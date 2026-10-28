@@ -19,14 +19,14 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 for (const name of [
   "index.html", "assets", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
-  "narration.mp3", "narration-iphone.mp3",
+  "apparent-narration-mac.mp3", "apparent-narration-iphone.mp3", "apparent-demo-pi.mp4", "apparent-demo-pi-poster.jpg",
 ]) {
   if (!existsSync(join(dist, name))) throw new Error(`Missing required asset: ${name}`)
   cpSync(join(dist, name), join(out, name), { recursive: true })
 }
 writeFileSync(join(out, "robots.txt"), "User-agent: *\nAllow: /\nSitemap: https://app.tryapparent.com/sitemap.xml\n")
 writeFileSync(join(out, "sitemap.xml"), '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://app.tryapparent.com/</loc></url></urlset>\n')
-for (const name of ["appcast.xml", "llms.txt", "skill.md", "og.mp4", "releases", "map-tyyxsf5b"]) {
+for (const name of ["appcast.xml", "llms.txt", "skill.md", "og.mp4", "narration.mp3", "narration-iphone.mp3", "releases", "map-tyyxsf5b"]) {
   if (existsSync(join(out, name))) throw new Error(`Unexpected file in public artifact: ${name}`)
 }
 console.log(`Apparent public artifact: ${out}`)

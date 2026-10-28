@@ -4,38 +4,8 @@ import { AGENT, type Mode, type Script, summaryText, T } from "./script"
 import { motion, smoother } from "./motion"
 import { ContactSheet, hunkDelay, terminalActive } from "./stage-parts"
 
-// OpenCode's TUI (packages/tui) inside Ghostty, using the v2 "opencode" dark theme tokens:
-// background #0a0a0a / raised #141414 / prompt #1e1e1e, text #eeeeee / muted #808080,
-// Build agent blue #5c9cf5, paste extmarks on warning #f5a742.
-
-const LOGO_LEFT = ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"]
-const LOGO_RIGHT = ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"]
-
-// Ghostty draws block elements as exact cell sprites, so render them as cells rather than font glyphs.
-const CELL: Record<string, string> = { "█": "full", "▀": "top", "▄": "bottom", _: "sh", "^": "top-sh", "~": "sh-top" }
-
-function LogoLine({ line, cls }: { line: string; cls: string }) {
-  return (
-    <span className={`lg ${cls}`}>
-      {Array.from(line).map((c, i) => (
-        <i key={i} className={CELL[c] ?? ""} />
-      ))}
-    </span>
-  )
-}
-
 const Logo = memo(function Logo() {
-  return (
-    <div className="tui-logo" role="img" aria-label="opencode">
-      {LOGO_LEFT.map((l, i) => (
-        <div key={i}>
-          <LogoLine line={l} cls="lg-open" />
-          <i />
-          <LogoLine line={LOGO_RIGHT[i]} cls="lg-code" />
-        </div>
-      ))}
-    </div>
-  )
+  return <div className="tui-logo pi-logo" role="img" aria-label="Pi coding agent">π <span>pi</span></div>
 })
 
 function Cursor({ focused }: { focused: boolean }) {
@@ -142,13 +112,13 @@ function Prompt({
             ) : (
               <span className="tp-ph">
                 <Cursor focused={focused} />
-                {submitted ? "" : 'Ask anything… "Fix a TODO in the codebase"'}
+                {submitted ? "" : "Ask Pi to work on this capture…"}
               </span>
             )}
           </div>
           </AutoHeight>
           <div className="tp-meta">
-            <span className="tx-build">Build</span> <span className="tx-mute">·</span> Claude Opus 5.5 <span className="tx-mute">anthropic</span>
+            <span className="tx-build">pi</span> <span className="tx-mute">· coding agent</span>
           </div>
         </div>
       </div>
@@ -165,18 +135,18 @@ function Prompt({
             </span>
           </span>
         ) : (
-          <span className="tx-mute">~/code/pulse:main</span>
+          <span className="tx-mute">~/code/pulse</span>
         )}
         <span className="tp-keys">
           {done ? (
-            <span className="tx-mute">18.4K (9%) · $0.11</span>
+            <span className="tx-mute">capture reviewed</span>
           ) : !submitted ? (
             <span>
-              tab <span className="tx-mute">agents</span>
+              enter <span className="tx-mute">send</span>
             </span>
           ) : null}
           <span>
-            ctrl+p <span className="tx-mute">commands</span>
+            / <span className="tx-mute">commands</span>
           </span>
         </span>
       </div>
@@ -390,8 +360,8 @@ function Session({
           {(hasStream || done) && <StreamedResponse streamElapsed={streamElapsed} done={done} from={m.streamFrom} fadeMs={m.streamMs} />}
           {done && (
             <div className="ta-foot enter">
-              <span className="tx-build">Build</span>
-              <span className="tx-mute"> · Claude Opus 5.5 · 4.1s</span>
+              <span className="tx-build">pi</span>
+              <span className="tx-mute"> · complete</span>
             </div>
           )}
         </div>
@@ -412,9 +382,9 @@ function Home({ children }: { children: ReactNode }) {
       <div className="th-grow" />
       <div className="th-footer">
         <span>
-          <span className="tx-ok">⊙</span> 2 MCP <span className="tx-mute">/mcps</span>
+          <span className="tx-ok">●</span> ready <span className="tx-mute">/help</span>
         </span>
-        <span className="tx-mute">2.0.0</span>
+        <span className="tx-mute">pi</span>
       </div>
     </div>
   )
@@ -451,7 +421,7 @@ const TerminalInner = memo(function TerminalInner({
 }) {
   const done = step >= 4
   const running = submitted && !done
-  const title = step >= 1 ? "OC | Fix header badge and button row" : "OpenCode"
+  const title = step >= 1 ? "pi | Fix header badge and button row" : "pi"
   const prompt = (
     <Prompt
       mode={mode}

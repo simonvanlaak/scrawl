@@ -39,6 +39,8 @@ fn init() -> Result<()> {
 
 /// Where a recording's pixels come from.
 pub enum Source {
+    #[cfg(test)]
+    Test,
     /// A rect of the X screen (global pixels), `ximagesrc`.
     X11 { rect: [f64; 4] },
     /// One X11 window, `ximagesrc xid=`: it follows the window and leaves out what covers it.
@@ -73,6 +75,8 @@ pub fn can_record_video() -> bool {
 
 fn source_launch(source: &Source) -> String {
     match source {
+        #[cfg(test)]
+        Source::Test => "videotestsrc is-live=true pattern=smpte".to_owned(),
         Source::X11 { rect } => {
             let [x, y, w, h] = rect.map(|v| v.round() as i64);
             format!(
@@ -131,7 +135,7 @@ impl Recorder {
         );
         if let (Some(encoder), Some(movie)) = (encoder, movie) {
             launch.push_str(&format!(
-                " t. ! queue max-size-time=3000000000 max-size-buffers=0 max-size-bytes=0 ! videorate ! video/x-raw,framerate={FPS}/1 ! videoconvert ! video/x-raw,format=I420 ! {encoder} name=encoder ! h264parse ! mp4mux faststart=true ! filesink location=\"{}\"",
+                " t. ! queue max-size-time=3000000000 max-size-buffers=0 max-size-bytes=0 ! videorate ! video/x-raw,framerate={FPS}/1 ! videoconvert ! video/x-raw,format=I420 ! {encoder} name=encoder ! h264parse ! mp4mux faststart=true ! filesink name=movie_sink location=\"{}\"",
                 movie.display().to_string().replace('"', "\\\"")
             ));
         }
@@ -139,6 +143,9 @@ impl Recorder {
             .with_context(|| format!("Could not build the recording pipeline: {launch}"))?
             .downcast::<gst::Pipeline>()
             .map_err(|_| anyhow!("Not a pipeline"))?;
+        // The candidate sink can hold back pipeline EOS after the movie sink has finished.
+        // Forward child EOS so finish() can distinguish a completed MP4 from an unfinished one.
+        pipeline.set_property("message-forward", true);
         if let (Source::PipeWire { crop: Some(crop), .. }, Some(element)) =
             (source, pipeline.by_name("crop"))
         {
@@ -223,10 +230,18 @@ impl Recorder {
 
     /// Sends end-of-stream and waits (a few seconds at most) for the movie to be finished.
     fn finish(self) -> bool {
-        let _ = self.pipeline.send_event(gst::event::Eos::new());
+        if !self.pipeline.send_event(gst::event::Eos::new()) {
+            scrawl_log("Movie failed to finish: end of stream was rejected");
+            let _ = self.pipeline.set_state(gst::State::Null);
+            return false;
+        }
         let deadline = Instant::now() + Duration::from_secs(8);
-        let message = self.pipeline.bus().and_then(|bus| {
+        let movie_sink = self.pipeline.by_name("movie_sink");
+        let (message, movie_finished) = self.pipeline.bus().map_or((None, false), |bus| {
             loop {
+                if Instant::now() >= deadline {
+                    break (None, false);
+                }
                 // The candidate sink holds end-of-stream back until its last frame is taken.
                 while self
                     .candidates
@@ -235,10 +250,28 @@ impl Recorder {
                 {}
                 let message = bus.timed_pop_filtered(
                     gst::ClockTime::from_mseconds(20),
-                    &[gst::MessageType::Eos, gst::MessageType::Error],
+                    &[
+                        gst::MessageType::Eos,
+                        gst::MessageType::Error,
+                        gst::MessageType::Element,
+                    ],
                 );
-                if message.is_some() || Instant::now() >= deadline {
-                    break message;
+                if let Some(message) = &message {
+                    if message.type_() == gst::MessageType::Element
+                        && let Some(forwarded) = message.structure()
+                        && forwarded.name() == "GstBinForwarded"
+                        && let Ok(child) = forwarded.get::<gst::Message>("message")
+                        && child.type_() == gst::MessageType::Eos
+                        && movie_sink
+                            .as_ref()
+                            .is_some_and(|sink| child.src() == Some(sink.upcast_ref()))
+                    {
+                        break (None, true);
+                    }
+                    if message.type_() == gst::MessageType::Element {
+                        continue;
+                    }
+                    break (Some(message.clone()), false);
                 }
             }
         });
@@ -248,6 +281,7 @@ impl Recorder {
                 scrawl_log(format!("Movie failed to finish: {}", error.error()));
                 false
             }
+            _ if movie_finished => true,
             _ => {
                 scrawl_log("Movie failed to finish: no end of stream within 8 s");
                 false
@@ -707,5 +741,97 @@ mod tests {
             rect: [100.0, 50.0, 800.0, 600.0],
         });
         assert!(launch.contains("startx=100 starty=50 endx=899 endy=649"), "{launch}");
+    }
+
+    #[test]
+    fn finished_movie_survives_a_stuck_candidate_branch() {
+        if init().is_err()
+            || encoder().is_none()
+            || gst::ElementFactory::find("videotestsrc").is_none()
+        {
+            eprintln!("Skipping synthetic GStreamer test: test source or encoder unavailable");
+            return;
+        }
+        let movie =
+            std::env::temp_dir().join(format!("scrawl-eos-test-{}.mp4", std::process::id()));
+        let _ = std::fs::remove_file(&movie);
+        let mut recorder = Recorder::new(
+            &Source::Test,
+            (640, 360),
+            (320, 180),
+            Some(&movie),
+            Instant::now(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while recorder.candidate(0, &[]).is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            recorder.last.is_some(),
+            "the synthetic pipeline never produced a frame"
+        );
+        let sink = recorder.candidates.static_pad("sink").unwrap();
+        let _blocked = sink.add_probe(
+            gst::PadProbeType::BLOCK | gst::PadProbeType::BUFFER,
+            |_, _| gst::PadProbeReturn::Ok,
+        );
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        assert!(
+            recorder.finish(),
+            "the movie branch finished but the candidate branch held pipeline EOS"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(std::fs::metadata(&movie).unwrap().len() > 1024);
+        std::fs::remove_file(movie).unwrap();
+    }
+
+    #[test]
+    fn unfinished_movie_is_not_kept_when_encoder_stalls() {
+        if init().is_err()
+            || encoder().is_none()
+            || gst::ElementFactory::find("videotestsrc").is_none()
+        {
+            eprintln!("Skipping synthetic GStreamer test: test source or encoder unavailable");
+            return;
+        }
+        let movie = std::env::temp_dir().join(format!(
+            "scrawl-encoder-eos-test-{}.mp4",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&movie);
+        let mut recorder = Recorder::new(
+            &Source::Test,
+            (640, 360),
+            (320, 180),
+            Some(&movie),
+            Instant::now(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while recorder.candidate(0, &[]).is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            recorder.last.is_some(),
+            "the synthetic pipeline never produced a frame"
+        );
+        let sink = recorder
+            .pipeline
+            .by_name("encoder")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap();
+        let _blocked = sink.add_probe(
+            gst::PadProbeType::BLOCK | gst::PadProbeType::BUFFER,
+            |_, _| gst::PadProbeReturn::Ok,
+        );
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !recorder.finish(),
+            "an encoder stall cannot finish the movie"
+        );
+        let _ = std::fs::remove_file(movie);
     }
 }

@@ -1,8 +1,10 @@
 import { Demo } from "./demo/Demo"
 import { HowItWorks } from "./HowItWorks"
+import { Copy } from "./Copy"
 
 const REPO = "https://github.com/tryapparent/apparent"
 const RELEASES = `${REPO}/releases`
+const INSTALL_PROMPT = `Check whether this computer supports Apparent (macOS or Linux, not Windows), then install the desktop app from the official releases at ${RELEASES} following the platform instructions, ask before changing system permissions, and verify it launches.`
 
 export function App() {
   return (
@@ -24,6 +26,13 @@ export function App() {
             <h1>Make what you mean <em>apparent.</em></h1>
             <p>Work should be enjoyable. When a design needs changing, show your agent what you mean.</p>
             <a className="btn-primary" href={RELEASES}>Get the app <span aria-hidden="true">↗</span></a>
+            <div className="agent-install">
+              <span className="agent-install-label">Or send this to your agent</span>
+              <div className="agent-install-prompt">
+                <p>{INSTALL_PROMPT}</p>
+                <Copy text={INSTALL_PROMPT} />
+              </div>
+            </div>
             <p className="release-note">Preview downloads on GitHub are still Scrawl-branded. Apparent does not support Windows.</p>
           </div>
         </section>

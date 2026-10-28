@@ -137,7 +137,7 @@ fn relaunch_command(image: &Path, backup: &Path, pid: u32) -> Command {
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg("pid=$1; image=$2; backup=$3; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; result=$?; if [ \"$result\" -ne 0 ] && [ -x \"$backup\" ]; then exec \"$backup\" app; fi; exit \"$result\"")
+        .arg("pid=$1; image=$2; backup=$3; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; if [ -x \"$backup\" ]; then exec \"$backup\" app; fi; exit 1")
         .arg("apparent-update-relaunch")
         .arg(pid.to_string())
         .arg(image)
@@ -564,6 +564,14 @@ mod tests {
         assert!(relaunch_command(&image, &backup, u32::MAX)
             .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
         assert_eq!(fs::read(&marker).unwrap(), b"recovered");
+        fs::remove_file(&marker).unwrap();
+        fs::write(&image, b"#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = fs::metadata(&image).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&image, permissions).unwrap();
+        assert!(relaunch_command(&image, &backup, u32::MAX)
+            .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        assert_eq!(fs::read(&marker).unwrap(), b"recovered", "a clean early exit without a running app still needs recovery");
         fs::write(&image, b"#!/bin/sh\nsleep 5\nexit 1\n").unwrap();
         let mut permissions = fs::metadata(&image).unwrap().permissions();
         permissions.set_mode(0o700);

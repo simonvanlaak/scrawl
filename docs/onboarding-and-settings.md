@@ -59,8 +59,9 @@ uses brand Signal blue with Paper text; Update later uses Paper, Carbon text and
 Both use the brand's square geometry, 18px control type, and 44px hit height rather than
 the compact pill buttons in Settings rows. The result panel has a square Paper field,
 Carbon rule, 18px native status, and 8px-based spacing; failure text uses the semantic
-failure color. Other results use a matching secondary OK action. Enter chooses now;
-Escape defers. On other results Enter and Escape dismiss.
+failure color. Other results use a matching secondary OK action. Tab moves between
+the choices, and Enter or Space activates the focused choice; Enter without a
+focused choice chooses now. Escape defers. On other results Enter and Escape dismiss.
 The app checks that an update is still staged before quitting; a failed relaunch request
 shows the failure result instead of silently exiting. macOS continues to hand off to Sparkle's
 native updater; it does not synthesize a frog result from a Sparkle launch.

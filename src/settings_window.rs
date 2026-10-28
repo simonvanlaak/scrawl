@@ -347,6 +347,9 @@ pub struct SettingsWindow {
     pane: Pane,
     events: Events,
     focus: FocusHandle,
+    update_later_focus: FocusHandle,
+    update_now_focus: FocusHandle,
+    update_dismiss_focus: FocusHandle,
     /// Modifiers held while a recorder listens, so their keycaps light as they go down.
     live: gpui::Modifiers,
     menu: Option<Menu>,
@@ -445,6 +448,9 @@ fn open(request: Request, cx: &mut App) {
                     pane: pane.unwrap_or(Pane::General),
                     events,
                     focus,
+                    update_later_focus: cx.focus_handle(),
+                    update_now_focus: cx.focus_handle(),
+                    update_dismiss_focus: cx.focus_handle(),
                     live: gpui::Modifiers::default(),
                     menu: None,
                     meter: None,
@@ -477,6 +483,11 @@ impl SettingsWindow {
                     }
                     if next.update_check.result.is_some()
                         && self.state.as_ref().is_none_or(|state| state.update_check.result.is_none())
+                    {
+                        window.focus(&self.focus);
+                    }
+                    if next.update_check.result.is_none()
+                        && self.state.as_ref().is_some_and(|state| state.update_check.result.is_some())
                     {
                         window.focus(&self.focus);
                     }
@@ -523,13 +534,25 @@ impl SettingsWindow {
         self.state.as_ref().and_then(ViewState::recording)
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent) {
-        if self.state.as_ref().is_some_and(|state| state.update_check.result.is_some())
-            && matches!(event.keystroke.key.as_str(), "escape" | "enter")
-        {
-            self.act(if event.keystroke.key == "enter"
-                && self.state.as_ref().is_some_and(|state| state.update_check.result == Some(UpdateResult::Available))
-            { Action::UpdateNow } else { Action::DismissUpdateCheck });
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(result) = self.state.as_ref().and_then(|state| state.update_check.result) {
+            match event.keystroke.key.as_str() {
+                "tab" => {
+                    let next = if result == UpdateResult::Available {
+                        if event.keystroke.modifiers.shift {
+                            if self.update_later_focus.is_focused(window) { &self.update_now_focus } else { &self.update_later_focus }
+                        } else if self.update_later_focus.is_focused(window) { &self.update_now_focus } else { &self.update_later_focus }
+                    } else { &self.update_dismiss_focus };
+                    window.focus(next);
+                    cx.notify();
+                }
+                "enter" | "space" => self.act(if result == UpdateResult::Available {
+                    if self.update_later_focus.is_focused(window) { Action::UpdateLater } else { Action::UpdateNow }
+                } else { Action::DismissUpdateCheck }),
+                "escape" => self.act(Action::DismissUpdateCheck),
+                _ => return,
+            }
+            cx.stop_propagation();
             return;
         }
         let Some(kind) = self.recording() else {
@@ -762,19 +785,21 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
 
 /// The update decision uses the brand's primary and secondary action roles,
 /// rather than the compact pill buttons used by Settings rows.
-fn update_choice_button(id: &'static str, title: &str, primary: bool) -> Stateful<Div> {
+fn update_choice_button(id: &'static str, title: &str, primary: bool, focus: &FocusHandle, selected: bool) -> Stateful<Div> {
     let paper = rgb(0xf5f0e8);
     let carbon = rgb(0x19161d);
     let signal = rgb(0x0000f2);
     div()
         .id(id)
+        .track_focus(focus)
+        .tab_index(0)
         .flex_none()
         .h(px(44.0))
         .px(px(16.0))
         .flex().items_center().justify_center()
         .bg(if primary { signal } else { paper })
         .border_2()
-        .border_color(if primary { signal } else { carbon })
+        .border_color(if selected { if primary { carbon } else { signal } } else if primary { signal } else { carbon })
         .text_size(px(18.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(if primary { paper } else { carbon })
@@ -1786,7 +1811,7 @@ impl SettingsWindow {
                         })),
                 )
                 .into_any_element()]))
-                .child(caption(theme, "Stable follows reviewed Linux releases. Main follows checked builds from every main commit. Updates install on the next launch.", false));
+                .child(caption(theme, "Stable follows reviewed Linux releases. Main follows published nightly previews. Updates install on the next launch.", false));
         }
         column = column.child(div().h(px(14.0))).child(group(theme, vec![div()
             .py(px(11.0))
@@ -1868,12 +1893,12 @@ impl SettingsWindow {
                     .child(result.label()))
                 .child(div().flex().justify_end().gap(px(8.0))
                     .when(result == UpdateResult::Available, |row| row
-                        .child(update_choice_button("settings-update-later", "Update later", false)
+                        .child(update_choice_button("settings-update-later", "Update later", false, &self.update_later_focus, self.update_later_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateLater))))
-                        .child(update_choice_button("settings-update-now", "Update now", true)
+                        .child(update_choice_button("settings-update-now", "Update now", true, &self.update_now_focus, self.update_now_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateNow)))))
                     .when(result != UpdateResult::Available, |row| row
-                        .child(update_choice_button("settings-update-dismiss", "OK", false)
+                        .child(update_choice_button("settings-update-dismiss", "OK", false, &self.update_dismiss_focus, self.update_dismiss_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::DismissUpdateCheck))))))
         ))
     }
@@ -2066,11 +2091,11 @@ impl Render for SettingsWindow {
         let root = div()
             .id("settings-root")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 if view.menu.take().is_some() {
                     cx.notify();
                 }
-                view.key_down(event);
+                view.key_down(event, window, cx);
             }))
             .on_modifiers_changed(cx.listener(|view, event: &ModifiersChangedEvent, _, cx| {
                 if view.recording().is_some() {

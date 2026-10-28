@@ -48,6 +48,7 @@ pub enum IconKind {
     Iphone,
     Close,
     Check,
+    Warning,
 }
 
 impl IconKind {
@@ -123,6 +124,7 @@ pub fn measure_metrics() -> Metrics {
         record: measure_text_pt("Record", HUD_TEXT, WEIGHT_SEMIBOLD, false),
         cancel: measure_text_pt("Cancel", HUD_TEXT, WEIGHT_MEDIUM, false),
         finish: measure_text_pt("Finish", HUD_TEXT, WEIGHT_SEMIBOLD, false),
+        warning: measure_text_pt("No words yet", HUD_TEXT, WEIGHT_SEMIBOLD, false),
         processing: measure_text_pt("Processing…", HUD_TEXT, WEIGHT_SEMIBOLD, false),
         paste: measure_text_pt("Paste", HUD_TEXT, WEIGHT_SEMIBOLD, false),
         inspect: measure_text_pt("Inspect", HUD_TEXT, WEIGHT_MEDIUM, false),
@@ -278,6 +280,11 @@ fn rasterize_icon(kind: IconKind, size_pt: f32, scale: f32) -> (u32, u32, [f32; 
             ctx.add_line_to_point(cx, cy);
             ctx.stroke_path();
         }
+        IconKind::Warning => {
+            ctx.set_line_width(2.6 * s);
+            line_seg(&ctx, 12.0, 5.0, 12.0, 14.0);
+            line_seg(&ctx, 12.0, 19.0, 12.0, 19.2);
+        }
     }
     ctx.flush();
     (
@@ -358,6 +365,7 @@ impl GlyphAtlas {
             (IconKind::Iphone, 14.0),
             (IconKind::Close, 12.0),
             (IconKind::Check, 13.0),
+            (IconKind::Warning, 13.0),
         ] {
             let (w, h, size_pt, bytes) = rasterize_icon(kind, size_pt, scale);
             let sprite = atlas.pack(w, h, size_pt, &bytes);
@@ -375,6 +383,7 @@ impl GlyphAtlas {
             ("Mic unavailable", HUD_TEXT, WEIGHT_MEDIUM),
             ("Mic stopped", HUD_TEXT, WEIGHT_MEDIUM),
             ("Mic very quiet", HUD_TEXT, WEIGHT_MEDIUM),
+            ("No words yet", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Processing…", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Paste", HUD_TEXT, WEIGHT_SEMIBOLD),
             ("Inspect", HUD_TEXT, WEIGHT_MEDIUM),
@@ -548,6 +557,7 @@ mod tests {
             IconKind::Iphone,
             IconKind::Close,
             IconKind::Check,
+            IconKind::Warning,
         ] {
             let (w, h, _, rgba) = rasterize_icon(kind, 14.0, 2.0);
             assert_eq!(w, 28);

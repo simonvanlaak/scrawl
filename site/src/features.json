@@ -331,6 +331,24 @@
       "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]
     },
     {
+      "id": "missing-transcript-warning",
+      "group": "finish",
+      "name": "Warn when saved audio has no transcribed words",
+      "says": "After Stop, the completed capsule and Review distinguish an empty recognized transcript from a speech-model failure without guessing the cause.",
+      "status": "experiment:missingTranscriptWarning",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
+      "id": "live-word-warning",
+      "group": "record",
+      "name": "Warn when live recognition finds no words",
+      "says": "After bounded chunks of processed audio recognize no words, warn inside the recording capsule. Check the final transcript again after Stop.",
+      "status": "experiment:liveWordWarning",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
       "id": "review-window",
       "group": "finish",
       "name": "Review window",

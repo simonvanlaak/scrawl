@@ -36,6 +36,7 @@ pub const CHIP_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET; // 32.0
 pub const CHIP_RADIUS: f32 = CHIP_H * 0.5; // 16.0
 pub const CHIP_PX: f32 = 12.0;
 pub const CHIP_GAP: f32 = 2.0;
+pub const LIVE_WARNING_END_PAD: f32 = 16.0;
 pub const DIVIDER_MX: f32 = 6.0;
 pub const DIVIDER_W: f32 = 1.0 + 2.0 * DIVIDER_MX; // 13.0
 pub const LEAD_TRAIL: f32 = 8.0;
@@ -337,10 +338,11 @@ pub enum ElemId {
     Route1 = 16,
     MicWarning = 17,
     DividerWarning = 18,
+    LiveWarning = 19,
 }
 
 impl ElemId {
-    pub const COUNT: usize = 19;
+    pub const COUNT: usize = 20;
     pub const ROUTES: [ElemId; 2] = [Self::Route0, Self::Route1];
     pub const ALL: [ElemId; Self::COUNT] = [
         Self::Lead,
@@ -362,6 +364,7 @@ impl ElemId {
         Self::Route1,
         Self::MicWarning,
         Self::DividerWarning,
+        Self::LiveWarning,
     ];
 
     pub const fn trace_key(self) -> &'static str {
@@ -385,6 +388,7 @@ impl ElemId {
             Self::Route1 => "route:1",
             Self::MicWarning => "mic.warning",
             Self::DividerWarning => "divider.mic",
+            Self::LiveWarning => "warning:no-words",
         }
     }
 
@@ -410,7 +414,7 @@ impl ElemId {
     pub const fn is_interactive(self) -> bool {
         !matches!(
             self,
-            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing
+            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing | Self::LiveWarning
         )
     }
 
@@ -431,6 +435,7 @@ impl ElemId {
             Self::Paste => "Paste",
             Self::Inspect => "Inspect",
             Self::Route0 | Self::Route1 => "Send to session",
+            Self::LiveWarning => "No words recognized yet",
         }
     }
 }
@@ -439,6 +444,10 @@ impl ElemId {
 pub enum Pres {
     Hidden,
     Recording {
+        chips: bool,
+        has_iphone: bool,
+    },
+    RecordingWarning {
         chips: bool,
         has_iphone: bool,
     },
@@ -451,6 +460,7 @@ pub enum Pres {
     Completed {
         label: String,
         routes: Vec<String>,
+        warning: bool,
     },
 }
 
@@ -471,6 +481,16 @@ impl Pres {
                 },
             ) => a == b && (ia == ib || !*a),
             (
+                Self::RecordingWarning {
+                    chips: a,
+                    has_iphone: ia,
+                },
+                Self::RecordingWarning {
+                    chips: b,
+                    has_iphone: ib,
+                },
+            ) => a == b && (ia == ib || !*a),
+            (
                 Self::Selecting {
                     mode: ma,
                     has_iphone: ia,
@@ -484,12 +504,14 @@ impl Pres {
                 Self::Completed {
                     label: a,
                     routes: ra,
+                    warning: wa,
                 },
                 Self::Completed {
                     label: b,
                     routes: rb,
+                    warning: wb,
                 },
-            ) => a == b && ra == rb,
+            ) => a == b && ra == rb && wa == wb,
             _ => false,
         }
     }
@@ -505,6 +527,7 @@ pub struct Metrics {
     pub record: f32,
     pub cancel: f32,
     pub finish: f32,
+    pub warning: f32,
     pub processing: f32,
     pub paste: f32,
     pub inspect: f32,
@@ -523,6 +546,7 @@ impl Default for Metrics {
             record: 46.0,
             cancel: 44.0,
             finish: 38.0,
+            warning: 77.0,
             processing: 78.0,
             paste: 36.0,
             inspect: 47.0,
@@ -668,7 +692,8 @@ fn layout_of_warning(
             raw.push((ElemId::DividerClose, DIVIDER_W, 0.0, 0.0, false));
             raw.push((ElemId::Close, CHIP_H, CHIP_CORE_ROUND, 0.0, true));
         }
-        Pres::Recording { chips, has_iphone } => {
+        Pres::Recording { chips, has_iphone }
+        | Pres::RecordingWarning { chips, has_iphone } => {
             let clock_w = m.clock_width(clock);
             let lead_w = CHIP_H + clock_w + LEAD_TRAIL;
             raw.push((ElemId::Lead, lead_w, CHIP_CORE_ROUND, 0.0, true));
@@ -705,6 +730,9 @@ fn layout_of_warning(
                     0.0,
                     true,
                 ));
+            }
+            if matches!(pres, Pres::RecordingWarning { .. }) {
+                raw.push((ElemId::LiveWarning, 13.0 + 5.0 + m.warning + 12.0 + LIVE_WARNING_END_PAD, 0.0, 0.0, false));
             }
         }
         Pres::Processing => {
@@ -844,6 +872,7 @@ pub struct FrameState {
     pub ghost: Option<Silhouette>,
     pub is_completed: bool,
     pub mic_warning: Option<InputWarning>,
+    pub completed_warning: bool,
     pub content_blur: f32,
     pub content_alpha: f32,
     pub elems: Vec<FrameElem>,
@@ -912,7 +941,7 @@ impl PillModel {
     pub fn set_mic_warning(&mut self, warning: Option<InputWarning>) {
         if self.mic_warning != warning {
             self.mic_warning = warning;
-            if matches!(self.pres, Pres::Recording { .. }) {
+            if matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
                 self.apply_geometry();
             }
         }
@@ -1120,7 +1149,8 @@ impl PillModel {
         let new_w = self.metrics.clock_width(clock);
         self.clock.clear();
         self.clock.push_str(clock);
-        if (old_w - new_w).abs() > 0.5 && matches!(self.pres, Pres::Recording { .. }) {
+        if (old_w - new_w).abs() > 0.5
+            && matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
             self.apply_geometry();
         }
     }
@@ -1625,6 +1655,7 @@ impl PillModel {
             ghost,
             is_completed: matches!(self.geo_pres, Pres::Completed { .. }),
             mic_warning: self.mic_warning,
+            completed_warning: matches!(self.geo_pres, Pres::Completed { warning: true, .. }),
             content_blur: max_blur,
             content_alpha: max_alpha,
             elems,
@@ -1677,6 +1708,57 @@ impl PillModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_warning_stays_inline_and_keeps_finish_and_cancel() {
+        let metrics = Metrics::default();
+        let (plain, _) = layout_of(&Pres::Recording { chips: false, has_iphone: false }, "00:12", LabelWidths::default(), &metrics);
+        let (warned, items) = layout_of(&Pres::RecordingWarning { chips: false, has_iphone: false }, "00:12", LabelWidths::default(), &metrics);
+        assert!(warned.r - warned.l > plain.r - plain.l);
+        let ids: Vec<_> = items.iter().map(|elem| elem.id).collect();
+        assert!(ids.contains(&ElemId::LiveWarning));
+        assert!(ids.contains(&ElemId::Cancel));
+        assert!(ids.contains(&ElemId::Finish));
+        let warning = items.iter().find(|item| item.id == ElemId::LiveWarning).unwrap();
+        let text_right = warning.rect[0] + 26.0 + metrics.warning;
+        assert!((warned.r - text_right - (ISLAND_INSET + 4.0 + LIVE_WARNING_END_PAD)).abs() < 0.5);
+        let (with_mic, items) = layout_of_warning(
+            &Pres::RecordingWarning { chips: false, has_iphone: false },
+            "00:12", LabelWidths::default(), &metrics, Some(InputWarning::VeryQuiet),
+        );
+        assert!(with_mic.r - with_mic.l <= PANEL_W - 16.0, "both warnings must fit the panel");
+        assert!(items.iter().any(|item| item.id == ElemId::MicWarning));
+        assert!(items.iter().any(|item| item.id == ElemId::Finish));
+    }
+
+    #[test]
+    fn microphone_warning_can_arrive_after_no_words_warning() {
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::RecordingWarning { chips: false, has_iphone: false });
+        model.advance(1.0);
+        model.set_mic_warning(Some(InputWarning::Stopped));
+        model.advance(1.0);
+        let frame = model.frame();
+        assert!(frame.elems.iter().any(|elem| elem.id == ElemId::MicWarning));
+        assert!(frame.elems.iter().any(|elem| elem.id == ElemId::LiveWarning));
+        assert!(frame.elems.iter().any(|elem| elem.id == ElemId::Finish));
+    }
+
+    #[test]
+    fn completed_warning_is_a_distinct_pill_presentation() {
+        let mut model = PillModel::new(Metrics::default());
+        let completed = |warning| Pres::Completed {
+            label: "Copied · No words".into(),
+            routes: Vec::new(),
+            warning,
+        };
+        model.set_pres(completed(false));
+        model.advance(1.0);
+        assert!(!model.frame().completed_warning);
+        model.set_pres(completed(true));
+        model.advance(1.0);
+        assert!(model.frame().completed_warning);
+    }
 
     const FRAME_DT: f32 = 1.0 / 120.0;
 
@@ -1852,6 +1934,7 @@ mod tests {
                     Pres::Completed {
                         label: "Copied".into(),
                         routes: Vec::new(),
+                        warning: false,
                     },
                 ),
                 (4.2, Pres::Hidden),
@@ -1931,6 +2014,7 @@ mod tests {
             Pres::Completed {
                 label: "Copied".into(),
                 routes: Vec::new(),
+                warning: false,
             },
         ];
 
@@ -2053,6 +2137,7 @@ mod tests {
         m.set_pres(Pres::Completed {
             label: "Copied".into(),
             routes: Vec::new(),
+            warning: false,
         });
         let done_target_w = m.r.target - m.l.target;
         let mut max_w = 0.0_f32;

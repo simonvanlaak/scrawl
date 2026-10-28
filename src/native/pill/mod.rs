@@ -63,7 +63,7 @@ struct PillUniforms {
     canvas_size: [f32; 2],
     scale: f32,
     elem_count: u32,
-    is_completed: u32,
+    completion_state: u32, // 0 = other, 1 = saved, 2 = saved with no transcribed words
     has_ghost: u32,
     shape_rect: [f32; 4],
     shape_meta: [f32; 4],
@@ -510,6 +510,7 @@ impl NativePill {
             if let Pres::Completed {
                 ref label,
                 ref routes,
+                ..
             } = snapshot.pres
             {
                 let mut labels = st.model.labels;
@@ -915,7 +916,9 @@ impl PillRuntimeState {
                             msg_send![&**gv, setCornerRadius: f64::from(frame.shape.radius)];
                     }
                     if msg_send![&**gv, respondsToSelector: sel!(setTintColor:)] {
-                        let tint = if frame.is_completed {
+                        let tint = if frame.completed_warning {
+                            NSColor::colorWithSRGBRed_green_blue_alpha(0.16, 0.11, 0.03, 0.28)
+                        } else if frame.is_completed {
                             NSColor::colorWithSRGBRed_green_blue_alpha(0.04, 0.14, 0.09, 0.28)
                         } else {
                             NSColor::colorWithSRGBRed_green_blue_alpha(0.06, 0.07, 0.10, 0.22)
@@ -973,6 +976,7 @@ impl MetalPipelines {
                 [slot_x + TILE_PAD_PT, slot_y + TILE_PAD_PT],
                 frame.t,
                 frame.mic_warning,
+                frame.completed_warning,
                 &mut prims,
             );
 
@@ -1016,7 +1020,11 @@ impl MetalPipelines {
             canvas_size: [OFFSCREEN_W_PT, OFFSCREEN_H_PT],
             scale: self.scale,
             elem_count: comp_elems.len() as u32,
-            is_completed: u32::from(frame.is_completed),
+            completion_state: if frame.completed_warning {
+                2
+            } else {
+                u32::from(frame.is_completed)
+            },
             has_ghost,
             shape_rect: [frame.shape.l, frame.shape.t, frame.shape.r, frame.shape.b],
             shape_meta: [
@@ -1143,6 +1151,7 @@ fn emit_elem_prims(
     [ox, oy]: [f32; 2],
     t: f32,
     mic_warning: Option<crate::audio::InputWarning>,
+    completed_warning: bool,
     out: &mut Vec<TilePrim>,
 ) {
     let [bw, bh] = elem.base_size;
@@ -1372,6 +1381,15 @@ fn emit_elem_prims(
                 [1.0, 1.0, 1.0, 0.11],
             );
         }
+        ElemId::LiveWarning => {
+            push_shape(out, [ox, oy + 8.0, 1.0, bh - 16.0], 0.5, [1.0, 1.0, 1.0, 0.11]);
+            let icon = atlas.icon(IconKind::Warning);
+            let text = atlas.label("No words yet");
+            let amber = [0.961, 0.710, 0.267, 1.0];
+            push_sprite(out, [ox + 8.0, oy + (bh - 13.0) * 0.5, 13.0, 13.0], icon.uv, amber);
+            push_sprite(out, [ox + 26.0, oy + (bh - text.size_pt[1]) * 0.5,
+                text.size_pt[0], text.size_pt[1]], text.uv, amber);
+        }
         ElemId::Processing => {
             let head = (t * 8.0) % 8.0;
             for k in 0..8 {
@@ -1401,13 +1419,26 @@ fn emit_elem_prims(
             );
         }
         ElemId::DoneLead => {
+            let (icon, color, background) = if completed_warning {
+                (
+                    IconKind::Warning,
+                    [0.961, 0.710, 0.267, 1.0],
+                    [0.961, 0.647, 0.137, 0.18],
+                )
+            } else {
+                (
+                    IconKind::Check,
+                    [0.412, 0.847, 0.624, 1.0],
+                    [0.412, 0.847, 0.624, 0.22],
+                )
+            };
             push_shape(
                 out,
                 [ox + 5.0, oy + 5.0, 22.0, 22.0],
                 11.0,
-                [0.412, 0.847, 0.624, 0.22],
+                background,
             );
-            let ic = atlas.icon(IconKind::Check);
+            let ic = atlas.icon(icon);
             push_sprite(
                 out,
                 [
@@ -1417,7 +1448,7 @@ fn emit_elem_prims(
                     13.0,
                 ],
                 ic.uv,
-                [0.412, 0.847, 0.624, 1.0],
+                color,
             );
             let tx = atlas.completed_sprite;
             push_sprite(
@@ -1453,7 +1484,7 @@ mod tests {
         pres: &Pres,
         seconds: f32,
     ) -> crate::model::RgbaFrame {
-        if let Pres::Completed { label, routes } = pres {
+        if let Pres::Completed { label, routes, .. } = pres {
             let mut labels = model.labels;
             labels.completed = pipelines.atlas.update_completed(label).size_pt[0];
             for (i, width) in labels.routes.iter_mut().enumerate() {
@@ -1525,6 +1556,7 @@ mod tests {
         let completed = |label: &str, routes: &[&str]| Pres::Completed {
             label: label.into(),
             routes: routes.iter().map(|r| (*r).to_owned()).collect(),
+            warning: false,
         };
         let states = [
             ("1-copied", completed("Copied", &[])),

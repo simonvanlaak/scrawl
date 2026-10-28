@@ -129,10 +129,15 @@ struct Transcript {
 /// SFSpeechRecognizer on macOS 15. Without a speech model the transcript is empty and `missing`
 /// says why.
 pub fn transcribe(audio: &Path) -> Result<TranscriptData> {
+    transcribe_with_timeout(audio, Duration::from_secs(180))
+}
+
+/// Short-lived recording-time probes must not use the batch transcriber's 180 s deadline.
+pub fn transcribe_with_timeout(audio: &Path, timeout: Duration) -> Result<TranscriptData> {
     let locale = crate::speech_model::locale_args();
     let mut args = vec![os("transcribe"), audio.as_os_str()];
     args.extend(locale.iter().map(|arg| arg.as_os_str()));
-    let transcript: Transcript = run(&args, Duration::from_secs(180))?;
+    let transcript: Transcript = run(&args, timeout)?;
     let engine = transcript
         .engine
         .unwrap_or_else(|| "SpeechTranscriber".into());

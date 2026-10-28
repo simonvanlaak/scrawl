@@ -73,6 +73,7 @@ const CHIP_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET;
 const CHIP_RADIUS: f32 = CHIP_H / 2.0;
 const CHIP_PX: f32 = 12.0;
 const CHIP_GAP: f32 = 2.0;
+const LIVE_WARNING_END_PAD: f32 = 16.0;
 const DIVIDER_MX: f32 = 6.0;
 const LEAD_TRAIL: f32 = 8.0;
 const HUD_TEXT: f32 = 13.0;
@@ -80,7 +81,8 @@ const HUD_TEXT: f32 = 13.0;
 const SEG_PX: f32 = 10.0;
 const SEG_ICON: f32 = 14.0;
 const SEG_ICON_GAP: f32 = 5.0;
-const PILL_WINDOW_W: f32 = 520.0;
+// The live warning and optional input meter need room without clipping Finish.
+const PILL_WINDOW_W: f32 = 640.0;
 #[cfg(target_os = "linux")]
 const AUDIO_EQUALIZER: &str = "audioEqualizer";
 #[cfg(target_os = "linux")]
@@ -241,6 +243,39 @@ fn completed_label(inbox_count: usize, note: Option<&str>) -> String {
     }
 }
 
+fn no_words_warning(
+    transcript: &crate::model::TranscriptData,
+    audio_saved: bool,
+    enabled: bool,
+) -> bool {
+    enabled && audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
+}
+
+fn no_words_warning_enabled() -> bool {
+    crate::handoff::experiment("missingTranscriptWarning")
+        || crate::handoff::experiment("liveWordWarning")
+}
+
+fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ScrawlBundle) -> bool {
+    no_words_warning(
+        &bundle.transcript,
+        bundle
+            .audio
+            .as_ref()
+            .is_some_and(|file| dir.join(file).is_file()),
+        no_words_warning_enabled(),
+    )
+}
+
+fn completed_status_label(inbox_count: usize, note: Option<&str>, no_words: bool) -> String {
+    let label = completed_label(inbox_count, note);
+    if no_words {
+        format!("{label} · No words")
+    } else {
+        label
+    }
+}
+
 /// How long a smart-routed capture waits, showing "Sending to …", before it is sent.
 const SMART_SEND_UNDO: Duration = Duration::from_millis(3_000);
 
@@ -389,6 +424,8 @@ fn island_content_width(
     chips: bool,
     warning: Option<InputWarning>,
     completed_note: Option<&str>,
+    no_words: bool,
+    live_no_words: bool,
     routes: &[String],
 ) -> f32 {
     let divider = 1.0 + 2.0 * DIVIDER_MX;
@@ -428,6 +465,12 @@ fn island_content_width(
                 + meter_w
                 + trail.iter().sum::<f32>()
                 + (trail.len() + 1) as f32 * CHIP_GAP
+                + if live_no_words {
+                    divider + CHIP_GAP + measure_text(window, "⚠ No words yet", HUD_TEXT, FontWeight::SEMIBOLD)
+                        + LIVE_WARNING_END_PAD
+                } else {
+                    0.0
+                }
         }
         IslandPhase::Processing => {
             CHIP_H
@@ -440,7 +483,7 @@ fn island_content_width(
                 + 8.0
                 + measure_text(
                     window,
-                    &completed_label(inbox_count, completed_note),
+                    &completed_status_label(inbox_count, completed_note, no_words),
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 )
@@ -712,6 +755,7 @@ pub struct ScrawlCoordinator {
     #[cfg(target_os = "linux")]
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
+    last_live_no_words: bool,
     playback: Option<crate::playback::Guard>,
     picker_metal_overlay: Option<LaserOverlay>,
     native_pill: Option<crate::native::pill::NativePill>,
@@ -827,6 +871,7 @@ impl ScrawlCoordinator {
             #[cfg(target_os = "linux")]
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
+            last_live_no_words: false,
             playback: None,
             picker_metal_overlay: None,
             native_pill: None,
@@ -1919,6 +1964,23 @@ impl ScrawlCoordinator {
         }
     }
 
+    fn completed_has_no_words(&self) -> bool {
+        match (&self.completed_dir, &self.review_bundle) {
+            (Some(dir), Some((review_dir, bundle))) if dir == review_dir => {
+                bundle_no_words_warning(dir, bundle)
+            }
+            _ => false,
+        }
+    }
+
+    fn recording_has_no_words(&self) -> bool {
+        matches!(
+            self.active_recording.as_ref().map(|rec| &rec.source),
+            Some(CaptureSource::Screen { audio: Some(audio), .. })
+                if audio.live_word_state() == Some(crate::live_word_warning::State::NoWords)
+        )
+    }
+
     fn pill_snapshot(&self) -> crate::native::pill::PillSnapshot {
         use crate::native::pill::{PillSnapshot, PillStyle, model::Pres};
         let recording_ms = self
@@ -1932,13 +1994,21 @@ impl ScrawlCoordinator {
         let pres = match self.island_phase {
             IslandPhase::Hidden | IslandPhase::Dismissing => Pres::Hidden,
             IslandPhase::Selecting { mode } => Pres::Selecting { mode, has_iphone },
+            IslandPhase::Recording if self.recording_has_no_words() && !self.reveal.is_open() => {
+                Pres::RecordingWarning { chips: false, has_iphone }
+            }
             IslandPhase::Recording => Pres::Recording {
                 chips: self.reveal.is_open(),
                 has_iphone,
             },
             IslandPhase::Processing => Pres::Processing,
             IslandPhase::Completed { inbox_count, .. } => Pres::Completed {
-                label: completed_label(inbox_count, self.completed_note.as_deref()),
+                warning: self.completed_has_no_words(),
+                label: completed_status_label(
+                    inbox_count,
+                    self.completed_note.as_deref(),
+                    self.completed_has_no_words(),
+                ),
                 routes: self.route_chip_labels(),
             },
         };
@@ -2249,6 +2319,12 @@ impl ScrawlCoordinator {
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
     pub fn island_tick(&mut self, cx: &mut Context<Self>) {
+        let live_no_words = self.recording_has_no_words();
+        if live_no_words != self.last_live_no_words {
+            self.last_live_no_words = live_no_words;
+            self.sync_native_pill();
+            cx.notify();
+        }
         if self.island_await_frame {
             // Ask for the frame that ends the wait.
             cx.notify();
@@ -3272,6 +3348,8 @@ impl Render for HudPillWindow {
         let clock = format_clock(elapsed_ms);
         let has_iphone = coord.iphone.is_some();
         let completed_note = coord.completed_note.clone();
+        let completed_no_words = coord.completed_has_no_words();
+        let live_no_words = coord.recording_has_no_words() && !coord.reveal.is_open();
         let routes = coord.route_chip_labels();
         // The Recording capsule's trailing group: switch chips or controls, and the swap between.
         let chips = if matches!(phase, IslandPhase::Recording) {
@@ -3299,6 +3377,8 @@ impl Render for HudPillWindow {
             chips,
             mic_warning,
             completed_note.as_deref(),
+            completed_no_words,
+            live_no_words,
             &routes,
         );
         let snap_initial_width =
@@ -3586,18 +3666,30 @@ impl Render for HudPillWindow {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(rgba(0x34c7592e))
-                            .text_color(rgb(POSITIVE_COLOR))
+                            .bg(rgba(if completed_no_words {
+                                0xf5a6232e
+                            } else {
+                                0x34c7592e
+                            }))
+                            .text_color(rgb(if completed_no_words {
+                                0xf5b544
+                            } else {
+                                POSITIVE_COLOR
+                            }))
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .child("✓"),
+                            .child(if completed_no_words { "!" } else { "✓" }),
                     )
                     .child(
                         div()
                             .ml(px(8.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(TEXT_COLOR))
-                            .child(completed_label(inbox_count, completed_note.as_deref())),
+                            .child(completed_status_label(
+                                inbox_count,
+                                completed_note.as_deref(),
+                                completed_no_words,
+                            )),
                     ),
             )
             .child(island_divider())
@@ -3787,6 +3879,15 @@ impl Render for HudPillWindow {
                             self.recording_trail(chips, has_iphone, &in_alphas, true),
                             trail_keys(chips, has_iphone, &in_alphas, ""),
                         ))
+                })
+                .when(live_no_words, |row| {
+                    row.child(island_divider()).child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xf5b544))
+                            .pr(px(LIVE_WARNING_END_PAD))
+                            .child("⚠ No words yet"),
+                    )
                 })
             }
             IslandPhase::Processing => {
@@ -4723,6 +4824,11 @@ impl Render for BundleReviewWindow {
             .cloned();
         let history_count = self.history.len();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
+        let no_words = bundle_no_words_warning(&dir, &bundle);
+        let missing_reason = no_words_warning_enabled()
+            .then(|| bundle.transcript.missing.as_ref())
+            .flatten()
+            .filter(|_| bundle.transcript.text.trim().is_empty());
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
             (Some(app), Some(win)) if !win.is_empty() && win != app => {
@@ -5033,24 +5139,42 @@ impl Render for BundleReviewWindow {
                             .flex()
                             .flex_col()
                             .child(sidebar_heading("Transcript"))
-                            .child(
-                                div()
-                                    .p_3()
-                                    .rounded(px(8.0))
-                                    .bg(rgb(SURFACE_BG))
-                                    .border_1()
-                                    .border_color(rgb(LINE_COLOR))
-                                    .text_size(px(13.0))
-                                    .line_height(relative(1.45))
-                                    .map(|d| {
-                                        let text = bundle.transcript.text.trim();
-                                        if text.is_empty() {
-                                            d.text_color(rgb(MUTED_COLOR)).child("No speech")
-                                        } else {
-                                            d.text_color(rgb(TEXT_COLOR)).child(format!("“{text}”"))
-                                        }
-                                    }),
-                            )
+                            .when(no_words, |sidebar| {
+                                sidebar.child(
+                                    div()
+                                        .mt_3()
+                                        .p_3()
+                                        .rounded(px(8.0))
+                                        .bg(rgba(0xf5a62320))
+                                        .text_color(rgb(0xf5b544))
+                                        .text_size(px(13.0))
+                                        .child("No words transcribed. Your audio was saved—check it or try again closer to the microphone."),
+                                )
+                            })
+                            .when(!no_words, |sidebar| {
+                                sidebar.child(
+                                    div()
+                                        .p_3()
+                                        .rounded(px(8.0))
+                                        .bg(rgb(SURFACE_BG))
+                                        .border_1()
+                                        .border_color(rgb(LINE_COLOR))
+                                        .text_size(px(13.0))
+                                        .line_height(relative(1.45))
+                                        .map(|d| {
+                                            let text = bundle.transcript.text.trim();
+                                            if text.is_empty() {
+                                                d.text_color(rgb(MUTED_COLOR)).child(
+                                                    missing_reason
+                                                        .map(|missing| format!("Transcription unavailable: {}", missing.reason))
+                                                        .unwrap_or_else(|| "No speech".into()),
+                                                )
+                                            } else {
+                                                d.text_color(rgb(TEXT_COLOR)).child(format!("“{text}”"))
+                                            }
+                                        }),
+                                )
+                            })
                             .child(div().mt(px(20.0)).child(sidebar_heading("Timeline")))
                             .child(
                                 div().mx(px(-8.0)).flex().flex_col().gap(px(1.0)).children(
@@ -5941,6 +6065,27 @@ mod tests {
     }
 
     #[test]
+    fn no_words_warning_requires_saved_audio_and_successful_empty_recognition() {
+        let empty = crate::model::TranscriptData::default();
+        assert!(no_words_warning(&empty, true, true));
+        assert!(!no_words_warning(&empty, true, false));
+        assert!(!no_words_warning(&empty, false, true));
+        let spoken = crate::model::TranscriptData {
+            text: "hello".into(),
+            ..Default::default()
+        };
+        assert!(!no_words_warning(&spoken, true, true));
+        let unavailable = crate::model::TranscriptData {
+            missing: Some(crate::model::MissingTranscript {
+                reason: "Model unavailable".into(),
+                retry: true,
+            }),
+            ..Default::default()
+        };
+        assert!(!no_words_warning(&unavailable, true, true));
+    }
+
+    #[test]
     fn review_history_stops_at_both_ends() {
         let paths = vec![
             PathBuf::from("new"),
@@ -6250,6 +6395,12 @@ mod tests {
         assert_eq!(completed_label(0, Some("Sent to SCRAWL")), "Sent to SCRAWL");
         assert_eq!(completed_label(1, Some("Sent to SCRAWL")), "From iPhone");
         assert_eq!(completed_label(3, None), "3 from iPhone");
+        assert_eq!(completed_status_label(0, None, true), "Copied · No words");
+        assert_eq!(
+            completed_status_label(0, Some("Sent to SCRAWL"), true),
+            "Sent to SCRAWL · No words"
+        );
+        assert_eq!(completed_status_label(0, None, false), "Copied");
         assert_eq!(island_title("SCRAWL"), "SCRAWL");
         assert_eq!(
             island_title("Make Mac captures route to the site session"),

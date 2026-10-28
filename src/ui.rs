@@ -2970,7 +2970,9 @@ impl ScrawlCoordinator {
         let captured = target.bundle_id.clone();
         let finish_started = Instant::now();
         #[cfg(target_os = "linux")]
-        let final_whiteboard = screen.then(|| self.whiteboard.borrow().clone());
+        let final_whiteboard = screen.then(|| {
+            whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx))
+        });
         let route = (screen && !smart && !auto_active).then(|| {
             let (front, captured) = (front.clone(), captured.clone());
             std::thread::spawn(move || {

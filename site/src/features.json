@@ -133,6 +133,16 @@
       "docs": ["docs/linux.md"]
     },
     {
+      "id": "audio-equalizer",
+      "group": "record",
+      "name": "Microphone input equalizer",
+      "says": "Five smooth bars respond to captured microphone samples in the Linux recording capsule; this does not assess speech or transcription quality.",
+      "status": "experiment:audioEqualizer",
+      "platforms": ["linux"],
+      "note": "Off by default. The recording cue, Finish, and warning text remain separate.",
+      "docs": ["docs/linux.md"]
+    },
+    {
       "id": "pins",
       "group": "record",
       "name": "Pins",

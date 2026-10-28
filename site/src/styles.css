@@ -2947,7 +2947,7 @@ kbd {
   color: var(--fg);
 }
 
-/* ---------- Liquid Glass (ApparentKit strip & iOS 26 style) ---------- */
+/* ---------- Liquid Glass (demo controls) ---------- */
 
 .liquid-glass-defs {
   position: fixed;

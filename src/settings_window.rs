@@ -1698,6 +1698,19 @@ impl SettingsWindow {
                 .into_any_element()]))
                 .child(caption(theme, "Stable follows reviewed Linux releases. Main follows checked builds from every main commit. Updates install on the next launch.", false));
         }
+        column = column
+            .child(header(theme, "Enjoying Apparent?"))
+            .child(group(theme, vec![row(
+                theme,
+                "Support the project",
+                true,
+                button(theme, "settings-star-github", "Star on GitHub", true)
+                    .on_click(|_, _, _| {
+                        let _ = crate::handoff::open_path(std::path::Path::new("https://github.com/tryapparent/apparent"));
+                    }),
+            )
+            .into_any_element()]))
+            .child(caption(theme, "A GitHub star won’t fix your bugs, but it will make our day.", false));
         column
             .child(header(theme, "Links"))
             .child(group(

@@ -929,11 +929,11 @@
       "id": "linux-appimage-updates",
       "group": "install",
       "name": "Linux AppImage update channels",
-      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or manually published main previews, a manual check, and live version status.",
+      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or nightly published main previews, a manual check, and live version status.",
       "status": "main",
       "platforms": ["linux"],
       "config": [
-        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux update feed" },
+        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux release channel" },
         { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with apparent update status" }
       ],
       "docs": ["docs/linux.md"]

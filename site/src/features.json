@@ -206,7 +206,7 @@
       "says": "Choose an input in Recording Settings or with apparent mic set; a live input meter shows its level. Keep a disconnected choice saved, explain the fallback, and use the current system default for new captures until it returns.",
       "status": "main",
       "platforms": ["mac", "linux"],
-      "note": "On PipeWire/PulseAudio Linux desktops this requires pactl and the GStreamer pulsesrc plugin. Other Linux audio servers may expose only a shared CPAL input. Windows implementation awaits a real Windows Settings and selected-capture test before parity is claimed.",
+      "note": "On PipeWire/PulseAudio Linux desktops this requires pactl and the GStreamer pulsesrc plugin. Other Linux audio servers may expose only a shared CPAL input. Windows is unsupported.",
       "config": [
         { "key": "microphone", "value": "{\"id\": string, \"name\": string}", "does": "Save the chosen input; absent follows the system default" }
       ],

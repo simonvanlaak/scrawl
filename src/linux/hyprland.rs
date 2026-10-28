@@ -1,4 +1,4 @@
-//! Hyprland: Scrawl's shortcuts as runtime binds that run `scrawl shortcut record|paste`, which
+//! Hyprland: Apparent's shortcuts as runtime binds that run `apparent shortcut record|paste`, which
 //! hand the press to the running app (`super::ipc`), like GNOME's custom keybindings do. The
 //! compositor consumes the chord, so it doesn't also reach the app in front, and nothing needs
 //! the `input` group.
@@ -7,7 +7,7 @@
 //! an app id, and `xdg-desktop-portal-hyprland` only fires shortcuts the user bound by hand with
 //! `bind = …, global, <app id>:<name>`.
 //!
-//! A config reload drops runtime binds, so `watch_reloads` tells Scrawl to bind them again.
+//! A config reload drops runtime binds, so `watch_reloads` tells Apparent to bind them again.
 //! Hyprland 0.55+ can read its config as Lua (Omarchy 4 does), where binds are added with
 //! `hyprctl eval`; the older hyprlang config takes `hyprctl keyword`. `Syntax` tells them apart.
 
@@ -35,7 +35,7 @@ enum Syntax {
 }
 
 static SYNTAX: Mutex<Option<Syntax>> = Mutex::new(None);
-/// The chords Scrawl bound, by shortcut id (`record`, `paste`), to take them off again.
+/// The chords Apparent bound, by shortcut id (`record`, `paste`), to take them off again.
 static BOUND: Mutex<Option<HashMap<&'static str, (u32, String)>>> = Mutex::new(None);
 
 /// This session is Hyprland, and its socket answers where `HYPRLAND_INSTANCE_SIGNATURE` says.
@@ -150,7 +150,7 @@ fn syntax() -> Result<Syntax> {
     }
     // `keyword` answers "can't work with non-legacy parsers" under a Lua config, and
     // complains about the unknown option under a hyprlang one, so the probe changes nothing.
-    let reply = request("keyword scrawl_probe 1")?;
+    let reply = request("keyword apparent_probe 1")?;
     let syntax = if reply.contains("non-legacy") {
         Syntax::Lua
     } else {
@@ -160,7 +160,7 @@ fn syntax() -> Result<Syntax> {
     Ok(syntax)
 }
 
-/// Hyprland's `SUPER` mask for Scrawl's Carbon modifier bits (⌥ is Alt, ⌘ is Super).
+/// Hyprland's `SUPER` mask for Apparent's Carbon modifier bits (⌥ is Alt, ⌘ is Super).
 fn modmask(carbon_modifiers: u32) -> u32 {
     [
         (CARBON_SHIFT_KEY, MOD_SHIFT),
@@ -186,7 +186,7 @@ fn mod_names(mask: u32) -> Vec<&'static str> {
     .collect()
 }
 
-/// Scrawl's key names (`Enter`, `Backspace`) as xkb names, which Hyprland takes.
+/// Apparent's key names (`Enter`, `Backspace`) as xkb names, which Hyprland takes.
 fn key_name(key: &str) -> String {
     match key {
         "Enter" => "Return".into(),
@@ -217,11 +217,11 @@ fn shell_quote(text: &str) -> String {
 }
 
 fn description(id: &str) -> String {
-    format!("Scrawl: {id}")
+    format!("Apparent: {id}")
 }
 
 fn command(id: &str) -> Result<String> {
-    let exe = super::scrawl_exe()?;
+    let exe = super::apparent_exe()?;
     Ok(format!(
         "{} shortcut {id}",
         shell_quote(&exe.display().to_string())
@@ -232,9 +232,9 @@ fn command(id: &str) -> Result<String> {
 #[derive(Debug, PartialEq, Eq)]
 enum Existing {
     Free,
-    /// A bind with Scrawl's description: ours from before, or one the user made permanent
+    /// A bind with Apparent's description: ours from before, or one the user made permanent
     /// from the snippet in `docs/linux.md`.
-    Scrawl,
+    Apparent,
     Other,
 }
 
@@ -253,7 +253,7 @@ fn existing(binds_json: &str, mask: u32, key: &str, id: &str) -> Existing {
             continue;
         }
         if bind["description"].as_str() == Some(ours.as_str()) {
-            return Existing::Scrawl;
+            return Existing::Apparent;
         }
         found = Existing::Other;
     }
@@ -269,12 +269,12 @@ fn run(command: &str) -> Result<()> {
     }
 }
 
-/// A normal GPUI window is tiled by Hyprland. Float only the whiteboard, not Scrawl's
+/// A normal GPUI window is tiled by Hyprland. Float only the whiteboard, not Apparent's
 /// picker or capsule, so the browser can stay beside a movable, resizable paper window.
 pub fn float_whiteboard() -> Result<()> {
     let clients: Vec<serde_json::Value> = serde_json::from_str(&request("j/clients")?)?;
     let Some(board) = clients.iter().find(|client| {
-        client["title"].as_str() == Some("Scrawl Whiteboard")
+        client["title"].as_str() == Some("Apparent Whiteboard")
             && client["pid"].as_u64() == Some(u64::from(std::process::id()))
     }) else {
         bail!("Whiteboard window not mapped yet");
@@ -287,7 +287,7 @@ pub fn float_whiteboard() -> Result<()> {
         .context("Whiteboard window has no address")?;
     match syntax()? {
         Syntax::Lua => run(&format!(
-            "eval local w = hl.get_windows({{ title = 'Scrawl Whiteboard' }})[1]; \
+            "eval local w = hl.get_windows({{ title = 'Apparent Whiteboard' }})[1]; \
              assert(w and w.address == '{}', 'Whiteboard window changed'); \
              hl.dispatch(hl.dsp.window.float({{ action = 'set', window = w }})); \
              hl.dispatch(hl.dsp.window.resize({{ x = 560, y = 460, window = w }}))",
@@ -333,7 +333,7 @@ pub fn bind(id: &'static str, chord: Option<(u32, &str)>) -> Result<()> {
     };
     let mask = modmask(modifiers);
     match existing(&request("j/binds")?, mask, key, id) {
-        Existing::Scrawl => return Ok(()),
+        Existing::Apparent => return Ok(()),
         Existing::Other => bail!("{} is already bound", lua_chord(mask, key)),
         Existing::Free => {}
     }
@@ -389,7 +389,7 @@ struct CursorPos {
     y: f64,
 }
 
-/// A point in Hyprland's layout as XWayland's coordinates, which Scrawl's windows and captures
+/// A point in Hyprland's layout as XWayland's coordinates, which Apparent's windows and captures
 /// use. XWayland lays the monitors out by itself (`xrandr` can put a monitor at y 0 where
 /// Hyprland has it at y 1080), so the point is taken to the same place on the same output,
 /// found by name, and scaled by how big XWayland draws it. `x_monitors` is each output's name
@@ -425,7 +425,7 @@ pub fn watch_reloads(reloaded: impl Fn() + Send + 'static) -> Result<()> {
     let dir = instance_dir().context("Not a Hyprland session")?;
     let stream = UnixStream::connect(dir.join(".socket2.sock")).context("Hyprland events")?;
     std::thread::Builder::new()
-        .name("scrawl-hyprland-events".into())
+        .name("apparent-hyprland-events".into())
         .spawn(move || {
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
                 if line.starts_with("configreloaded>>") {
@@ -546,11 +546,11 @@ mod tests {
     fn existing_binds_are_told_apart() {
         let binds = r#"[
             {"modmask": 72, "key": "S", "description": "Move window to scratchpad"},
-            {"modmask": 9, "key": "TAB", "description": "Scrawl: record"},
+            {"modmask": 9, "key": "TAB", "description": "Apparent: record"},
             {"modmask": 9, "key": "V", "description": ""}
         ]"#;
         assert_eq!(existing(binds, 72, "S", "record"), Existing::Other);
-        assert_eq!(existing(binds, 9, "Tab", "record"), Existing::Scrawl);
+        assert_eq!(existing(binds, 9, "Tab", "record"), Existing::Apparent);
         assert_eq!(existing(binds, 9, "v", "paste"), Existing::Other);
         assert_eq!(existing(binds, 9, "S", "record"), Existing::Free);
         assert_eq!(existing("not json", 9, "S", "record"), Existing::Free);

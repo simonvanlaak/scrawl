@@ -74,7 +74,7 @@ export function App() {
           <div className="availability-copy">
             <p>The public demo is ready. A separately signed Apparent installer is not yet available, so this page does not send you to someone else’s release.</p>
             <a className="btn-primary" href={REPO}>View the source on GitHub <span aria-hidden="true">↗</span></a>
-            <p className="availability-note">The current code still uses the <code>scrawl</code> command and capture format while the app identity changes.</p>
+            <p className="availability-note">The source builds the <code>apparent</code> command and writes <code>.apparent</code> captures. No branded installer is published yet.</p>
           </div>
         </section>
       </main>

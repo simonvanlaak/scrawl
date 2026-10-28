@@ -4,9 +4,9 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 version=2.9.4
 sha256=ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9
-# SCRAWL_SPARKLE_DIR keeps the tools outside target/ (which cleans wipe), e.g.
-# ~/.local/share/scrawl-release/sparkle-2.9.4 on the Macs that release (docs/release.md).
-destination="${SCRAWL_SPARKLE_DIR:-$root/target/sparkle-$version}"
+# APPARENT_SPARKLE_DIR keeps the tools outside target/ (which cleans wipe), e.g.
+# ~/.local/share/apparent-release/sparkle-2.9.4 on the Macs that release (docs/release.md).
+destination="${APPARENT_SPARKLE_DIR:-$root/target/sparkle-$version}"
 parent=$(dirname -- "$destination")
 archive="$parent/Sparkle-$version.tar.xz"
 url="https://github.com/sparkle-project/Sparkle/releases/download/$version/Sparkle-$version.tar.xz"

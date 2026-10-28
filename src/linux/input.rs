@@ -1,7 +1,7 @@
 //! Keys and mouse buttons straight from the kernel's input devices (`/dev/input/event*`), for a
 //! Wayland session, where no app hears another's input. Reading them needs membership of the
 //! `input` group (`sudo usermod -aG input $USER`, then log in again): the same trust macOS asks
-//! for with Accessibility. Scrawl only keeps which modifiers and buttons are down and a few
+//! for with Accessibility. Apparent only keeps which modifiers and buttons are down and a few
 //! keys (its shortcuts, Esc, Ctrl+Z); it never records what is typed.
 //!
 //! On X11 none of this is used: the X server answers the same questions (`super::x11`).
@@ -149,7 +149,7 @@ fn absolute_axes(fd: &OwnedFd) -> Option<[(i32, i32); 2]> {
     Some([abs_range(fd, ABS_X)?, abs_range(fd, ABS_Y)?])
 }
 
-/// Whether Scrawl may read at least one keyboard or mouse.
+/// Whether Apparent may read at least one keyboard or mouse.
 pub fn devices_readable() -> bool {
     event_devices()
         .iter()
@@ -173,13 +173,13 @@ pub fn start() -> bool {
     if fds.is_empty() {
         return false;
     }
-    crate::capture::scrawl_log(format!("input devices: reading {}", fds.len()));
+    crate::capture::apparent_log(format!("input devices: reading {}", fds.len()));
     READER.get_or_init(|| Reader {
         held: Mutex::new(Held::default()),
         pressed: Mutex::new(HashSet::new()),
     });
     *started = std::thread::Builder::new()
-        .name("scrawl-evdev".into())
+        .name("apparent-evdev".into())
         .spawn(move || read_loop(fds))
         .is_ok();
     *started
@@ -293,7 +293,7 @@ const LETTERS: [u16; 26] = [
     21, 44,
 ];
 
-/// The Windows-style virtual key (what Scrawl stores shortcuts as on Linux) for an evdev code:
+/// The Windows-style virtual key (what Apparent stores shortcuts as on Linux) for an evdev code:
 /// letters, digits and F1–F12 on a US layout's positions, plus Space, Enter, Tab, Backspace,
 /// Delete and Esc.
 pub fn vk_for_evdev_code(code: u16) -> Option<u16> {

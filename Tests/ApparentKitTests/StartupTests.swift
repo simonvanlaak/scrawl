@@ -1,24 +1,24 @@
 #if os(iOS)
 import XCTest
 import AVFoundation
-@testable import ScrawlKit
+@testable import ApparentKit
 
 final class StartupTests: XCTestCase {
   @MainActor func testPreparedOverlayIsPresentedBeforeHardwareStarts() async throws {
     try requireHost()
     let recorder = SuspendedRecorder()
-    let scrawl = makeScrawl(recorder)
+    let apparent = makeApparent(recorder)
     let prepared = expectation(description: "transparent strip laid out")
     let drawn = expectation(description: "prepared strip presented")
     let hardware = expectation(description: "hardware starts after presentation")
-    scrawl.startupObserver = { event in
+    apparent.startupObserver = { event in
       if event.stage == "prewarmLayout" { prepared.fulfill() }
       if event.stage == "firstDraw" { drawn.fulfill() }
     }
-    scrawl.prepareToStart()
+    apparent.prepareToStart()
     await fulfillment(of: [prepared], timeout: 2)
     recorder.didStart = { hardware.fulfill() }
-    scrawl.start()
+    apparent.start()
     XCTAssertEqual(recorder.starts, 0)
     await fulfillment(of: [drawn, hardware], timeout: 2, enforceOrder: true)
     recorder.complete(.failure(RecorderError.notRecording))
@@ -31,7 +31,7 @@ final class StartupTests: XCTestCase {
       recorder.start(microphone: false) { continuation.resume(returning: $0) }
     }
     _ = try started.get()
-    let url = URL.temporaryDirectory.appending(path: "scrawl-start-test-\(UUID()).mp4")
+    let url = URL.temporaryDirectory.appending(path: "apparent-start-test-\(UUID()).mp4")
     defer { try? FileManager.default.removeItem(at: url) }
     let error: (any Error)? = await withCheckedContinuation { continuation in
       recorder.stop(writingTo: url) { continuation.resume(returning: $0) }
@@ -57,64 +57,64 @@ final class StartupTests: XCTestCase {
   @MainActor func testOverlayDrawsBeforeAudioStartCompletesAndEarlyDrawingIsAccepted() async throws {
     try requireHost()
     let recorder = SuspendedRecorder()
-    let scrawl = makeScrawl(recorder)
+    let apparent = makeApparent(recorder)
     let drawn = expectation(description: "strip content presented while audio is suspended")
-    scrawl.startupObserver = { event in
+    apparent.startupObserver = { event in
       if event.stage == "firstDraw" { drawn.fulfill() }
     }
-    scrawl.start()
-    XCTAssertTrue(scrawl.isStarting)
-    XCTAssertFalse(scrawl.isRecording)
-    scrawl.toggleDrawing()
-    XCTAssertTrue(scrawl.isDrawing)
+    apparent.start()
+    XCTAssertTrue(apparent.isStarting)
+    XCTAssertFalse(apparent.isRecording)
+    apparent.toggleDrawing()
+    XCTAssertTrue(apparent.isDrawing)
     await fulfillment(of: [drawn], timeout: 3)
     XCTAssertNotNil(recorder.completion, "audio completion remains withheld until after presentation")
     recorder.complete(.failure(RecorderError.notRecording))
-    XCTAssertFalse(scrawl.isStarting)
-    XCTAssertNil(scrawl.startedAt)
+    XCTAssertFalse(apparent.isStarting)
+    XCTAssertNil(apparent.startedAt)
   }
 
   @MainActor func testEarlySendIsBufferedAndDuplicateStartDoesNotReplaceRecorder() throws {
     try requireHost()
     let recorder = SuspendedRecorder()
-    let scrawl = makeScrawl(recorder)
-    scrawl.start()
-    scrawl.start()
+    let apparent = makeApparent(recorder)
+    apparent.start()
+    apparent.start()
     XCTAssertEqual(recorder.starts, 1)
-    scrawl.stop()
+    apparent.stop()
     XCTAssertEqual(recorder.stops, 0)
     recorder.complete(.success(Date()))
     XCTAssertEqual(recorder.stops, 1)
-    XCTAssertFalse(scrawl.isStarting)
-    XCTAssertFalse(scrawl.isRecording)
+    XCTAssertFalse(apparent.isStarting)
+    XCTAssertFalse(apparent.isRecording)
   }
 
   @MainActor func testEarlyDiscardIsBuffered() throws {
     try requireHost()
     let recorder = SuspendedRecorder()
-    let scrawl = makeScrawl(recorder)
-    scrawl.start()
-    scrawl.discard()
-    XCTAssertFalse(scrawl.isDiscardPending)
+    let apparent = makeApparent(recorder)
+    apparent.start()
+    apparent.discard()
+    XCTAssertFalse(apparent.isDiscardPending)
     recorder.complete(.success(Date()))
     XCTAssertEqual(recorder.stops, 1)
-    XCTAssertTrue(scrawl.isDiscardPending)
+    XCTAssertTrue(apparent.isDiscardPending)
   }
 
-  @MainActor private func makeScrawl(_ recorder: SuspendedRecorder) -> Scrawl {
-    Scrawl(config: ScrawlConfig(urls: [URL(string: "http://127.0.0.1:1")!], token: "fixture"),
+  @MainActor private func makeApparent(_ recorder: SuspendedRecorder) -> Apparent {
+    Apparent(config: ApparentConfig(urls: [URL(string: "http://127.0.0.1:1")!], token: "fixture"),
            makeRecorder: { _, _ in recorder })
   }
 
   @MainActor private func requireHost() throws {
-    // Run these with perf/scrawl-start's hosted simulator target, not an unhosted package runner.
-    try XCTSkipIf(Scrawl.activeScene == nil, "Requires the ScrawlStart iOS fixture host")
+    // Run these with perf/apparent-start's hosted simulator target, not an unhosted package runner.
+    try XCTSkipIf(Apparent.activeScene == nil, "Requires the ApparentStart iOS fixture host")
   }
 }
 
-@MainActor private final class SuspendedRecorder: ScrawlRecorder {
+@MainActor private final class SuspendedRecorder: ApparentRecorder {
   var startupTrace: StartupTrace?
-  let method = ScrawlCaptureMethod.appFrames
+  let method = ApparentCaptureMethod.appFrames
   let isAvailable = true
   let recordsAudio = false
   var onInterruption: (@MainActor @Sendable () -> Void)?

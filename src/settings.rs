@@ -1,15 +1,15 @@
-//! The Settings window. It is SwiftUI in `scrawl-helper settings` and, like onboarding, only
+//! The Settings window. It is SwiftUI in `apparent-helper settings` and, like onboarding, only
 //! draws what this module sends it (`View`) and reports what was clicked or typed (`Action`).
-//! Everything is decided and written here: `~/.config/scrawl/config.json` keeps its other keys
+//! Everything is decided and written here: `~/.config/apparent/config.json` keeps its other keys
 //! and its `0600` mode (it holds the ingest token).
 //!
 //! Panes: General (launch at login, sending dev-site captures, the two shortcuts), Recording
 //! (transcriber, video export), Storage (how long recordings are kept), Permissions (the
-//! onboarding checklist, to fix things later), Agents (`scrawl` on PATH, the skill's install
+//! onboarding checklist, to fix things later), Agents (`apparent` on PATH, the skill's install
 //! command) and About.
 //!
 //! Shortcuts live under `"shortcuts"` (`{"record": {"keyCode", "modifiers", "label"}}`, Carbon
-//! modifier bits; absent means the default, and `"paste": null` turns paste off). While the window records one, Scrawl's hotkeys are
+//! modifier bits; absent means the default, and `"paste": null` turns paste off). While the window records one, Apparent's hotkeys are
 //! paused (`capture::pause_shortcuts`) so the current combo reaches the recorder.
 
 use std::collections::BTreeSet;
@@ -25,7 +25,7 @@ use crate::onboarding::{Grants, Permission, Status};
 
 // MARK: Shortcuts in the config
 
-/// Scrawl's two shortcuts.
+/// Apparent's two shortcuts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shortcuts {
     pub record: ShortcutConfig,
@@ -64,7 +64,7 @@ impl Shortcuts {
         }
     }
 
-    /// From `~/.config/scrawl/config.json`, moving a shortcut saved by 0.3.x (its own file
+    /// From `~/.config/apparent/config.json`, moving a shortcut saved by 0.3.x (its own file
     /// under Application Support) across the first time.
     pub fn load() -> Self {
         let path = crate::handoff::default_config_path();
@@ -165,7 +165,7 @@ fn read_json(path: &Path) -> serde_json::Value {
 /// Saves one shortcut; a default is removed rather than written, and one turned off is `null`.
 pub fn save_shortcut(kind: ShortcutKind, cfg: &ShortcutConfig) {
     if let Err(error) = save_shortcut_in(&crate::handoff::default_config_path(), kind, cfg) {
-        crate::capture::scrawl_log(format!("Saving the {kind:?} shortcut failed: {error:#}"));
+        crate::capture::apparent_log(format!("Saving the {kind:?} shortcut failed: {error:#}"));
     }
 }
 
@@ -262,11 +262,11 @@ const DELETE_KEYS: [u32; 2] = [51, 117];
 pub enum Rejection {
     /// Only ⇧, or nothing, with a key that isn't a function key.
     NoModifier,
-    /// A key Scrawl can't name or that the recorder uses (Esc).
+    /// A key Apparent can't name or that the recorder uses (Esc).
     UnsupportedKey,
     /// macOS or every app already uses it.
     Reserved(String),
-    /// Scrawl's other shortcut.
+    /// Apparent's other shortcut.
     Taken(ShortcutKind),
     /// `RegisterEventHotKey` refused it.
     Refused,
@@ -282,7 +282,7 @@ impl Rejection {
                 "Hold Ctrl, Alt or Super with the key.".to_owned()
             }
             Self::NoModifier => "Hold ⌘, ⌥ or ⌃ with the key.".to_owned(),
-            Self::UnsupportedKey => "Scrawl can't use that key. Try a letter or number.".to_owned(),
+            Self::UnsupportedKey => "Apparent can't use that key. Try a letter or number.".to_owned(),
             Self::Reserved(label) if cfg!(not(target_os = "macos")) => {
                 let system = if cfg!(target_os = "windows") {
                     "Windows"
@@ -477,7 +477,7 @@ fn reserved(modifiers: u32, key: &str) -> bool {
     .contains(&(modifiers, key))
 }
 
-/// Checks a pressed combination for `kind` and names it. `other` is Scrawl's other shortcut.
+/// Checks a pressed combination for `kind` and names it. `other` is Apparent's other shortcut.
 pub fn validate(
     kind: ShortcutKind,
     pressed: &Pressed,
@@ -524,7 +524,7 @@ pub enum LoginItem {
     /// Registered, waiting for the user in System Settings › Login Items (on Windows: switched
     /// off in Settings › Apps › Startup).
     NeedsApproval,
-    /// Not running from Scrawl.app (a development build).
+    /// Not running from Apparent.app (a development build).
     Unavailable,
 }
 
@@ -549,13 +549,13 @@ fn reconcile_login_item_in(
 
 /// Reconcile at launch and on Settings refresh, so agent edits take effect without restarting.
 pub fn reconcile_login_item() {
-    if option_env!("SCRAWL_PREVIEW_BUILD").is_some() {
+    if option_env!("APPARENT_PREVIEW_BUILD").is_some() {
         return;
     }
     if let Err(error) = reconcile_login_item_in(
         &crate::handoff::default_config_path(), login_item(), login_command_stale(), set_login_item,
     ) {
-        crate::capture::scrawl_log(format!("Launch at login: {error:#}"));
+        crate::capture::apparent_log(format!("Launch at login: {error:#}"));
     }
 }
 
@@ -578,7 +578,7 @@ mod login {
 
     fn main_app_service() -> Option<objc2::rc::Retained<objc2::runtime::AnyObject>> {
         // Shared config preferences cannot register or remove a production login item.
-        if option_env!("SCRAWL_PREVIEW_BUILD").is_some() {
+        if option_env!("APPARENT_PREVIEW_BUILD").is_some() {
             return None;
         }
         use objc2::runtime::{AnyClass, AnyObject};
@@ -613,7 +613,7 @@ mod login {
         use objc2::runtime::Bool;
         use objc2_foundation::NSError;
         let service =
-            main_app_service().ok_or_else(|| anyhow::anyhow!("not running from Scrawl.app"))?;
+            main_app_service().ok_or_else(|| anyhow::anyhow!("not running from Apparent.app"))?;
         let mut error: Option<objc2::rc::Retained<NSError>> = None;
         let ok: Bool = unsafe {
             if on {
@@ -708,8 +708,8 @@ pub enum Pane {
     About,
 }
 
-/// What `bunx skills add` installs: `skills/scrawl/SKILL.md` from this repository.
-pub const SKILL_COMMAND: &str = "bunx skills add kitlangton/scrawl";
+/// What `bunx skills add` installs: `skills/apparent/SKILL.md` from this repository.
+pub const SKILL_COMMAND: &str = "bunx skills add tryapparent/apparent";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -748,7 +748,7 @@ pub struct UpdateCheck {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandLineView {
-    /// Where `scrawl` is linked, once it is.
+    /// Where `apparent` is linked, once it is.
     pub path: Option<String>,
     /// "install", "uninstall", or none.
     pub button: Option<&'static str>,
@@ -771,19 +771,19 @@ impl CommandLineView {
         match state {
             State::Installed { link, homebrew } => {
                 view.path = Some(tilde(link));
-                view.caption = "Agents and your terminal can run scrawl to read captures, zoom \
+                view.caption = "Agents and your terminal can run apparent to read captures, zoom \
                                 into a moment and export video."
                     .to_owned();
                 if *homebrew {
                     view.button = None;
                     view.caption = "Installed with Homebrew. Agents and your terminal can run \
-                                    scrawl to read captures, zoom into a moment and export video."
+                                    apparent to read captures, zoom into a moment and export video."
                         .to_owned();
                 } else {
                     view.button = Some("uninstall");
                     if !usually_on_path(link) {
                         view.caption = format!(
-                            "If your shell can't find scrawl, add {} to your PATH.",
+                            "If your shell can't find apparent, add {} to your PATH.",
                             folder(link)
                         );
                     }
@@ -791,13 +791,13 @@ impl CommandLineView {
             }
             State::Missing { link } => {
                 view.caption = format!(
-                    "Links scrawl into {}, so agents and your terminal can run it.",
+                    "Links apparent into {}, so agents and your terminal can run it.",
                     folder(link)
                 );
             }
             State::Stale { link } => {
                 view.caption = format!(
-                    "{} points to another copy of Scrawl. Install links it to this one.",
+                    "{} points to another copy of Apparent. Install links it to this one.",
                     tilde(link)
                 );
             }
@@ -805,7 +805,7 @@ impl CommandLineView {
                 view.button = None;
                 view.error = true;
                 view.caption = format!(
-                    "{} is another program, so Scrawl leaves it alone.",
+                    "{} is another program, so Apparent leaves it alone.",
                     tilde(link)
                 );
             }
@@ -813,14 +813,14 @@ impl CommandLineView {
                 view.enabled = false;
                 view.error = true;
                 view.caption =
-                    "There's no folder on your PATH that Scrawl can write to.".to_owned();
+                    "There's no folder on your PATH that Apparent can write to.".to_owned();
             }
             State::Unavailable => {
                 view.enabled = false;
                 view.caption = if cfg!(target_os = "linux") {
-                    "The command-line tool links to Scrawl's AppImage; run Scrawl from one."
+                    "The command-line tool links to Apparent's AppImage; run Apparent from one."
                 } else {
-                    "The command-line tool works in the installed Scrawl.app."
+                    "The command-line tool works in the installed app."
                 }
                 .to_owned();
             }
@@ -1003,7 +1003,7 @@ pub struct PermissionView {
     pub status: Status,
     pub required: bool,
     pub requested: bool,
-    /// Granted, but on only after Scrawl reopens.
+    /// Granted, but on only after Apparent reopens.
     pub relaunch: bool,
 }
 
@@ -1100,14 +1100,14 @@ pub enum Action {
     Grant {
         permission: Permission,
     },
-    /// Reopen Scrawl so a Screen Recording grant takes.
+    /// Reopen Apparent so a Screen Recording grant takes.
     Reopen,
     ShowCaptures,
     CheckForUpdates,
     DismissUpdateCheck,
     /// "Show Welcome Tour" on About.
     Tour,
-    /// Link `scrawl` into a folder on PATH, or remove that link.
+    /// Link `apparent` into a folder on PATH, or remove that link.
     InstallCli,
     UninstallCli,
     Close,
@@ -1133,7 +1133,7 @@ pub enum Effect {
     Close,
 }
 
-/// The outside world the window changes: Scrawl's hotkeys and the config file.
+/// The outside world the window changes: Apparent's hotkeys and the config file.
 pub trait Host {
     fn shortcuts(&self) -> Shortcuts;
     /// Registers both, keeping the old ones if macOS refuses one.
@@ -1141,7 +1141,7 @@ pub trait Host {
     fn pause_shortcuts(&mut self, paused: bool);
     fn config_path(&self) -> PathBuf;
     fn set_login_item(&mut self, on: bool) -> anyhow::Result<()>;
-    /// Scrawl's binary and the folders `scrawl` may be linked into.
+    /// Apparent's binary and the folders `apparent` may be linked into.
     fn command_line(&self) -> crate::command_line::Places;
 }
 
@@ -1182,8 +1182,8 @@ impl Panel {
     fn finish_update_check(&mut self, result: Result<&'static str, String>) {
         self.update_check.checking = false;
         self.update_check.message = Some(match result {
-            Ok("installed; restart Scrawl to use it") | Ok("already installed; restart Scrawl to use it") =>
-                "Update installed. Restart Scrawl to use it.".into(),
+            Ok("installed; restart Apparent to use it") | Ok("already installed; restart Apparent to use it") =>
+                "Update installed. Restart Apparent to use it.".into(),
             Ok("up to date") => "No new update is available on this channel.".into(),
             Ok(other) => other.into(),
             Err(error) => format!("Could not check for updates: {error}"),
@@ -1280,7 +1280,7 @@ impl Panel {
 
     fn note_cli(&mut self, verb: &str, result: anyhow::Result<()>) {
         self.cli_error = result.err().map(|error| {
-            crate::capture::scrawl_log(format!("Command-line tool: {verb}: {error:#}"));
+            crate::capture::apparent_log(format!("Command-line tool: {verb}: {error:#}"));
             format!("Couldn't {verb} it: {error}.")
         });
     }
@@ -1307,7 +1307,7 @@ impl Panel {
             Ok(()) => {
                 self.error = None;
                 if let Err(error) = save_shortcut_in(&host.config_path(), kind, &cfg) {
-                    crate::capture::scrawl_log(format!("Saving the shortcut failed: {error:#}"));
+                    crate::capture::apparent_log(format!("Saving the shortcut failed: {error:#}"));
                 }
             }
             Err(refused) => self.error = Some((refused, Rejection::Refused.message())),
@@ -1318,13 +1318,13 @@ impl Panel {
         let path = host.config_path();
         let write = |key: &str, value: serde_json::Value| {
             if let Err(error) = crate::handoff::set_config_value_in(&path, key, value) {
-                crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
             }
         };
         match (key, value) {
             ("agentDemoVideo", serde_json::Value::Bool(on)) => {
                 if let Err(error) = crate::handoff::set_experiment_in(&path, "agentDemoVideo", *on) {
-                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                    crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
                 }
             }
             ("launchAtLogin", serde_json::Value::Bool(on)) => {
@@ -1334,13 +1334,13 @@ impl Panel {
                     .and_then(|config| config.get(key).cloned())
                     .unwrap_or(serde_json::Value::Null);
                 if let Err(error) = crate::handoff::set_config_value_in(&path, key, (*on).into()) {
-                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                    crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
                     return Effect::None;
                 }
                 if let Err(error) = host.set_login_item(*on) {
-                    crate::capture::scrawl_log(format!("Launch at login: {error:#}"));
+                    crate::capture::apparent_log(format!("Launch at login: {error:#}"));
                     if let Err(rollback) = crate::handoff::set_config_value_in(&path, key, previous) {
-                        crate::capture::scrawl_log(format!("Restoring {key} failed: {rollback:#}"));
+                        crate::capture::apparent_log(format!("Restoring {key} failed: {rollback:#}"));
                     }
                     return Effect::None;
                 }
@@ -1352,7 +1352,7 @@ impl Panel {
                 if let Err(error) = crate::phone::change_remote_phone_setting(|| {
                     crate::handoff::set_config_value_in(&path, key, (*on).into())
                 }) {
-                    crate::capture::scrawl_log(format!("Saving {key} failed: {error:#}"));
+                    crate::capture::apparent_log(format!("Saving {key} failed: {error:#}"));
                 }
             }
             ("videoExport" | "lowerPlayback", serde_json::Value::Bool(on)) => {
@@ -1371,7 +1371,7 @@ impl Panel {
             ("microphone", serde_json::Value::String(id)) => {
                 let inputs = self.inputs.clone().unwrap_or_default();
                 if let Err(error) = crate::mic::save_in(&path, id, &inputs) {
-                    crate::capture::scrawl_log(format!("Saving microphone failed: {error:#}"));
+                    crate::capture::apparent_log(format!("Saving microphone failed: {error:#}"));
                 }
             }
             ("transcriber", serde_json::Value::String(name)) => {
@@ -1415,7 +1415,7 @@ impl Panel {
                     write(key, dir.trim().into());
                     return Effect::Measure;
                 }
-                crate::capture::scrawl_log(format!("Settings: ignoring capturesDir={dir}"));
+                crate::capture::apparent_log(format!("Settings: ignoring capturesDir={dir}"));
             }
             ("retention", serde_json::Value::String(id)) => {
                 if let Some(preset) = crate::retention::Preset::ALL
@@ -1423,12 +1423,12 @@ impl Panel {
                     .find(|p| preset_id(*p) == id)
                 {
                     if let Err(error) = preset.policy().save_to(&path) {
-                        crate::capture::scrawl_log(format!("Saving retention failed: {error:#}"));
+                        crate::capture::apparent_log(format!("Saving retention failed: {error:#}"));
                     }
                     return Effect::Measure;
                 }
             }
-            _ => crate::capture::scrawl_log(format!("Settings: ignoring {key}={value}")),
+            _ => crate::capture::apparent_log(format!("Settings: ignoring {key}={value}")),
         }
         Effect::None
     }
@@ -1595,7 +1595,7 @@ fn wayland() -> bool {
     false
 }
 
-/// Whether this copy can check for updates: Sparkle in Scrawl.app; on Windows the releases
+/// Whether this copy can check for updates: Sparkle in Apparent.app; on Windows the releases
 /// page always opens.
 fn updates_available() -> bool {
     #[cfg(target_os = "macos")]
@@ -1615,7 +1615,7 @@ fn check_for_updates() {
 }
 
 #[cfg(target_os = "windows")]
-const RELEASES_URL: &str = "https://github.com/kitlangton/scrawl/releases/latest";
+const RELEASES_URL: &str = "https://github.com/tryapparent/apparent/releases/latest";
 
 // MARK: The live window
 
@@ -1752,7 +1752,7 @@ impl Session {
         })
     }
 
-    /// `scrawl-helper settings`, reading its actions off stdout.
+    /// `apparent-helper settings`, reading its actions off stdout.
     fn spawn_helper(
         pane: Option<Pane>,
         events: std::sync::Arc<dyn Fn(Event) + Send + Sync>,
@@ -1786,7 +1786,7 @@ impl Session {
                     match serde_json::from_str::<Action>(&line) {
                         Ok(action) => events(Event::Action(action)),
                         Err(error) => {
-                            crate::capture::scrawl_log(format!("settings: {error}: {line}"))
+                            crate::capture::apparent_log(format!("settings: {error}: {line}"))
                         }
                     }
                 }
@@ -1801,7 +1801,7 @@ impl Session {
     pub fn event(&mut self, event: Event, host: &mut dyn Host) -> Effect {
         let effect = match event {
             Event::Action(action) => {
-                crate::capture::scrawl_log(format!("settings: {action:?}"));
+                crate::capture::apparent_log(format!("settings: {action:?}"));
                 self.panel.on(action, host)
             }
             Event::Grants(grants) => {
@@ -1828,7 +1828,7 @@ impl Session {
             }
         };
         let result = match effect {
-            // Attributed to whichever process asks, so Scrawl itself asks.
+            // Attributed to whichever process asks, so Apparent itself asks.
             Effect::Request(Permission::ScreenRecording) => {
                 crate::capture::request_screen_capture();
                 Effect::None
@@ -2010,7 +2010,7 @@ mod tests {
     impl TempDir {
         fn new(name: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "scrawl-settings-{name}-{}-{}",
+                "apparent-settings-{name}-{}-{}",
                 std::process::id(),
                 crate::now_epoch_ms()
             ));
@@ -2067,7 +2067,7 @@ mod tests {
         panel.on(Action::DismissUpdateCheck, &mut host);
         assert!(panel.view(&host).update_check.message.is_none());
         panel.on(Action::CheckForUpdates, &mut host);
-        panel.finish_update_check(Ok("already installed; restart Scrawl to use it"));
+        panel.finish_update_check(Ok("already installed; restart Apparent to use it"));
         assert!(panel.view(&host).update_check.message.unwrap().contains("Restart"));
         panel.on(Action::CheckForUpdates, &mut host);
         panel.finish_update_check(Err("feed unavailable".into()));
@@ -2182,7 +2182,7 @@ mod tests {
         let mut system = pressed(R, CTRL_OPT, "r");
         system.reserved = true;
         assert_eq!(no(system), Rejection::Reserved(label(CTRL_OPT, "R")));
-        // Scrawl's other shortcut.
+        // Apparent's other shortcut.
         assert_eq!(
             no(pressed(V, OPT_SHIFT, "v")),
             Rejection::Taken(ShortcutKind::Paste)
@@ -2843,12 +2843,12 @@ mod tests {
 
         std::fs::write(
             &host.path,
-            r#"{"transcriber":"apple","transcribeCommand":["/opt/stt/whisper-scrawl","{audio}"]}"#,
+            r#"{"transcriber":"apple","transcribeCommand":["/opt/stt/whisper-apparent","{audio}"]}"#,
         )
         .unwrap();
         let view = panel.view(&host).transcriber;
         assert_eq!(view.engine, "apple");
-        assert_eq!(view.command.as_deref(), Some("whisper-scrawl"));
+        assert_eq!(view.command.as_deref(), Some("whisper-apparent"));
 
         panel.on(
             Action::Set {
@@ -2968,7 +2968,7 @@ mod tests {
         assert_eq!(parse(r#"{"action":"uninstall-cli"}"#), Action::UninstallCli);
     }
 
-    /// Links are a unix thing; Windows has no Scrawl.app to link (`State::Unavailable`).
+    /// Links are a unix thing; Windows has no Apparent.app to link (`State::Unavailable`).
     #[cfg(unix)]
     #[test]
     fn the_command_line_row_installs_uninstalls_and_says_why_not() {
@@ -2981,33 +2981,33 @@ mod tests {
         assert_eq!(
             row.caption,
             if cfg!(target_os = "linux") {
-                "The command-line tool links to Scrawl's AppImage; run Scrawl from one."
+                "The command-line tool links to Apparent's AppImage; run Apparent from one."
             } else {
-                "The command-line tool works in the installed Scrawl.app."
+                "The command-line tool works in the installed app."
             }
         );
         assert_eq!(
             panel.view(&host).skill_command,
-            "bunx skills add kitlangton/scrawl"
+            "bunx skills add tryapparent/apparent"
         );
 
-        let macos = dir.0.join("Scrawl.app/Contents/MacOS");
+        let macos = dir.0.join("Apparent.app/Contents/MacOS");
         std::fs::create_dir_all(&macos).unwrap();
-        std::fs::write(macos.join("scrawl"), "").unwrap();
-        host.cli.target = Some(std::fs::canonicalize(macos.join("scrawl")).unwrap());
+        std::fs::write(macos.join("apparent"), "").unwrap();
+        host.cli.target = Some(std::fs::canonicalize(macos.join("apparent")).unwrap());
         let row = panel.view(&host).command_line;
         assert_eq!(
             (row.button, row.enabled, row.path),
             (Some("install"), true, None)
         );
         assert!(
-            row.caption.starts_with("Links scrawl into "),
+            row.caption.starts_with("Links apparent into "),
             "{}",
             row.caption
         );
 
         panel.on(Action::InstallCli, &mut host);
-        let link = dir.0.join("bin/scrawl");
+        let link = dir.0.join("bin/apparent");
         assert_eq!(
             std::fs::read_link(&link).unwrap(),
             host.cli.target.clone().unwrap()
@@ -3023,13 +3023,13 @@ mod tests {
         assert!(link.symlink_metadata().is_err());
         assert_eq!(panel.view(&host).command_line.button, Some("install"));
 
-        // Someone else's scrawl stays, and the row says so.
+        // Someone else's apparent stays, and the row says so.
         std::fs::write(&link, "other").unwrap();
         let row = panel.view(&host).command_line;
         assert_eq!((row.button, row.error), (None, true));
         assert!(
             row.caption
-                .ends_with("is another program, so Scrawl leaves it alone.")
+                .ends_with("is another program, so Apparent leaves it alone.")
         );
         panel.on(Action::InstallCli, &mut host);
         assert_eq!(std::fs::read_to_string(&link).unwrap(), "other");

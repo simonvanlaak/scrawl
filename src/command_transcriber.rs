@@ -1,11 +1,11 @@
-//! The command transcriber (`"transcriber": "command"`): Scrawl runs a program the user names
+//! The command transcriber (`"transcriber": "command"`): Apparent runs a program the user names
 //! (`"transcribeCommand"`, an argv array) on the recording's WAV and reads one versioned JSON
-//! transcript from its stdout. A small wrapper adapts any local model to it; Scrawl knows about
+//! transcript from its stdout. A small wrapper adapts any local model to it; Apparent knows about
 //! none of them.
 //!
 //! The program runs without a shell, in its own process group, with stdin `/dev/null` and
 //! stderr discarded, under a wall-clock limit and an 8 MiB stdout cap. On timeout or overflow
-//! the whole group is killed, and Scrawl never waits on a pipe a leftover process still holds.
+//! the whole group is killed, and Apparent never waits on a pipe a leftover process still holds.
 //!
 //! Anything the program says or is given (stdout, stderr, argv, environment, transcript text)
 //! can hold what the user said, so none of it is logged or put in an error: every failure is a
@@ -29,7 +29,7 @@ use serde_json::{Map, Value};
 
 use crate::model::{TranscriptData, TranscriptSegment, WordTiming};
 
-/// The only protocol version (`SCRAWL_TRANSCRIBE_VERSION`, the output's `version`).
+/// The only protocol version (`APPARENT_TRANSCRIBE_VERSION`, the output's `version`).
 const VERSION: u64 = 1;
 /// Most stdout read from the program.
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
@@ -218,8 +218,8 @@ impl Program {
         let deadline = Instant::now() + limit;
         let mut child = std::process::Command::new(&self.argv[0])
             .args(self.arguments(wav))
-            .env("SCRAWL_TRANSCRIBE_VERSION", VERSION.to_string())
-            .env("SCRAWL_AUDIO", wav)
+            .env("APPARENT_TRANSCRIBE_VERSION", VERSION.to_string())
+            .env("APPARENT_AUDIO", wav)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -228,7 +228,7 @@ impl Program {
             .map_err(|error| Failure::Spawn(error.kind()))?;
         let pid = child.id() as libc::pid_t;
         // Read here, without blocking, so the pipe is closed on every return: a process that
-        // left the group can't keep a reader of Scrawl's waiting on it.
+        // left the group can't keep a reader of Apparent's waiting on it.
         let mut stdout = child.stdout.take().filter(nonblocking);
         if stdout.is_none() {
             kill_group(pid);
@@ -555,7 +555,7 @@ mod tests {
         fn new() -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "scrawl command {}-{}",
+                "apparent command {}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
@@ -746,7 +746,7 @@ mod tests {
         let body = format!(
             r#"out='{}'
 printf '%s\n' "$#" "$@" > "$out"
-printf '%s\n' "$SCRAWL_TRANSCRIBE_VERSION" "$SCRAWL_AUDIO" >> "$out"
+printf '%s\n' "$APPARENT_TRANSCRIBE_VERSION" "$APPARENT_AUDIO" >> "$out"
 cat >> "$out"
 echo '{{"version":1,"text":"ok"}}'"#,
             log.display()
@@ -1145,7 +1145,7 @@ echo '{{"version":1,"text":"ok"}}'"#,
     }
 
     #[test]
-    fn a_child_that_keeps_stdout_open_does_not_hold_scrawl() {
+    fn a_child_that_keeps_stdout_open_does_not_hold_apparent() {
         let dir = Dir::new();
         let pid = dir.0.join("pid");
         let program = dir.program(
@@ -1163,11 +1163,11 @@ echo '{{"version":1,"text":"ok"}}'"#,
     }
 
     #[test]
-    fn stdout_held_outside_the_group_is_closed_when_scrawl_gives_up() {
+    fn stdout_held_outside_the_group_is_closed_when_apparent_gives_up() {
         let dir = Dir::new();
         let (leader, holder) = (dir.0.join("leader"), dir.0.join("holder"));
         // `set -m` puts the background holder in a process group of its own, out of reach of
-        // the group kill. It keeps stdout, then reports whether Scrawl still reads it. The probe
+        // the group kill. It keeps stdout, then reports whether Apparent still reads it. The probe
         // is `/bin/echo` because bash 3.2 (macOS `/bin/sh`) keeps a failed builtin `echo`
         // buffered and writes it out with the next one, into the report.
         let program = dir.program(
@@ -1320,7 +1320,7 @@ mod tests {
 
     #[test]
     fn there_is_no_program_off_unix() {
-        let program = std::env::temp_dir().join("whisper-scrawl");
+        let program = std::env::temp_dir().join("whisper-apparent");
         assert_eq!(
             Program::new(vec![program.to_string_lossy().into_owned()], None),
             Err(Unusable::Unsupported)

@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a Scrawl server said became of a recording it took: the JSON of its 2xx, or the `.sent`
+/// What a Apparent server said became of a recording it took: the JSON of its 2xx, or the `.sent`
 /// and `.delivery` markers a Mac writes back over USB.
 ///
 /// The Mac answers once it has built the bundle, or while it is still processing:
@@ -19,7 +19,7 @@ public enum IngestReply: Equatable, Sendable {
   /// Reads a 2xx response body.
   init(body: Data) {
     let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
-    self.init(json: json, fallbackTitle: "Scrawl")
+    self.init(json: json, fallbackTitle: "Apparent")
   }
 
   /// Reads the USB markers: `.sent` holds the session's name; `.delivery`, written first by

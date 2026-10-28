@@ -4,14 +4,14 @@
 // windows (a terminal running OpenCode, a browser app, an editor, chat, Finder, Notes), the menu
 // bar and Dock, narration with word timings, Shift-drawn ink, clicks, drags, scrolls, human-ish
 // cursor motion, windows moving and focusing. The script renders every distinct screen state
-// with Playwright at Scrawl's Screen sampling size (2560 px wide) and writes `scenario.json`
-// (what Scrawl's input monitors and window log would have recorded) plus `truth.json` (the crop a
-// person would want for each stretch of the capture, in points). `scrawl fixture` then builds a
+// with Playwright at Apparent's Screen sampling size (2560 px wide) and writes `scenario.json`
+// (what Apparent's input monitors and window log would have recorded) plus `truth.json` (the crop a
+// person would want for each stretch of the capture, in points). `apparent fixture` then builds a
 // real bundle from it: keyframe selection, ink and click ripples, and auto-crop.
 //
 //   bun scripts/autocrop-corpus.mjs <out-dir> [scenario-name ...]
-//   for s in <out-dir>/*/scenario.json; do scrawl fixture $s --out ${s%/scenario.json}.scrawl; done
-//   scrawl autocrop-eval <out-dir>
+//   for s in <out-dir>/*/scenario.json; do apparent fixture $s --out ${s%/scenario.json}.apparent; done
+//   apparent autocrop-eval <out-dir>
 //
 // Playwright comes from any node_modules that has it (this repo's site/ does).
 
@@ -666,7 +666,7 @@ async function run(page, sc) {
   }
   path.sort((a, b) => a[0] - b[0]);
   // Cursor samples at 15 Hz: between waypoints the hand moves late and fast (minimum jerk, a
-  // slight arc), then holds still; Scrawl drops samples within 2 pt of the previous one.
+  // slight arc), then holds still; Apparent drops samples within 2 pt of the previous one.
   const cursor = [];
   let last = null;
   for (let t = 0; t <= sc.duration; t += 66) {

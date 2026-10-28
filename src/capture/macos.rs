@@ -20,7 +20,7 @@ use super::{
     CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY,
     CARBON_SHIFT_KEY, FRAME_SAMPLE_INTERVAL, LiveOverlayEvent, Sampler, SharedCaptureTelemetry,
     ShortcutConfig, ShortcutKind, capture_size, clean_label, hotkey_combos, pick_display,
-    poll_clicks, scrawl_log, track_shift_ink,
+    poll_clicks, apparent_log, track_shift_ink,
 };
 use crate::model::{CaptureMode, InteractionEvent, RgbaFrame, TargetInfo};
 
@@ -32,9 +32,9 @@ pub(super) const MOUSE_SOURCE: &str = "the mouse monitor";
 pub(super) const KEY_SOURCE: &str = "the key tap";
 pub(super) const NO_KEY_SOURCE: &str = "nowhere (Accessibility off; the record shortcut still works)";
 
-/// `~/Library/Logs/Scrawl`.
+/// `~/Library/Logs/Apparent`.
 pub fn log_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join("Library/Logs/Scrawl"))
+    dirs::home_dir().map(|home| home.join("Library/Logs/Apparent"))
 }
 
 pub fn main_display_id() -> u32 {
@@ -46,7 +46,7 @@ pub(super) fn raw_windows_now() -> Vec<crate::windows::RawWindow> {
     objc2::rc::autoreleasepool(|_| crate::windows::raw_windows())
 }
 
-/// Whether `pid` runs this Scrawl's `scrawl-helper` (the iPhone mirror, Settings, onboarding, the
+/// Whether `pid` runs this Apparent's `apparent-helper` (the iPhone mirror, Settings, onboarding, the
 /// permission panel), going by its executable, so a helper started by another helper counts too.
 pub(super) fn is_helper_process(pid: i32) -> bool {
     static HELPER: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
@@ -323,7 +323,7 @@ pub fn init_keyboard_layout_map() -> &'static std::collections::HashMap<char, u1
             unsafe { CFRelease(source) };
         }
         let _ = LAYOUT_KEY_CHARS.set(chars);
-        scrawl_log(format!(
+        apparent_log(format!(
             "keyboard layout resolved: 's'={:?} 'z'={:?}",
             map.get(&'s'),
             map.get(&'z')
@@ -362,7 +362,7 @@ unsafe extern "C" fn carbon_hotkey_handler(
     event: *mut c_void,
     user_data: *mut c_void,
 ) -> i32 {
-    scrawl_log(format!(
+    apparent_log(format!(
         "carbon_hotkey_handler entered: event={event:p} user_data={user_data:p}"
     ));
     if event.is_null() || user_data.is_null() {
@@ -385,7 +385,7 @@ unsafe extern "C" fn carbon_hotkey_handler(
     };
     let sig = hotkey_id.signature;
     let id = hotkey_id.id;
-    scrawl_log(format!(
+    apparent_log(format!(
         "carbon_hotkey_handler GetEventParameter status={status} sig={sig:#x} id={id}"
     ));
     if status == 0 && sig == HOTKEY_SIG {
@@ -416,7 +416,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
             let mut handler_ref: *mut c_void = ptr::null_mut();
             let dispatcher = GetEventDispatcherTarget();
             let app_target = GetApplicationEventTarget();
-            scrawl_log(format!(
+            apparent_log(format!(
                 "install_global_hotkeys: dispatcher={dispatcher:p} app_target={app_target:p} s_code={s_code}"
             ));
             if !dispatcher.is_null() {
@@ -428,7 +428,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                     user_data,
                     &raw mut handler_ref,
                 );
-                scrawl_log(format!(
+                apparent_log(format!(
                     "InstallEventHandler(dispatcher) -> rc={rc} handler_ref={handler_ref:p}"
                 ));
             }
@@ -442,7 +442,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                     user_data,
                     &raw mut app_handler_ref,
                 );
-                scrawl_log(format!(
+                apparent_log(format!(
                     "InstallEventHandler(app_target) -> rc={rc} handler_ref={app_handler_ref:p}"
                 ));
             }
@@ -451,7 +451,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
     });
     let (record, paste) = telemetry.shortcuts();
     if let Err(kind) = register_shortcuts(state_mutex, &record, &paste) {
-        scrawl_log(format!(
+        apparent_log(format!(
             "install_global_hotkeys: {kind:?} shortcut could not be registered"
         ));
     }
@@ -508,7 +508,7 @@ fn register_shortcuts(
                     &raw mut r,
                 )
             };
-            scrawl_log(format!(
+            apparent_log(format!(
                 "RegisterEventHotKey({kind:?} {}, code={code}, mods={mods}) -> rc={rc} ref={r:p}",
                 if i == 0 { cfg.label.as_str() } else { "alias" }
             ));
@@ -548,7 +548,7 @@ pub fn set_shortcuts(
     Ok(())
 }
 
-/// While Settings records a new shortcut, Scrawl's own stop answering, so pressing the current
+/// While Settings records a new shortcut, Apparent's own stop answering, so pressing the current
 /// combo reaches the recorder instead of starting a capture.
 pub fn pause_shortcuts(telemetry: &SharedCaptureTelemetry, paused: bool) {
     if telemetry.shortcuts_paused.swap(paused, Ordering::AcqRel) == paused {
@@ -574,11 +574,11 @@ pub fn update_global_shortcut(telemetry: &SharedCaptureTelemetry, config: Shortc
     let (_, paste) = telemetry.shortcuts();
     match set_shortcuts(telemetry, config.clone(), paste) {
         Ok(()) => crate::settings::save_shortcut(ShortcutKind::Record, &config),
-        Err(kind) => scrawl_log(format!("update_global_shortcut: {kind:?} refused")),
+        Err(kind) => apparent_log(format!("update_global_shortcut: {kind:?} refused")),
     }
 }
 
-/// Whether this running copy of Scrawl may record the screen, by `CGPreflightScreenCaptureAccess`,
+/// Whether this running copy of Apparent may record the screen, by `CGPreflightScreenCaptureAccess`,
 /// which keeps its first answer for the life of the process. See `screen_capture_usable`.
 pub fn screen_capture_granted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
@@ -588,12 +588,12 @@ pub fn screen_capture_granted() -> bool {
 static SCREEN_PROBE_OK: AtomicBool = AtomicBool::new(false);
 static SCREEN_PROBE_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
-/// Whether this copy of Scrawl can capture the screen now: `CGPreflightScreenCaptureAccess`, or
+/// Whether this copy of Apparent can capture the screen now: `CGPreflightScreenCaptureAccess`, or
 /// a ScreenCaptureKit capture that already worked here. With `probe` (only once a fresh helper
 /// says Screen Recording is granted, so no prompt can come of it, and never on the UI thread) a
 /// stale preflight is checked with a real one-frame capture, at most every 2 s. Whether a grant
 /// reaches a running process this way on macOS 26 and 27 is what the probe finds out; when it
-/// does, Scrawl doesn't relaunch.
+/// does, Apparent doesn't relaunch.
 pub fn screen_capture_usable(probe: bool) -> bool {
     if screen_capture_granted() || SCREEN_PROBE_OK.load(Ordering::Acquire) {
         return true;
@@ -612,7 +612,7 @@ pub fn screen_capture_usable(probe: bool) -> bool {
     }
     let started = Instant::now();
     let result = screen_capture_probe();
-    scrawl_log(format!(
+    apparent_log(format!(
         "screen probe after a grant, without relaunching: {} in {} ms",
         match &result {
             Ok((w, h)) => format!("captured {w}x{h}"),
@@ -629,7 +629,7 @@ pub fn screen_capture_usable(probe: bool) -> bool {
 
 /// One small ScreenCaptureKit screenshot of the first display: `SCShareableContent`, then
 /// `SCScreenshotManager`. Returns the image size. Asks for Screen Recording if it was never
-/// decided, so only call it once it's known to be granted (or from `scrawl sck-probe`).
+/// decided, so only call it once it's known to be granted (or from `apparent sck-probe`).
 pub fn screen_capture_probe() -> Result<(u32, u32), String> {
     let content = SCShareableContent::get().map_err(|e| format!("SCShareableContent: {e:?}"))?;
     let display = content
@@ -660,7 +660,7 @@ pub fn request_screen_capture() {
 }
 
 /// Whether ⌥⇧V may post ⌘V into the app in front (System Settings › Accessibility). Unlike
-/// Screen Recording, a grant shows up here while Scrawl runs.
+/// Screen Recording, a grant shows up here while Apparent runs.
 pub fn accessibility_granted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
@@ -974,7 +974,7 @@ pub fn ensure_external_app_active() {
     }
 }
 
-/// The frontmost app's pid, or the last external one while Scrawl itself is in front.
+/// The frontmost app's pid, or the last external one while Apparent itself is in front.
 pub fn frontmost_external_pid() -> Option<i32> {
     use objc2_app_kit::NSWorkspace;
     let our_pid = std::process::id() as i32;
@@ -1071,11 +1071,11 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                 build_sck_filter_and_config(&sampler_target, &cur_excluded)
             {
                 // The recording must hide the same windows as the candidates, or
-                // keyframes decoded from it could show Scrawl's own overlays.
+                // keyframes decoded from it could show Apparent's own overlays.
                 if let Some(ref stream) = stream
                     && let Err(error) = stream.update_content_filter(&new_filter)
                 {
-                    scrawl_log(format!("Recording filter update failed: {error:?}"));
+                    apparent_log(format!("Recording filter update failed: {error:?}"));
                 }
                 filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
             }
@@ -1128,7 +1128,7 @@ fn build_sck_filter_and_config(
         Ok(c) => c,
         Err(err) => {
             // Screen Recording is asked for in onboarding, never mid-capture.
-            scrawl_log(format!(
+            apparent_log(format!(
                 "SCShareableContent::get() failed: {err:?} (screen recording granted: {})",
                 screen_capture_granted()
             ));
@@ -1150,8 +1150,8 @@ fn build_sck_filter_and_config(
         .find(|d| d.display_id() == target.display_id)
         .or_else(|| content.displays().into_iter().next())
     {
-        // Exclude Scrawl's floating HUD pill and Metal overlay windows by explicit window ID
-        // (and any non-layer-0 Scrawl panels), while keeping Scrawl's normal Review window visible.
+        // Exclude Apparent's floating HUD pill and Metal overlay windows by explicit window ID
+        // (and any non-layer-0 Apparent panels), while keeping Apparent's normal Review window visible.
         let excluded_overlays: Vec<SCWindow> = content
             .windows()
             .into_iter()
@@ -1174,7 +1174,7 @@ fn build_sck_filter_and_config(
         None
     }?;
 
-    // Full-screen captures get auto-cropped to a window or region afterwards (`scrawl autocrop`),
+    // Full-screen captures get auto-cropped to a window or region afterwards (`apparent autocrop`),
     // so they need enough pixels for a crop to a quarter of the screen to stay sharp.
     let long_edge = if target.mode == CaptureMode::Display {
         2560.0
@@ -1321,7 +1321,7 @@ impl SystemPrompts {
         let ids = crate::windows::system_prompts_over(&raw, frame);
         let appeared = ids.iter().any(|id| !self.ids.contains(id));
         if appeared {
-            scrawl_log(format!("system prompt over the capture: windows {ids:?}"));
+            apparent_log(format!("system prompt over the capture: windows {ids:?}"));
         } else {
             self.clear_until_ms = elapsed.as_millis() as u64;
         }
@@ -1384,7 +1384,7 @@ fn check_key_tap(telemetry: &Arc<SharedCaptureTelemetry>) -> bool {
             }
         };
     if telemetry.tap_live.swap(live, Ordering::AcqRel) != live {
-        scrawl_log(if live {
+        apparent_log(if live {
             "key tap live"
         } else if !trusted {
             "key tap off: Accessibility is off"
@@ -1408,7 +1408,7 @@ fn check_key_tap(telemetry: &Arc<SharedCaptureTelemetry>) -> bool {
 pub fn start_global_input_tap(telemetry: Arc<SharedCaptureTelemetry>) {
     let live = install_mouse_monitor(Arc::clone(&telemetry));
     telemetry.mouse_live.store(live, Ordering::Release);
-    scrawl_log(format!(
+    apparent_log(format!(
         "mouse monitor {}",
         if live {
             "installed"
@@ -1417,7 +1417,7 @@ pub fn start_global_input_tap(telemetry: Arc<SharedCaptureTelemetry>) {
         }
     ));
     let _ = thread::Builder::new()
-        .name("scrawl-hid-poller".into())
+        .name("apparent-hid-poller".into())
         .spawn(move || run_global_hid_poller(telemetry));
 }
 
@@ -1439,8 +1439,8 @@ const MOUSE_MONITOR_MASK: u64 = (1 << EVENT_LEFT_MOUSE_DOWN)
     | (1 << EVENT_SCROLL_WHEEL);
 
 /// `+[NSEvent addGlobalMonitorForEventsMatchingMask:handler:]` for mouse buttons and scrolls.
-/// AppKit sends it events bound for other apps only, so clicks on Scrawl's own windows (the stop
-/// control, the HUD) never arrive; those on `scrawl-helper`'s windows do, and `mouse_event` drops
+/// AppKit sends it events bound for other apps only, so clicks on Apparent's own windows (the stop
+/// control, the HUD) never arrive; those on `apparent-helper`'s windows do, and `mouse_event` drops
 /// them. The monitor lives as long as the app.
 fn install_mouse_monitor(telemetry: Arc<SharedCaptureTelemetry>) -> bool {
     use objc2::msg_send;
@@ -1453,7 +1453,7 @@ fn install_mouse_monitor(telemetry: Arc<SharedCaptureTelemetry>) -> bool {
         let cg: *mut OpaqueCgEvent = unsafe { msg_send![event, CGEvent] };
         if !cg.is_null() {
             mouse_event(&telemetry, cg.cast(), |x, y| {
-                telemetry.on_scrawl_window(x, y)
+                telemetry.on_apparent_window(x, y)
             });
         }
     });
@@ -1464,12 +1464,12 @@ fn install_mouse_monitor(telemetry: Arc<SharedCaptureTelemetry>) -> bool {
 }
 
 /// A mouse button or scroll in another app, from the mouse monitor (main thread). Presses and
-/// scrolls on Scrawl's helper windows (`on_scrawl`: Settings, onboarding) aren't part of what is
+/// scrolls on Apparent's helper windows (`on_apparent`: Settings, onboarding) aren't part of what is
 /// being shown.
 fn mouse_event(
     telemetry: &SharedCaptureTelemetry,
     event: EventRef,
-    on_scrawl: impl Fn(f64, f64) -> bool,
+    on_apparent: impl Fn(f64, f64) -> bool,
 ) {
     if !telemetry.active.load(Ordering::Acquire) {
         return;
@@ -1482,7 +1482,7 @@ fn mouse_event(
     let loc = unsafe { CGEventGetLocation(event) };
     match event_type {
         // A ⇧-press is never a click: a ⇧-click drops a pin, a ⇧-drag is ink (the poller's).
-        EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN if !on_scrawl(loc.x, loc.y) => {
+        EVENT_LEFT_MOUSE_DOWN | EVENT_RIGHT_MOUSE_DOWN if !on_apparent(loc.x, loc.y) => {
             if !pure_shift {
                 telemetry.pointer_down(t_ms, loc.x, loc.y);
             } else if event_type == EVENT_LEFT_MOUSE_DOWN {
@@ -1501,7 +1501,7 @@ fn mouse_event(
                 unsafe { CGEventGetIntegerValueField(event, SCROLL_WHEEL_DELTA_AXIS_1) } as f32;
             let dx =
                 unsafe { CGEventGetIntegerValueField(event, SCROLL_WHEEL_DELTA_AXIS_2) } as f32;
-            if (dx.abs() > 0.0 || dy.abs() > 0.0) && !on_scrawl(loc.x, loc.y) {
+            if (dx.abs() > 0.0 || dy.abs() > 0.0) && !on_apparent(loc.x, loc.y) {
                 let (nx, ny, _, _) = telemetry.normalize_point(loc.x, loc.y);
                 telemetry
                     .events
@@ -1524,7 +1524,7 @@ fn mouse_event(
 /// Stops the key tap (Accessibility was turned off). The port and its callback's `Arc` are left
 /// alive: `check_key_tap` may still hold the old pointer.
 fn stop_key_tap(telemetry: &SharedCaptureTelemetry) {
-    scrawl_log("Accessibility is off; stopping the key tap");
+    apparent_log("Accessibility is off; stopping the key tap");
     let tap = telemetry.tap_port.swap(0, Ordering::AcqRel) as *mut c_void;
     if !tap.is_null() {
         unsafe { CGEventTapEnable(tap, false) };
@@ -1544,7 +1544,7 @@ fn stop_key_tap(telemetry: &SharedCaptureTelemetry) {
 fn spawn_key_tap(telemetry: Arc<SharedCaptureTelemetry>) {
     let starting = Arc::clone(&telemetry);
     let spawned = thread::Builder::new()
-        .name("scrawl-key-tap".into())
+        .name("apparent-key-tap".into())
         .spawn(move || {
             let mask = 1_u64 << EVENT_KEY_DOWN;
             let user_info = Arc::into_raw(Arc::clone(&telemetry))
@@ -1553,7 +1553,7 @@ fn spawn_key_tap(telemetry: Arc<SharedCaptureTelemetry>) {
             // tap = 1 (kCGSessionEventTap), place = 1 (kCGTailAppendEventTap),
             // options = 0 (kCGEventTapOptionDefault).
             let tap = unsafe { CGEventTapCreate(1, 1, 0, mask, key_tap_callback, user_info) };
-            scrawl_log(format!(
+            apparent_log(format!(
                 "key tap: CGEventTapCreate -> {tap:p} (Accessibility {})",
                 if accessibility_granted() { "on" } else { "off" }
             ));
@@ -1790,7 +1790,7 @@ fn run_global_hid_poller(telemetry: Arc<SharedCaptureTelemetry>) {
             buttons,
             (loc.x, loc.y),
             shift && !cmd && !ctrl && !alt,
-            |x, y| telemetry.on_scrawl_window(x, y),
+            |x, y| telemetry.on_apparent_window(x, y),
         );
 
         let pure_shift = shift && !cmd && !ctrl && !alt && !await_shift_release;
@@ -2003,7 +2003,7 @@ mod tests {
     /// monitor like another app's: 87 captures ended "clicked text “Finish”", with a keyframe and
     /// a ripple for it. Presses, ⇧-presses and scrolls there are dropped; the app's are kept.
     #[test]
-    fn presses_and_scrolls_on_scrawl_s_helper_windows_are_not_recorded() {
+    fn presses_and_scrolls_on_apparent_s_helper_windows_are_not_recorded() {
         unsafe extern "C" {
             fn CGEventSetType(event: EventRef, kind: u32);
             fn CGEventSetLocation(event: EventRef, at: CGPoint);
@@ -2011,11 +2011,11 @@ mod tests {
         }
         let telemetry = session(1000.0, 1000.0);
         // Settings covers the right half.
-        let on_scrawl = |x: f64, _: f64| x >= 500.0;
+        let on_apparent = |x: f64, _: f64| x >= 500.0;
         let send = |kind, (x, y), flags| {
             let cg = unsafe { CGEventCreateMouseEvent(ptr::null(), kind, CGPoint { x, y }, 0) };
             unsafe { CGEventSetFlags(cg, flags) };
-            mouse_event(&telemetry, cg, on_scrawl);
+            mouse_event(&telemetry, cg, on_apparent);
             unsafe { CFRelease(cg.cast()) };
         };
         let scroll = |(x, y)| {
@@ -2025,7 +2025,7 @@ mod tests {
                 CGEventSetLocation(cg, CGPoint { x, y });
                 CGEventSetIntegerValueField(cg, SCROLL_WHEEL_DELTA_AXIS_1, -3);
             }
-            mouse_event(&telemetry, cg, on_scrawl);
+            mouse_event(&telemetry, cg, on_apparent);
             unsafe { CFRelease(cg.cast()) };
         };
         for at in [(700.0, 100.0), (100.0, 100.0)] {

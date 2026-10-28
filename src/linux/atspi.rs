@@ -1,6 +1,6 @@
 //! The focused app on Wayland, from the accessibility bus (AT-SPI): the compositor tells no app
 //! which window has focus, but every GTK, Qt, Chromium and Firefox app reports its windows'
-//! states to the accessibility bus, as screen readers rely on. Scrawl asks which top-level
+//! states to the accessibility bus, as screen readers rely on. Apparent asks which top-level
 //! window is active, and so which app (`GNOME Terminal`, `Firefox`) a paste goes to.
 
 use std::sync::{Mutex, OnceLock};
@@ -126,7 +126,7 @@ fn x11_front() -> Option<FocusedApp> {
     })
 }
 
-/// The app whose window has focus (not Scrawl), asked at most every 250 ms.
+/// The app whose window has focus (not Apparent), asked at most every 250 ms.
 pub fn focused_app() -> Option<FocusedApp> {
     static CACHE: Mutex<Option<(Instant, Option<FocusedApp>)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -140,7 +140,7 @@ pub fn focused_app() -> Option<FocusedApp> {
     app
 }
 
-/// The last app other than Scrawl that had focus, for when Scrawl's own window has it.
+/// The last app other than Apparent that had focus, for when Apparent's own window has it.
 pub fn last_external_app() -> Option<FocusedApp> {
     static LAST: Mutex<Option<FocusedApp>> = Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -904,7 +904,7 @@ kbd {
   margin-top: -2px;
 }
 
-.menubar-scrawl img {
+.menubar-apparent img {
   width: 16px;
   height: 16px;
   filter: invert(1) drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.2));
@@ -961,7 +961,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Scrawl HUD (src/ui.rs) ---------- */
+/* ---------- Apparent HUD (src/ui.rs) ---------- */
 
 .island {
   position: absolute;
@@ -2947,7 +2947,7 @@ kbd {
   color: var(--fg);
 }
 
-/* ---------- Liquid Glass (ScrawlKit strip & iOS 26 style) ---------- */
+/* ---------- Liquid Glass (ApparentKit strip & iOS 26 style) ---------- */
 
 .liquid-glass-defs {
   position: fixed;
@@ -2996,7 +2996,7 @@ kbd {
 }
 
 .svg-glass .liquid-glass {
-  backdrop-filter: url(#scrawl-liquid-glass);
+  backdrop-filter: url(#apparent-liquid-glass);
 }
 
 .liquid-glass::before {

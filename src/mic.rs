@@ -1,5 +1,5 @@
 //! Which microphone Mac captures record from: `"microphone": {"id", "name"}` in
-//! `~/.config/scrawl/config.json` (absent = the macOS default, followed as it changes). The id is
+//! `~/.config/apparent/config.json` (absent = the macOS default, followed as it changes). The id is
 //! the CoreAudio device UID, which is also `AVCaptureDevice.uniqueID`; the name is kept only to
 //! say which device is missing. A chosen device that isn't connected falls back to the default.
 
@@ -153,7 +153,7 @@ pub fn note_pick(pick: &Pick) {
     match (pick, pick.note()) {
         (Pick::Missing { wanted, .. }, Some(note)) => {
             if warned.as_deref() != Some(wanted.id.as_str()) {
-                crate::capture::scrawl_log(format!("Microphone: {note}"));
+                crate::capture::apparent_log(format!("Microphone: {note}"));
                 *warned = Some(wanted.id.clone());
             }
         }
@@ -244,7 +244,7 @@ mod watch {
         let (sender, receiver) = std::sync::mpsc::channel();
         let data = Box::into_raw(Box::new(sender.clone())) as *mut c_void as usize;
         let spawned = std::thread::Builder::new()
-            .name("scrawl-mic-watch".into())
+            .name("apparent-mic-watch".into())
             .spawn(move || {
                 let data = data as *mut c_void;
                 let addresses = [DEVICES, DEFAULT_INPUT].map(|selector| Address {
@@ -268,7 +268,7 @@ mod watch {
                 drop(unsafe { Box::from_raw(data as *mut Sender<Message>) });
             });
         if let Err(error) = spawned {
-            crate::capture::scrawl_log(format!("Microphone watch failed: {error}"));
+            crate::capture::apparent_log(format!("Microphone watch failed: {error}"));
         }
         sender
     }
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn the_choice_round_trips_through_the_config_keeping_other_keys() {
         let dir = std::env::temp_dir().join(format!(
-            "scrawl-mic-{}-{}",
+            "apparent-mic-{}-{}",
             std::process::id(),
             crate::now_epoch_ms()
         ));

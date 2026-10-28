@@ -22,10 +22,10 @@ impl Probe {
         let worker_state = Arc::clone(&state);
         let worker_stop = Arc::clone(&stop);
         if let Err(error) = std::thread::Builder::new()
-            .name("scrawl-live-words".into())
+            .name("apparent-live-words".into())
             .spawn(move || run(samples, worker_state, worker_stop))
         {
-            crate::capture::scrawl_log(format!("Live word check could not start: {error}"));
+            crate::capture::apparent_log(format!("Live word check could not start: {error}"));
             if let Ok(mut state) = state.lock() { state.unavailable(); }
         }
         Self { state, stop }
@@ -79,7 +79,7 @@ fn run(samples: Arc<Mutex<Vec<f32>>>, state: Arc<Mutex<LiveWordWarning>>, stop: 
             match result {
                 Ok(words) => state.completed(6_000, active, words),
                 Err(error) => {
-                    crate::capture::scrawl_log(format!("Live word check unavailable: {error:#}"));
+                    crate::capture::apparent_log(format!("Live word check unavailable: {error:#}"));
                     state.unavailable();
                     return;
                 }
@@ -94,7 +94,7 @@ fn mac_words(chunk: &[f32]) -> anyhow::Result<bool> {
     use std::os::unix::fs::OpenOptionsExt;
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
-        "scrawl-live-words-{}-{}.wav",
+        "apparent-live-words-{}-{}.wav",
         std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;

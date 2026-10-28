@@ -10,9 +10,9 @@ import { join, resolve } from "node:path";
 // `perf/screen-guard.sh` refuses on the Studio, so run it on the MacBook Pro under `/tmp/pro-gui.lock`.
 // One process: warmup + seven starts, matching repeated captures in the menu-bar app.
 // Build separately so compiler/cache state never enters the timing.
-const binary = resolve(process.env.SCRAWL_BIN ?? "target/debug/scrawl");
+const binary = resolve(process.env.APPARENT_BIN ?? "target/debug/apparent");
 const quickStop = process.argv.includes("--quick-stop");
-const root = await mkdtemp(join(tmpdir(), "scrawl-start-"));
+const root = await mkdtemp(join(tmpdir(), "apparent-start-"));
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
 const summarize = (xs: number[]) => {
   const mid = median(xs);
@@ -23,7 +23,7 @@ if (guard.exitCode !== 0) process.exit(1);
 try {
   // -i keeps the Mac from idle-sleeping mid-run; never -d/-u, which wake the display.
   const child = Bun.spawn(["caffeinate", "-i", binary], {
-    env: { ...process.env, SCRAWL_BENCH_START: root, SCRAWL_BENCH_QUICK_STOP: quickStop ? "1" : "0" }, stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, APPARENT_BENCH_START: root, APPARENT_BENCH_QUICK_STOP: quickStop ? "1" : "0" }, stdout: "pipe", stderr: "pipe",
   });
   const timeout = setTimeout(() => child.kill(), 120_000);
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

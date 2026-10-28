@@ -1,6 +1,6 @@
-//! `scrawl-helper`, the Swift executable shipped beside `scrawl` (see `helper/main.swift`).
+//! `apparent-helper`, the Swift executable shipped beside `apparent` (see `helper/main.swift`).
 //!
-//! It owns the Apple frameworks that are Swift-only or absent from the objc2 bindings Scrawl
+//! It owns the Apple frameworks that are Swift-only or absent from the objc2 bindings Apparent
 //! uses: SpeechAnalyzer transcription, CoreMediaIO/AVFoundation iPhone capture with a live
 //! mirror window, and AVFoundation movie decoding.
 
@@ -15,18 +15,18 @@ use serde::Deserialize;
 use crate::model::{RgbaFrame, TranscriptData, TranscriptSegment, WordTiming};
 
 pub fn path() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("SCRAWL_HELPER") {
+    if let Some(path) = std::env::var_os("APPARENT_HELPER") {
         return Ok(PathBuf::from(path));
     }
-    let raw_exe = std::env::current_exe().context("Could not locate scrawl")?;
+    let raw_exe = std::env::current_exe().context("Could not locate apparent")?;
     let exe = std::fs::canonicalize(&raw_exe).unwrap_or(raw_exe);
     // Beside the app binary, or one level up from `target/*/deps` for tests.
     exe.ancestors()
         .skip(1)
         .take(2)
-        .map(|dir| dir.join("scrawl-helper"))
+        .map(|dir| dir.join("apparent-helper"))
         .find(|path| path.is_file())
-        .context("scrawl-helper is missing; rebuild Scrawl")
+        .context("apparent-helper is missing; rebuild Apparent")
 }
 
 /// Runs a helper command to completion and parses its JSON output.
@@ -45,7 +45,7 @@ fn run_program<T: for<'de> Deserialize<'de>>(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Could not start scrawl-helper")?;
+        .context("Could not start apparent-helper")?;
     let mut stdout = child.stdout.take().context("No helper stdout")?;
     let mut stderr = child.stderr.take().context("No helper stderr")?;
     let caller = std::thread::current();
@@ -70,7 +70,7 @@ fn run_program<T: for<'de> Deserialize<'de>>(
         if now >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("scrawl-helper {:?} timed out", args.first());
+            bail!("apparent-helper {:?} timed out", args.first());
         }
         std::thread::park_timeout(deadline - now);
     };
@@ -80,7 +80,7 @@ fn run_program<T: for<'de> Deserialize<'de>>(
         let _ = stderr.read_to_string(&mut message);
         bail!("{}", message.trim());
     }
-    serde_json::from_slice(&out).context("Invalid scrawl-helper output")
+    serde_json::from_slice(&out).context("Invalid apparent-helper output")
 }
 
 fn os(s: &str) -> &std::ffi::OsStr {
@@ -96,7 +96,7 @@ pub struct PhoneDevice {
     pub height: u32,
 }
 
-/// What macOS has granted Scrawl, from a fresh helper process (a long-running one can miss a
+/// What macOS has granted Apparent, from a fresh helper process (a long-running one can miss a
 /// Screen Recording grant).
 pub fn permissions()
 -> Result<std::collections::BTreeMap<crate::onboarding::Permission, crate::onboarding::Status>> {
@@ -161,7 +161,7 @@ pub fn transcribe_with_timeout(audio: &Path, timeout: Duration) -> Result<Transc
     })
 }
 
-/// One line of `scrawl-helper speech-model [--install]`.
+/// One line of `apparent-helper speech-model [--install]`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct SpeechModelLine {
     pub status: String,
@@ -177,7 +177,7 @@ pub struct SpeechModelLine {
     pub error: Option<String>,
 }
 
-/// Runs `scrawl-helper speech-model --install` for the chosen language, handing each line to
+/// Runs `apparent-helper speech-model --install` for the chosen language, handing each line to
 /// `line` as it comes. The download can take minutes; the helper exits when it's done or has
 /// failed, and is killed as soon as `stop` says a newer check superseded it.
 pub fn install_speech_model(
@@ -206,7 +206,7 @@ fn install_with(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Could not start scrawl-helper")?;
+        .context("Could not start apparent-helper")?;
     let stdout = child.stdout.take().context("No helper stdout")?;
     // Lines come through a thread so `stop` is checked while the helper is quiet.
     let (sender, lines) = std::sync::mpsc::channel();
@@ -314,7 +314,7 @@ pub enum FrameTimes<'a> {
 
 /// Decodes movie frames into memory; `max_edge` 0 keeps native size.
 pub fn frames(movie: &Path, times: FrameTimes, max_edge: u32) -> Result<Vec<RgbaFrame>> {
-    let dir = std::env::temp_dir().join(format!("scrawl-frames-{}", crate::make_bundle_id()));
+    let dir = std::env::temp_dir().join(format!("apparent-frames-{}", crate::make_bundle_id()));
     let (flag, value, sampled) = match times {
         FrameTimes::Every(ms) => ("--every", ms.max(1).to_string(), true),
         FrameTimes::At(times) => {

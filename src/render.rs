@@ -983,7 +983,7 @@ pub fn render_contact_sheet_for_duration(
     sheet
 }
 
-/// An `M:SS.mmm` pill in the bottom-left corner, for `scrawl zoom` cells; `k` is how many frame
+/// An `M:SS.mmm` pill in the bottom-left corner, for `apparent zoom` cells; `k` is how many frame
 /// pixels make one pixel of the finished sheet.
 pub fn draw_time_label(frame: &mut RgbaFrame, text: &str, k: f32) {
     let (w, h) = (frame.width as f32, frame.height as f32);
@@ -1020,7 +1020,7 @@ pub fn draw_time_label(frame: &mut RgbaFrame, text: &str, k: f32) {
     );
 }
 
-/// A tight grid of every frame of a `scrawl zoom` burst, in time order: four portrait or three
+/// A tight grid of every frame of a `apparent zoom` burst, in time order: four portrait or three
 /// landscape frames to a row.
 pub fn render_zoom_sheet(frames: &[RgbaFrame]) -> RgbaFrame {
     const PAD: f32 = 12.0;

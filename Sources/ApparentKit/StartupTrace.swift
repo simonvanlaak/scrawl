@@ -4,7 +4,7 @@
   import UIKit
 
   /// Opt-in startup evidence. Only fixed stage names and monotonic timings, never capture content.
-  public struct ScrawlStartupEvent: Sendable, Codable {
+  public struct ApparentStartupEvent: Sendable, Codable {
     public let stage: String
     public let milliseconds: Double
     public let onMainThread: Bool
@@ -15,9 +15,9 @@
     private let id = AppFrameRecorder.signposter.makeSignpostID()
     private let lock = NSLock()
     private var recorded = Set<String>()
-    private let receive: @Sendable (ScrawlStartupEvent) -> Void
+    private let receive: @Sendable (ApparentStartupEvent) -> Void
 
-    init(receive: @escaping @Sendable (ScrawlStartupEvent) -> Void) {
+    init(receive: @escaping @Sendable (ApparentStartupEvent) -> Void) {
       self.receive = receive
       mark("recognized")
     }
@@ -28,7 +28,7 @@
       lock.unlock()
       guard first else { return }
       let ms = (CACurrentMediaTime() - start) * 1000
-      AppFrameRecorder.signposter.emitEvent("ScrawlStartup", id: id, "stage=\(stage) ms=\(ms, format: .fixed(precision: 3))")
+      AppFrameRecorder.signposter.emitEvent("ApparentStartup", id: id, "stage=\(stage) ms=\(ms, format: .fixed(precision: 3))")
       receive(.init(stage: stage, milliseconds: ms, onMainThread: Thread.isMainThread))
     }
   }
@@ -38,7 +38,7 @@
   }
 
   extension EnvironmentValues {
-    var scrawlStartupTrace: StartupTrace? {
+    var apparentStartupTrace: StartupTrace? {
       get { self[StartupTraceKey.self] }
       set { self[StartupTraceKey.self] = newValue }
     }

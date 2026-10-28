@@ -1,4 +1,4 @@
-//! `scrawl export`: a bundle's recording as one shareable `.mp4` (H.264 or HEVC, AAC audio).
+//! `apparent export`: a bundle's recording as one shareable `.mp4` (H.264 or HEVC, AAC audio).
 //!
 //! Rust decides everything about the picture and the helper (`helper/Export.swift`) renders it:
 //!
@@ -25,7 +25,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::autocrop::Rect;
-use crate::model::{InteractionEvent, ScrawlBundle};
+use crate::model::{InteractionEvent, ApparentBundle};
 
 use self::camera::{CameraKey, Focus};
 use self::crop::CropArg;
@@ -74,15 +74,15 @@ pub struct Exported {
     pub bytes: u64,
 }
 
-/// Where `~/Movies/Scrawl/<bundle>.mp4` goes for a bundle.
+/// Where `~/Movies/Apparent/<bundle>.mp4` goes for a bundle.
 pub fn default_output(bundle_dir: &Path) -> PathBuf {
     let name = bundle_dir
         .file_stem()
         .and_then(|n| n.to_str())
-        .unwrap_or("scrawl");
+        .unwrap_or("apparent");
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Movies/Scrawl")
+        .join("Movies/Apparent")
         .join(format!("{name}.mp4"))
 }
 
@@ -114,7 +114,7 @@ struct Done {
 
 /// Camera focuses for a bundle, on the video's clock: clicks, drags, drawn marks and laser
 /// points. Activity before the video began is dropped.
-pub fn focuses(bundle: &ScrawlBundle) -> Vec<Focus> {
+pub fn focuses(bundle: &ApparentBundle) -> Vec<Focus> {
     let offset = bundle.video_offset_ms;
     let mut out = Vec::new();
     let mut push = |t0: u64, t1: u64, rect: Rect| {
@@ -174,7 +174,7 @@ pub fn focuses(bundle: &ScrawlBundle) -> Vec<Focus> {
 
 /// The camera path for `bundle` inside `crop`, as `[t, x0, y0, x1, y1]` rows.
 pub fn camera_rows(
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     crop: Rect,
     video_px: (u32, u32),
     duration_ms: u64,
@@ -199,7 +199,7 @@ pub fn camera_rows(
 /// Exports `bundle` (in `dir`), reporting progress `0.0..=1.0`.
 pub fn export(
     dir: &Path,
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     options: &Options,
     progress: &mut dyn FnMut(f32),
 ) -> Result<Exported> {
@@ -235,7 +235,7 @@ pub fn export(
     };
 
     // The audio: an iPhone movie's own track (full quality, on the movie's clock), else
-    // `audio.wav`, which Scrawl records from the bundle's start, `video_offset_ms` before the
+    // `audio.wav`, which Apparent records from the bundle's start, `video_offset_ms` before the
     // video's.
     let wav = bundle
         .audio
@@ -299,7 +299,7 @@ pub fn export(
         ink: &ink,
     };
     let plan_path =
-        std::env::temp_dir().join(format!("scrawl-export-{}.json", crate::make_bundle_id()));
+        std::env::temp_dir().join(format!("apparent-export-{}.json", crate::make_bundle_id()));
     std::fs::write(&plan_path, serde_json::to_vec(&plan)?)?;
     let result = run_helper(&plan_path, options.background, progress);
     let _ = std::fs::remove_file(&plan_path);
@@ -337,7 +337,7 @@ fn wav_duration_ms(path: &Path) -> Result<u64> {
     Ok(u64::from(reader.duration()) * 1_000 / u64::from(spec.sample_rate))
 }
 
-/// Runs `scrawl-helper export PLAN`, reading its JSON lines: `{"progress": f}` and a final
+/// Runs `apparent-helper export PLAN`, reading its JSON lines: `{"progress": f}` and a final
 /// `{"done": {...}}`.
 fn run_helper(plan: &Path, background: bool, progress: &mut dyn FnMut(f32)) -> Result<Done> {
     let helper = crate::helper::path()?;
@@ -355,7 +355,7 @@ fn run_helper(plan: &Path, background: bool, progress: &mut dyn FnMut(f32)) -> R
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("Could not start scrawl-helper")?;
+        .context("Could not start apparent-helper")?;
     let stdout = child.stdout.take().context("No helper stdout")?;
     let mut stderr = child.stderr.take().context("No helper stderr")?;
     let errors = std::thread::spawn(move || {
@@ -380,10 +380,10 @@ fn run_helper(plan: &Path, background: bool, progress: &mut dyn FnMut(f32)) -> R
     if !status.success() {
         bail!("{}", message.trim());
     }
-    done.context("scrawl-helper finished without a result")
+    done.context("apparent-helper finished without a result")
 }
 
-/// What `scrawl export` prints.
+/// What `apparent export` prints.
 pub fn describe(exported: &Exported) -> String {
     format!(
         "{} · {}×{} @ {} fps · {} · {:.1} MB{}{}",
@@ -410,7 +410,7 @@ pub fn describe(exported: &Exported) -> String {
 mod tests {
     use super::*;
 
-    fn bundle() -> ScrawlBundle {
+    fn bundle() -> ApparentBundle {
         serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 20_000,
             "target": {"mode": "display", "displayId": 0,
@@ -454,10 +454,10 @@ mod tests {
     }
 
     #[test]
-    fn default_output_lands_in_movies_scrawl() {
-        let path = default_output(Path::new("/x/scrawl-17-9.scrawl"));
+    fn default_output_lands_in_movies_apparent() {
+        let path = default_output(Path::new("/x/apparent-17-9.apparent"));
         assert!(
-            path.ends_with("Movies/Scrawl/scrawl-17-9.mp4"),
+            path.ends_with("Movies/Apparent/apparent-17-9.mp4"),
             "{}",
             path.display()
         );

@@ -5,7 +5,7 @@
   /// (including mid-animation) for the app-frame recorder's keyboard panel, and whether it's up,
   /// as the `keyboard` context value (`visible`, or `hidden` once it goes down mid-recording).
   ///
-  /// It only listens while Scrawl is configured, from before any recording, so a keyboard that is
+  /// It only listens while Apparent is configured, from before any recording, so a keyboard that is
   /// already up when recording starts is known.
   @MainActor
   final class KeyboardTracker {
@@ -42,14 +42,14 @@
         from = .null
         to = .null
         setVisible(false)
-        ScrawlAppContext.shared.setContext(Self.contextKey, nil, token: contextToken, promote: false)
+        ApparentAppContext.shared.setContext(Self.contextKey, nil, token: contextToken, promote: false)
       }
     }
 
     /// A recording is about to start: a keyboard that's down isn't worth a `hidden` in its context.
     func recordingWillBegin() {
       guard !isVisible else { return }
-      ScrawlAppContext.shared.setContext(Self.contextKey, nil, token: contextToken, promote: false)
+      ApparentAppContext.shared.setContext(Self.contextKey, nil, token: contextToken, promote: false)
     }
 
     /// The keyboard's frame in `scene`'s coordinates right now, clipped to the scene, or nil when
@@ -83,7 +83,7 @@
       to = change.end
       animationStart = now
       animationDuration = change.duration
-      let screen = change.screen ?? Scrawl.activeScene?.screen
+      let screen = change.screen ?? Apparent.activeScene?.screen
       let onScreen = screen.map { change.end.intersection($0.bounds) } ?? change.end
       setVisible(!onScreen.isNull && onScreen.height >= 1)
     }
@@ -97,8 +97,8 @@
     private func setVisible(_ visible: Bool) {
       guard visible != isVisible else { return }
       isVisible = visible
-      let value: String? = visible ? "visible" : (Scrawl.shared.isRecording ? "hidden" : nil)
-      ScrawlAppContext.shared.setContext(Self.contextKey, value, token: contextToken, promote: false)
+      let value: String? = visible ? "visible" : (Apparent.shared.isRecording ? "hidden" : nil)
+      ApparentAppContext.shared.setContext(Self.contextKey, value, token: contextToken, promote: false)
     }
   }
 

@@ -1,5 +1,5 @@
 // Publish only the Apparent landing page and the assets it actually uses.
-// Never copy dist wholesale: it also contains Scrawl's update feed, release
+// Never copy dist wholesale: it also contains Apparent's update feed, release
 // files, agent instructions, and the unlinked feature map.
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -12,7 +12,7 @@ const html = readFileSync(join(dist, "index.html"), "utf8")
 if (!html.includes("https://app.tryapparent.com/") || !html.includes("Show the problem.")) {
   throw new Error("Refusing to package a stale or unrelated build")
 }
-if (html.includes("https://scrawl.kitlangton.com/") || html.includes("kitlangton/tap")) {
+if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangton/tap")) {
   throw new Error("Refusing to publish upstream download or canonical links")
 }
 rmSync(out, { recursive: true, force: true })

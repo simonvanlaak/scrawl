@@ -1,4 +1,4 @@
-//! The desktop around Scrawl: opening files and links, showing a file in the file manager,
+//! The desktop around Apparent: opening files and links, showing a file in the file manager,
 //! the freedesktop.org Trash, and notifications.
 
 use std::path::{Path, PathBuf};
@@ -102,7 +102,7 @@ fn trash_in(path: &Path, trash: &Path) -> Result<()> {
     if let Err(error) = std::fs::rename(&path, files.join(&slot)) {
         let _ = std::fs::remove_file(&info_file);
         // Another file system than the home trash's: the spec's per-volume trash isn't worth it
-        // for Scrawl's captures, which live under the home folder.
+        // for Apparent's captures, which live under the home folder.
         return Err(error).with_context(|| format!("Could not move {} to the Trash", path.display()));
     }
     Ok(())
@@ -162,9 +162,9 @@ pub fn notify(summary: &str, body: &str) {
             Some("org.freedesktop.Notifications"),
             "Notify",
             &(
-                "Scrawl",
+                "Apparent",
                 0_u32,
-                "dev.kitlangton.scrawl",
+                "dev.kitlangton.apparent",
                 summary.as_str(),
                 body.as_str(),
                 Vec::<&str>::new(),
@@ -182,25 +182,25 @@ mod tests {
     #[test]
     fn trash_info_paths_are_percent_encoded() {
         assert_eq!(
-            percent_path(Path::new("/home/kit/a b#1.scrawl")),
-            "/home/kit/a%20b%231.scrawl"
+            percent_path(Path::new("/home/kit/a b#1.apparent")),
+            "/home/kit/a%20b%231.apparent"
         );
     }
 
     #[test]
     fn trashing_keeps_the_item_and_where_it_came_from() {
-        let home = std::env::temp_dir().join(format!("scrawl-trash-{}", std::process::id()));
-        let item = home.join("captures/one.scrawl");
+        let home = std::env::temp_dir().join(format!("apparent-trash-{}", std::process::id()));
+        let item = home.join("captures/one.apparent");
         std::fs::create_dir_all(&item).unwrap();
-        std::fs::write(item.join("scrawl.json"), "{}").unwrap();
+        std::fs::write(item.join("apparent.json"), "{}").unwrap();
         trash_in(&item, &home.join("data/Trash")).unwrap();
         assert!(!item.exists());
-        let trashed = home.join("data/Trash/files/one.scrawl/scrawl.json");
+        let trashed = home.join("data/Trash/files/one.apparent/apparent.json");
         assert!(trashed.is_file());
         let info =
-            std::fs::read_to_string(home.join("data/Trash/info/one.scrawl.trashinfo")).unwrap();
+            std::fs::read_to_string(home.join("data/Trash/info/one.apparent.trashinfo")).unwrap();
         assert!(info.starts_with("[Trash Info]\nPath=/"));
-        assert!(info.contains("captures/one.scrawl\n"));
+        assert!(info.contains("captures/one.apparent\n"));
         let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -1,5 +1,5 @@
 {
-  "capture": "scrawl-1792523507390-170ef.scrawl",
+  "capture": "apparent-1792523507390-170ef.apparent",
   "savedDecision": "send HOME",
   "server": {
     "note": "The story folder and the tool calls as they were when this was replayed (2026-10-20, 15:3x PDT), minus the calls of the session that investigated it.",
@@ -765,7 +765,7 @@
   },
   "bundle": {
     "version": 1,
-    "id": "scrawl-1792523507390-170ef",
+    "id": "apparent-1792523507390-170ef",
     "createdAtMs": 1792523547849,
     "durationMs": 40163,
     "target": {
@@ -2872,9 +2872,9 @@
       },
       {
         "id": "ses_edb816b31ffe4B3nexhh9rqAJp",
-        "title": "SCRAWL",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "title": "APPARENT",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792522399527,
         "viewedMs": 1792516152471
       },
@@ -2929,8 +2929,8 @@
       {
         "id": "ses_eb4805506ffdExxfN3euuGJzSR",
         "title": "Quick check-in",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792472119901,
         "viewedMs": 1792302248443
       },
@@ -2991,9 +2991,9 @@
       },
       {
         "id": "ses_ead37e06cffeRfPkN2vrbdNWDs",
-        "title": "SCRAWL RECORDER",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "title": "APPARENT RECORDER",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792391837251,
         "viewedMs": 1792391837366
       },

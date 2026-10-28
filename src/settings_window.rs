@@ -4,19 +4,18 @@
 //! `settings::Action`s, as the helper's JSON lines parse into.
 //!
 //! Windows uses it in process (`settings::Session`); macOS still runs the SwiftUI window in
-//! `scrawl-helper settings`.
+//! `apparent-helper settings`.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
     AnyElement, App, Bounds, BoxShadow, ClickEvent, Context, Div, FocusHandle, FontWeight, Hsla,
-    Image, ImageFormat,
-    InteractiveElement, IntoElement, KeyDownEvent, ModifiersChangedEvent, MouseButton,
-    ParentElement, Pixels, Point, Render, Rgba, SharedString, Stateful, StatefulInteractiveElement,
-    Styled, Window, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*,
-    px, rgb, rgba, size, svg,
+    Image, ImageFormat, InteractiveElement, IntoElement, KeyDownEvent, ModifiersChangedEvent,
+    MouseButton, ParentElement, Pixels, Point, Render, Rgba, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowControlArea, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient,
+    point, prelude::*, px, rgb, rgba, size, svg,
 };
 use serde::Deserialize;
 
@@ -26,19 +25,19 @@ use crate::capture::{
 use crate::onboarding::{Permission, Status};
 use crate::settings::{Action, Event, Pane, Pressed};
 
-const WIDTH: f32 = 620.0;
-const HEIGHT: f32 = 448.0;
+const WIDTH: f32 = 720.0;
+const HEIGHT: f32 = 530.0;
 const SIDEBAR: f32 = 210.0;
-/// The content pane's width: what the 620-point window keeps after the sidebar and the
+/// The content pane's width: what the window keeps after the sidebar and the
 /// hairline between them. Giving the pane an explicit width (rather than `flex_1`) makes the
 /// space it hands its children definite, which GPUI requires to wrap text: with an indefinite
 /// width a caption measures as one full line, inflates the column and pushes trailing controls
 /// (the permission rows' buttons) past the window's edge.
 const CONTENT: f32 = WIDTH - SIDEBAR - 1.0;
 const TITLEBAR: f32 = 52.0;
-const INSET: f32 = 20.0;
+const INSET: f32 = 30.0;
 const ROW: f32 = 42.0;
-const RADIUS: f32 = 12.0;
+const RADIUS: f32 = 2.0;
 const WINDOWS: bool = cfg!(target_os = "windows");
 const LINUX: bool = cfg!(target_os = "linux");
 
@@ -194,7 +193,7 @@ impl ViewState {
 
 // MARK: Look
 
-/// `SettingsTheme` from the SwiftUI window: the same greys, as alpha over the window.
+/// Apparent's Paper workspace and Carbon navigation, independent of OS dark mode.
 #[derive(Clone, Copy)]
 struct Theme {
     dark: bool,
@@ -206,17 +205,13 @@ impl Theme {
         rgba(base | (alpha * 255.0).round() as u32)
     }
     fn window(self) -> Rgba {
-        rgb(if self.dark { 0x1e1e1e } else { 0xf3f3f3 })
+        rgb(if self.dark { 0x201b24 } else { 0xf5f0e8 })
     }
     fn sidebar(self) -> Rgba {
-        rgb(if self.dark { 0x262626 } else { 0xe9e9e9 })
+        rgb(0x020102)
     }
     fn group(self) -> Rgba {
-        if self.dark {
-            rgba(0xffffff0b)
-        } else {
-            rgb(0xffffff)
-        }
+        rgb(if self.dark { 0x302a36 } else { 0xe7e0ee })
     }
     fn group_line(self) -> Rgba {
         self.ink(if self.dark { 0.075 } else { 0.08 })
@@ -225,7 +220,7 @@ impl Theme {
         self.ink(if self.dark { 0.07 } else { 0.075 })
     }
     fn text(self) -> Rgba {
-        rgb(if self.dark { 0xf2f2f2 } else { 0x1a1a1a })
+        rgb(if self.dark { 0xf5f0e8 } else { 0x020102 })
     }
     fn secondary(self) -> Rgba {
         self.ink(if self.dark { 0.55 } else { 0.5 })
@@ -234,7 +229,7 @@ impl Theme {
         self.ink(if self.dark { 0.3 } else { 0.28 })
     }
     fn selection(self) -> Rgba {
-        self.ink(if self.dark { 0.08 } else { 0.07 })
+        rgb(0x302442)
     }
     fn control(self) -> Rgba {
         self.ink(if self.dark { 0.08 } else { 0.06 })
@@ -259,13 +254,13 @@ impl Theme {
         rgb(if self.dark { 0x2b2b2b } else { 0xffffff })
     }
     fn accent(self) -> Rgba {
-        rgb(0x0a84ff)
+        rgb(0x7a58c7)
     }
     fn positive(self) -> Rgba {
-        rgb(0x33bd6b)
+        rgb(0x146b43)
     }
     fn negative(self) -> Rgba {
-        rgb(0xff453b)
+        rgb(0xb42318)
     }
 }
 
@@ -319,6 +314,7 @@ pub struct SettingsWindow {
     live: gpui::Modifiers,
     menu: Option<Menu>,
     icon: Arc<Image>,
+    wordmark: Arc<Image>,
     /// The skill command was just copied (the button says Copied for a moment).
     copied: bool,
 }
@@ -340,7 +336,7 @@ fn open(request: Request, cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Scrawl Settings".into()),
+                title: Some("apparent Settings".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(20.0), px(20.0))),
             }),
@@ -351,7 +347,7 @@ fn open(request: Request, cx: &mut App) {
             is_resizable: false,
             is_minimizable: true,
             window_background: WindowBackgroundAppearance::Opaque,
-            app_id: Some("dev.kitlangton.scrawl".into()),
+            app_id: Some("dev.kitlangton.apparent".into()),
             ..Default::default()
         },
         move |window, cx| {
@@ -417,13 +413,17 @@ fn open(request: Request, cx: &mut App) {
                         ImageFormat::Png,
                         include_bytes!("../assets/app-icon.png").to_vec(),
                     )),
+                    wordmark: Arc::new(Image::from_bytes(
+                        ImageFormat::Png,
+                        include_bytes!("../assets/brand/apparent-wordmark.png").to_vec(),
+                    )),
                     copied: false,
                 }
             })
         },
     );
     if let Err(error) = opened {
-        crate::capture::scrawl_log(format!("settings: the window failed to open: {error:#}"));
+        crate::capture::apparent_log(format!("settings: the window failed to open: {error:#}"));
     }
 }
 
@@ -787,16 +787,6 @@ fn keycap(theme: Theme, glyph: &str, name: Option<&str>, lit: bool, center: bool
 
 impl SettingsWindow {
     fn sidebar(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
-        let section = |title: &str| {
-            div()
-                .pl(px(10.0))
-                .pt(px(16.0))
-                .pb(px(4.0))
-                .text_size(px(12.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.secondary())
-                .child(title.to_owned())
-        };
         div()
             .flex_none()
             .w(px(SIDEBAR))
@@ -807,45 +797,41 @@ impl SettingsWindow {
             .child(drag_strip("settings-drag-sidebar"))
             .child(
                 div()
-                    .px(px(10.0))
-                    .flex()
-                    .flex_col()
-                    .child(self.item(theme, Pane::General, cx))
-                    .child(section("Settings"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(self.item(theme, Pane::Recording, cx))
-                            .child(self.item(theme, Pane::Storage, cx))
-                            .child(self.item(theme, Pane::Permissions, cx))
-                            .child(self.item(theme, Pane::Agents, cx)),
-                    )
-                    .child(section("Scrawl"))
-                    .child(self.item(theme, Pane::About, cx)),
+                    .px(px(20.0))
+                    .pt(px(8.0))
+                    .pb(px(28.0))
+                    .child(img(Arc::clone(&self.wordmark)).w(px(150.0)).h(px(35.0)))
+                    .child(div().pt(px(12.0)).text_size(px(10.0))
+                        .text_color(rgb(0xb7a5d8)).child("CAPTURE SETTINGS")),
             )
+            .child(self.item(theme, Pane::General, cx))
+            .child(self.item(theme, Pane::Recording, cx))
+            .child(self.item(theme, Pane::Storage, cx))
+            .child(self.item(theme, Pane::Permissions, cx))
+            .child(self.item(theme, Pane::Agents, cx))
+            .child(self.item(theme, Pane::About, cx))
     }
 
     fn item(&self, theme: Theme, pane: Pane, cx: &mut Context<Self>) -> Stateful<Div> {
-        let (path, tint) = pane_icon(pane);
+        let (path, _) = pane_icon(pane);
         let selected = self.pane == pane;
         div()
             .id(SharedString::from(format!("settings-pane-{}", pane_title(pane))))
-            .h(px(36.0))
-            .px(px(8.0))
+            .h(px(44.0))
+            .px(px(17.0))
             .flex()
             .items_center()
             .gap(px(10.0))
-            .rounded(px(9.0))
+            .border_l_1()
+            .border_color(if selected { rgb(0xb7a5d8) } else { theme.sidebar() })
             .when(selected, |d| d.bg(theme.selection()))
-            .when(!selected, |d| d.hover(|s| s.bg(theme.ink(0.04))))
+            .when(!selected, |d| d.hover(|s| s.bg(rgb(0x29232f))))
             .cursor_pointer()
-            .child(icon_tile(path, tint, 24.0))
+            .child(icon(path, 16.0, rgb(0xb7a5d8)))
             .child(
                 div()
                     .text_size(px(14.0))
-                    .text_color(theme.text())
+                    .text_color(rgb(0xf5f0e8))
                     .child(pane_title(pane)),
             )
             .on_click(cx.listener(move |view, _, _, cx| {
@@ -859,7 +845,6 @@ impl SettingsWindow {
     }
 
     fn content(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Stateful<Div> {
-        let (path, tint) = pane_icon(self.pane);
         let body = match self.pane {
             Pane::General => self.general(theme, state, cx),
             Pane::Recording => self.recording_pane(theme, state, cx),
@@ -884,22 +869,22 @@ impl SettingsWindow {
             .child(
                 div()
                     .relative()
-                    .h(px(TITLEBAR))
+                    .h(px(92.0))
                     .flex_none()
                     .px(px(INSET))
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .child(icon_tile(path, tint, 24.0))
                     .child(
                         div()
-                            .text_size(px(16.0))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_size(px(31.0))
+                            .font_weight(FontWeight::BOLD)
                             .text_color(theme.text())
                             .child(pane_title(self.pane)),
                     )
                     .child(drag_strip("settings-drag-title").absolute().top_0().left_0()),
             )
+            .child(div().w_full().h(px(1.0)).bg(theme.group_line()))
             .child(div().w_full().px(px(INSET)).flex().flex_col().child(body))
     }
 
@@ -939,18 +924,18 @@ impl SettingsWindow {
             column = column.child(caption(
                 theme,
                 if WINDOWS {
-                    "Turn Scrawl on in Settings › Apps › Startup."
+                    "Turn Apparent on in Settings › Apps › Startup."
                 } else if LINUX {
-                    "Your desktop's startup settings turned Scrawl off. Turn it on there."
+                    "Your desktop's startup settings turned Apparent off. Turn it on there."
                 } else {
-                    "Allow Scrawl in System Settings › General › Login Items."
+                    "Allow Apparent in System Settings › General › Login Items."
                 },
                 false,
             ));
         } else if !state.login.available {
             column = column.child(caption(
                 theme,
-                "Launch at login works in the installed Scrawl.app.",
+                "Launch at login works in the installed Apparent.app.",
                 false,
             ));
         }
@@ -1169,7 +1154,7 @@ impl SettingsWindow {
                 "Parakeet runs on {here} and times each word. Hex uses a model you have in Hex, and its word times are estimates."
             ),
             (true, false) => format!(
-                "Parakeet runs on {here} and times each word. Scrawl downloads its 730 MB model once, unless Hex already has it. Hex shows up here while Hex is running."
+                "Parakeet runs on {here} and times each word. Apparent downloads its 730 MB model once, unless Hex already has it. Hex shows up here while Hex is running."
             ),
             (false, true) => {
                 "Apple Speech times each word. Hex uses a model you have in Hex, and its word times are estimates.".to_owned()
@@ -1189,7 +1174,7 @@ impl SettingsWindow {
             )),
             "failed" => Some((
                 format!(
-                    "The speech model couldn't be downloaded{}. Scrawl tries again in a few minutes.",
+                    "The speech model couldn't be downloaded{}. Apparent tries again in a few minutes.",
                     t.speech
                         .error
                         .as_deref()
@@ -1328,13 +1313,13 @@ impl SettingsWindow {
             column = column.child(group(theme, required_rows)).child(caption(
                 theme,
                 if WINDOWS {
-                    "Scrawl needs the microphone to hear you. Recording the screen, clicks and shortcuts need no permission on Windows."
+                    "Apparent needs the microphone to hear you. Recording the screen, clicks and shortcuts need no permission on Windows."
                 } else if LINUX && required.len() > 1 {
-                    "Scrawl needs the microphone to hear you, and on Wayland the input devices to see ⇧ ink, clicks and Esc over other apps."
+                    "Apparent needs the microphone to hear you, and on Wayland the input devices to see ⇧ ink, clicks and Esc over other apps."
                 } else if LINUX {
-                    "Scrawl needs the microphone to hear you. On X11, the screen, clicks and shortcuts need no permission."
+                    "Apparent needs the microphone to hear you. On X11, the screen, clicks and shortcuts need no permission."
                 } else {
-                    "Scrawl needs these three to record."
+                    "Apparent needs these three to record."
                 },
                 false,
             ));
@@ -1418,7 +1403,7 @@ impl SettingsWindow {
         let granted = row.status == Status::Granted;
         let id = SharedString::from(format!("settings-grant-{permission:?}"));
         let trailing: AnyElement = if granted && row.relaunch {
-            button(theme, id, "Reopen Scrawl", true)
+            button(theme, id, "Reopen Apparent", true)
                 .on_click(cx.listener(|view, _, _, _| view.act(Action::Reopen)))
                 .into_any_element()
         } else if granted {
@@ -1477,7 +1462,7 @@ impl SettingsWindow {
             .child(trailing)
     }
 
-    /// The agent skill's install command, with Copy. `scrawl.exe` is a console program, so the
+    /// The agent skill's install command, with Copy. `apparent.exe` is a console program, so the
     /// CLI needs no install step on Windows (macOS links it onto PATH here).
     fn agents(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Div {
         let command = state.skill_command.clone();
@@ -1526,7 +1511,7 @@ impl SettingsWindow {
             .flex_col()
             .child(group(theme, vec![row(
                 theme,
-                "Ask for a Scrawl video on complex changes",
+                "Ask for an Apparent video on complex changes",
                 true,
                 switch(theme, "settings-agent-demo-video", demo_video, true).on_click(
                     cx.listener(move |view, _, _, _| {
@@ -1539,7 +1524,7 @@ impl SettingsWindow {
             .child(group(theme, vec![line]))
             .child(caption(
                 theme,
-                "Run it in a terminal. It teaches Claude Code, OpenCode, Codex and other agents to read your captures and use scrawl.",
+                "Run it in a terminal. It teaches Claude Code, OpenCode, Codex and other agents to read your captures and use apparent.",
                 false,
             ))
     }
@@ -1593,7 +1578,7 @@ impl SettingsWindow {
                                     .text_size(px(14.0))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme.text())
-                                    .child("Scrawl"),
+                                    .child("Apparent"),
                             )
                             .child(
                                 div()
@@ -1619,7 +1604,7 @@ impl SettingsWindow {
         if !state.updates {
             column = column.child(caption(
                 theme,
-                if LINUX { "Update checks work when Scrawl runs from an AppImage." } else { "Updates work in the installed Scrawl.app." },
+                if LINUX { "Update checks work when Apparent runs from an AppImage." } else { "Updates work in the installed Apparent.app." },
                 false,
             ));
         }
@@ -1653,15 +1638,15 @@ impl SettingsWindow {
                     link(
                         "settings-website",
                         "Website",
-                        "scrawl.kitlangton.com",
-                        "https://scrawl.kitlangton.com",
+                        "app.tryapparent.com",
+                        "https://app.tryapparent.com",
                     )
                     .into_any_element(),
                     link(
                         "settings-source",
                         "Source",
-                        "github.com/kitlangton/scrawl",
-                        "https://github.com/kitlangton/scrawl",
+                        "github.com/tryapparent/apparent",
+                        "https://github.com/tryapparent/apparent",
                     )
                     .into_any_element(),
                     row(
@@ -1882,12 +1867,7 @@ fn caption_buttons(theme: Theme) -> Option<Div> {
 
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = Theme {
-            dark: matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            ),
-        };
+        let theme = Theme { dark: false };
         let root = div()
             .id("settings-root")
             .track_focus(&self.focus)
@@ -1907,7 +1887,7 @@ impl Render for SettingsWindow {
             .size_full()
             .flex()
             .bg(theme.window())
-            .font_family(".SystemUIFont")
+            .font_family("Host Grotesk")
             .text_color(theme.text());
         let Some(state) = self.state.clone() else {
             return root.children(caption_buttons(theme));
@@ -1929,9 +1909,9 @@ mod tests {
     #[test]
     fn the_command_transcriber_is_read_from_the_view() {
         let t: Transcriber =
-            serde_json::from_str(r#"{"engine":"command","command":"whisper-scrawl"}"#).unwrap();
+            serde_json::from_str(r#"{"engine":"command","command":"whisper-apparent"}"#).unwrap();
         assert_eq!(t.engine, "command");
-        assert_eq!(t.command.as_deref(), Some("whisper-scrawl"));
+        assert_eq!(t.command.as_deref(), Some("whisper-apparent"));
         assert_eq!(Transcriber::default().command, None);
     }
 

@@ -1,6 +1,6 @@
 //! Apple's on-device speech model. A fresh Mac doesn't have it, and each app has to reserve it
-//! for itself (`AssetInventory`, attributed to `scrawl-helper`), so Scrawl checks and installs
-//! it in the background at launch (`scrawl-helper speech-model --install`) instead of during the
+//! for itself (`AssetInventory`, attributed to `apparent-helper`), so Apparent checks and installs
+//! it in the background at launch (`apparent-helper speech-model --install`) instead of during the
 //! first capture. Onboarding and Settings show how that's going (`view`). On macOS 15 there's
 //! nothing to download: the check is for the Speech Recognition permission (`NeedsPermission`,
 //! asked for in onboarding) and Dictation's on-device model.
@@ -8,7 +8,7 @@
 //! A capture that finishes without a model says so in its summary (`TranscriptData::missing`,
 //! from `missing`). When the reason can pass (still downloading, a failed download), the bundle
 //! gets a `.transcript-pending` marker, and once the model is installed it's transcribed again
-//! in place: `scrawl.json` and `summary.md` are rewritten with the transcript.
+//! in place: `apparent.json` and `summary.md` are rewritten with the transcript.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -193,7 +193,7 @@ fn start(restart: bool) {
         return;
     };
     let spawned = std::thread::Builder::new()
-        .name("scrawl-speech-model".into())
+        .name("apparent-speech-model".into())
         .spawn(move || {
             loop {
                 work(generation);
@@ -233,7 +233,7 @@ fn work(generation: u64) {
             }
             worker.status.clone()
         };
-        crate::capture::scrawl_log(format!(
+        crate::capture::apparent_log(format!(
             "speech model: {:?} {} {}{}",
             status.state,
             status.engine.as_deref().unwrap_or("?"),
@@ -286,20 +286,20 @@ pub fn missing(why: &str, locale: &str, error: Option<&str>) -> MissingTranscrip
     match why {
         "downloading" => MissingTranscript {
             reason: format!(
-                "{model} was still downloading. The audio is saved, and Scrawl adds the \
+                "{model} was still downloading. The audio is saved, and Apparent adds the \
                  transcript to this bundle when the download finishes."
             ),
             retry: true,
         },
         "permission" => MissingTranscript {
-            reason: "Speech Recognition is off for Scrawl. The audio is saved, and Scrawl adds \
-                     the transcript to this bundle once it's on (Scrawl Settings › Permissions)."
+            reason: "Speech Recognition is off for Apparent. The audio is saved, and Apparent adds \
+                     the transcript to this bundle once it's on (Apparent Settings › Permissions)."
                 .to_owned(),
             retry: true,
         },
         "dictation" => MissingTranscript {
             reason: "Dictation's on-device model isn't on this Mac. Turn on Dictation in System \
-                     Settings › Keyboard, and Scrawl adds the transcript to this bundle once it's \
+                     Settings › Keyboard, and Apparent adds the transcript to this bundle once it's \
                      there."
                 .to_owned(),
             retry: true,
@@ -307,13 +307,13 @@ pub fn missing(why: &str, locale: &str, error: Option<&str>) -> MissingTranscrip
         "unsupported" => MissingTranscript {
             reason: format!(
                 "this Mac has no Apple speech model for {locale}. Hex can transcribe instead \
-                 (Scrawl Settings › Recording)."
+                 (Apparent Settings › Recording)."
             ),
             retry: false,
         },
         _ => MissingTranscript {
             reason: format!(
-                "{model} couldn't be installed{}. The audio is saved, and Scrawl adds the \
+                "{model} couldn't be installed{}. The audio is saved, and Apparent adds the \
                  transcript to this bundle if a later try works.",
                 error.map(|e| format!(" ({e})")).unwrap_or_default()
             ),
@@ -349,13 +349,13 @@ pub fn transcribe_pending(captures: &Path) {
 
 fn transcribe_one(dir: &Path) {
     match transcribe_again(dir) {
-        Ok(done) => crate::capture::scrawl_log(format!(
+        Ok(done) => crate::capture::apparent_log(format!(
             "transcribed again {}: {}",
             dir.display(),
             if done { "done" } else { "still no model" }
         )),
         Err(error) => {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "transcribing {} again failed: {error:#}",
                 dir.display()
             ));
@@ -365,7 +365,7 @@ fn transcribe_one(dir: &Path) {
 }
 
 /// Transcribes a bundle's `audio.wav` with Apple Speech and rewrites its transcript, each
-/// keyframe's words, `scrawl.json` and `summary.md`. Returns `false` (and keeps the marker)
+/// keyframe's words, `apparent.json` and `summary.md`. Returns `false` (and keeps the marker)
 /// while there's still no model.
 pub fn transcribe_again(dir: &Path) -> Result<bool> {
     let (dir, mut bundle) = crate::handoff::load_bundle(dir)?;
@@ -386,8 +386,8 @@ pub fn transcribe_again(dir: &Path) -> Result<bool> {
     }
     bundle.transcript = transcript;
     std::fs::write(
-        dir.join("scrawl.json"),
-        serde_json::to_vec_pretty(&bundle).context("Could not encode scrawl.json")?,
+        dir.join("apparent.json"),
+        serde_json::to_vec_pretty(&bundle).context("Could not encode apparent.json")?,
     )?;
     std::fs::write(
         dir.join("summary.md"),
@@ -529,7 +529,7 @@ mod tests {
             off.retry
                 && off
                     .reason
-                    .starts_with("Speech Recognition is off for Scrawl.")
+                    .starts_with("Speech Recognition is off for Apparent.")
         );
     }
 }

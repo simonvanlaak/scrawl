@@ -944,7 +944,7 @@ export function Brush3D() {
   if (failed) return <BrushFallback />
 
   return (
-    <div ref={hostRef} style={values.scale === 1 ? hostStyle : { ...hostStyle, transform: `scale(${values.scale})` }} role="img" aria-label="Scrawl">
+    <div ref={hostRef} style={values.scale === 1 ? hostStyle : { ...hostStyle, transform: `scale(${values.scale})` }} role="img" aria-label="Apparent">
       <div ref={flatRef} style={flatStyle}>
         <BrushIcon />
       </div>

@@ -1543,7 +1543,7 @@ mod tests {
         }
     }
 
-    /// The shader must load on the oldest macOS Scrawl supports (`LSMinimumSystemVersion` 15.0).
+    /// The shader must load on the oldest macOS Apparent supports (`LSMinimumSystemVersion` 15.0).
     /// Without `-mmacosx-version-min`, `xcrun metal` targets the build machine's macOS and the
     /// overlay (ink, laser, edge glow) silently fails to open on older systems.
     #[test]

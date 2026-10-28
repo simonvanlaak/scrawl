@@ -1,4 +1,4 @@
-// Scrawl 2 · Fix: a small app window slides in, a red mark lands on the problem,
+// Apparent 2 · Fix: a small app window slides in, a red mark lands on the problem,
 // the spoken note ticks in, and the app fixes itself. The ink lifts, the window
 // slides away and the next one arrives. Two windows; the seam is mid-belt.
 ;(() => {

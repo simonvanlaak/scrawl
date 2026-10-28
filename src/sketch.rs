@@ -670,7 +670,7 @@ pub fn describe_event(event: &InteractionEvent) -> String {
     }
 }
 
-pub fn timeline(bundle: &ScrawlBundle) -> Vec<String> {
+pub fn timeline(bundle: &ApparentBundle) -> Vec<String> {
     let mut items: Vec<(u64, String)> = bundle
         .transcript
         .segments
@@ -721,16 +721,16 @@ fn context_value(raw: &str) -> String {
 
 /// Agents given only the text fix what was said and skip the pictures, missing what only shows there.
 pub const LOOK_AT_IMAGES: &str = "Open contact-sheet.png and frames/ in that folder before changing anything: the marks and words only make sense on the images, which can show more than the text does.";
-pub const OPTIONAL_IMAGES: &str = "Visuals are saved in this bundle, but are optional for this text-first handoff. Use scrawl zoom if the words need screen context; contact-sheet.png and frames/ are also available there.";
+pub const OPTIONAL_IMAGES: &str = "Visuals are saved in this bundle, but are optional for this text-first handoff. Use apparent zoom if the words need screen context; contact-sheet.png and frames/ are also available there.";
 
-pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &std::path::Path) -> String {
+pub fn summary_markdown(bundle: &ApparentBundle, bundle_dir: &std::path::Path) -> String {
     let agent_context = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
     summary_markdown_with(bundle, bundle_dir, agent_context)
 }
 
 /// `agent_context` is the `agentContext` experiment (`agent_context::keyframe_texts`).
 pub fn summary_markdown_with(
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     bundle_dir: &std::path::Path,
     agent_context: bool,
 ) -> String {
@@ -738,7 +738,7 @@ pub fn summary_markdown_with(
 }
 
 pub(crate) fn summary_markdown_with_visual_policy(
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     bundle_dir: &std::path::Path,
     agent_context: bool,
 ) -> String {
@@ -773,7 +773,7 @@ pub(crate) fn summary_markdown_with_visual_policy(
         }
     }
     let mut out = format!(
-        "[scrawl {} · {target} · {}]\n",
+        "[apparent {} · {target} · {}]\n",
         format_clock(bundle.duration_ms),
         bundle_dir.display()
     );
@@ -1584,7 +1584,7 @@ mod tests {
             .collect()
     }
 
-    /// The two ⇧ strokes of a real capture (`scrawl-1792536608591-641c-2`), drawn with a mouse on
+    /// The two ⇧ strokes of a real capture (`apparent-1792536608591-641c-2`), drawn with a mouse on
     /// a 1728×1117 screen: a flat loop round a table cell that ends just past where it began,
     /// and an arrow drawn in one go, shaft left to right, then a barb back above it, back to the
     /// tip and a barb below.
@@ -2059,7 +2059,7 @@ mod tests {
         let strokes = vec![stroke(&[[0.5, 0.5]], 5000)];
         let mut marks = marks_of(&strokes);
         marks[0].frame = Some("frames/frame-01.png".into());
-        let bundle = ScrawlBundle {
+        let bundle = ApparentBundle {
             version: 1,
             id: "test".into(),
             created_at_ms: 0,
@@ -2126,10 +2126,10 @@ mod tests {
         assert!(tl.contains("— frame #1"));
 
         let summary = summary_markdown_with_visual_policy(&bundle, std::path::Path::new("/recordings/test"), false);
-        assert!(summary.starts_with("[scrawl 0:14 · App “Window” · /recordings/test]"));
+        assert!(summary.starts_with("[apparent 0:14 · App “Window” · /recordings/test]"));
         assert!(summary.contains("Note: Simplify it."));
         assert!(!summary.contains(LOOK_AT_IMAGES));
-        assert!(summary.contains("scrawl zoom"));
+        assert!(summary.contains("apparent zoom"));
         assert!(summary.contains("- #1 (0:05) “This row is too dense.”"));
         assert!(!summary.contains("No transcript"));
 
@@ -2150,7 +2150,7 @@ mod tests {
         phone.note = None;
         phone.device = Some(DeviceInfo {
             name: "iPhone".into(),
-            capture: "scrawlkit".into(),
+            capture: "apparentkit".into(),
             app: Some("dev.example.App".into()),
             app_version: Some("42".into()),
             ..Default::default()
@@ -2198,7 +2198,7 @@ mod tests {
         assert_eq!(
             summary,
             format!(
-                "[scrawl 0:14 · iPhone · dev.example.App (42) · /recordings/phone]\n\
+                "[apparent 0:14 · iPhone · dev.example.App (42) · /recordings/phone]\n\
                  {OPTIONAL_IMAGES}\n\
                  \x20 · 0:01 app: launched\n\
                  - #1 (0:05) “This row is too dense.”\n\
@@ -2243,7 +2243,7 @@ mod tests {
 
     #[test]
     fn summary_shows_app_version_context_and_screen_changes() {
-        let mut bundle: ScrawlBundle = serde_json::from_value(serde_json::json!({
+        let mut bundle: ApparentBundle = serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 25_000,
             "target": {"mode": "device", "app": "OpenCode", "bundleId": "ai.opencode.mobilecode",
                 "displayId": 0,
@@ -2251,7 +2251,7 @@ mod tests {
             "transcript": {"source": "test", "text": "", "segments": []},
             "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png",
             "source": "iphone",
-            "device": {"name": "iPhone", "capture": "scrawlkit", "width": 10, "height": 20,
+            "device": {"name": "iPhone", "capture": "apparentkit", "width": 10, "height": 20,
                 "app": "OpenCode", "appVersion": "354", "appShortVersion": "1.4"}
         }))
         .unwrap();
@@ -2325,7 +2325,7 @@ mod tests {
         assert_eq!(
             summary,
             format!(
-                "[scrawl 0:25 · iPhone · OpenCode 1.4 (354) · /recordings/phone]\n\
+                "[apparent 0:25 · iPhone · OpenCode 1.4 (354) · /recordings/phone]\n\
                  {LOOK_AT_IMAGES}\n\
                  Screen: Sessions · server: studio · session: {session}\n\
                  - #1 (0:01) “So here.”\n\
@@ -2343,7 +2343,7 @@ mod tests {
         bundle.device.as_mut().unwrap().app_short_version = None;
         let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/phone"));
         assert!(summary.starts_with(&format!(
-            "[scrawl 0:25 · iPhone · OpenCode (354) · /recordings/phone]\n{LOOK_AT_IMAGES}\n- #1 (0:01) “So here.”\n"
+            "[apparent 0:25 · iPhone · OpenCode (354) · /recordings/phone]\n{LOOK_AT_IMAGES}\n- #1 (0:01) “So here.”\n"
         )));
     }
 }

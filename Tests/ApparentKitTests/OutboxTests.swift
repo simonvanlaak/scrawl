@@ -1,5 +1,5 @@
 import Foundation
-@testable import ScrawlKit
+@testable import ApparentKit
 import Testing
 
 /// Stands in for the Problems board's ingest endpoint.
@@ -78,7 +78,7 @@ final class StubServer: URLProtocol, @unchecked Sendable {
 final class EventLog: @unchecked Sendable {
   private let lock = NSLock()
   private var events: [Outbox.Event] = []
-  /// Also follows the events, the way `Scrawl` drives the strip.
+  /// Also follows the events, the way `Apparent` drives the strip.
   let delivery = DeliveryProbe()
   func append(_ event: Outbox.Event) {
     lock.withLock { events.append(event) }
@@ -165,13 +165,13 @@ struct OutboxTests {
   let directory: URL
   let movie: URL
   let events = EventLog()
-  let target = URL(string: "https://problems.example.com/api/scrawl/ledger")!
+  let target = URL(string: "https://problems.example.com/api/apparent/ledger")!
   let timeline = Data(#"{"recordedAt":"2026-10-14T18:00:00Z","app":"Ledger"}"#.utf8)
   let movieBytes = Data((0 ..< 300_000).map { UInt8($0 % 251) })
 
   init() throws {
-    let root = FileManager.default.temporaryDirectory.appending(path: "scrawl-outbox-tests-\(UUID().uuidString)")
-    directory = root.appending(path: "ScrawlOutbox")
+    let root = FileManager.default.temporaryDirectory.appending(path: "apparent-outbox-tests-\(UUID().uuidString)")
+    directory = root.appending(path: "ApparentOutbox")
     movie = root.appending(path: "movie.mp4")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     try movieBytes.write(to: movie)
@@ -212,7 +212,7 @@ struct OutboxTests {
     #expect(received.request.url == target.appending(path: "ingest"))
     #expect(received.request.httpMethod == "POST")
     #expect(received.request.value(forHTTPHeaderField: "Authorization") == "Bearer pbcap_test")
-    #expect(received.request.value(forHTTPHeaderField: "X-Scrawl-Token") == "pbcap_test")
+    #expect(received.request.value(forHTTPHeaderField: "X-Apparent-Token") == "pbcap_test")
     #expect(received.request.value(forHTTPHeaderField: "Content-Type") == "application/octet-stream")
     #expect(received.request.value(forHTTPHeaderField: "Content-Length") == String(expectedPayload.count))
     // The payload was on disk while it was being sent.

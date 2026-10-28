@@ -32,9 +32,9 @@ struct SpeechChoice {
 }
 
 /// Apple's speech assets are installed per app: `AssetInventory` reserves the locale for this
-/// bundle id (`dev.kitlangton.scrawl.helper`) and downloads the model if the Mac doesn't have it.
-/// A fresh Mac has none, so Scrawl installs it in the background at launch
-/// (`scrawl-helper speech-model --install`) rather than in the middle of a capture. On macOS 15
+/// bundle id (`dev.kitlangton.apparent.helper`) and downloads the model if the Mac doesn't have it.
+/// A fresh Mac has none, so Apparent installs it in the background at launch
+/// (`apparent-helper speech-model --install`) rather than in the middle of a capture. On macOS 15
 /// the same command checks for the Speech Recognition permission and the Dictation model instead.
 enum SpeechModel {
   /// SpeechAnalyzer (macOS 26, built with its SDK); otherwise `Recognizer`.
@@ -156,7 +156,7 @@ enum SpeechModel {
   static func install(_ choice: SpeechChoice, progress: @escaping @Sendable (Double) -> Void) async throws {
     #if compiler(>=6.2)
     if #available(macOS 26, *) {
-      // Each language reserves a slot; Scrawl uses one language at a time.
+      // Each language reserves a slot; Apparent uses one language at a time.
       let reserved = await AssetInventory.reservedLocales
       if !reserved.contains(where: { $0.language.maximalIdentifier == choice.locale.language.maximalIdentifier }) {
         var count = reserved.count
@@ -334,7 +334,7 @@ enum Transcriber {
     case "downloading": return missing(choice, "downloading")
     case "unsupported": return missing(choice, "unsupported")
     default:
-      // Supported but not installed for Scrawl: usually on disk already and only needs
+      // Supported but not installed for Apparent: usually on disk already and only needs
       // reserving, which is quick. A real download is left to the background install.
       do {
         let done = try await withThrowingTaskGroup(of: Bool.self) { group in
@@ -476,7 +476,7 @@ enum Transcriber {
     cuts.append(durationMs)
     guard cuts.count > 2 else { return nil }
 
-    let dir = FileManager.default.temporaryDirectory.appending(path: "scrawl-wav-\(UUID().uuidString)")
+    let dir = FileManager.default.temporaryDirectory.appending(path: "apparent-wav-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     var files: [(offsetMs: Int, url: URL)] = []
     for idx in 0..<(cuts.count - 1) {
@@ -593,7 +593,7 @@ enum Media {
 
   /// Re-encodes a movie's video to HEVC with its long edge at most `maxEdge`, copying every audio
   /// track as it is. Each sample keeps its presentation time, so the timeline (and every time in
-  /// `scrawl.json`) still lines up. Fails rather than writing a movie of a different length.
+  /// `apparent.json`) still lines up. Fails rather than writing a movie of a different length.
   static func shrink(movie: URL, out: URL, maxEdge: Int, bitRate: Int) async throws -> [String: Any] {
     let started = Date()
     let asset = AVURLAsset(url: movie)

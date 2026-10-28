@@ -8,7 +8,7 @@ const TYPES: Record<string, string> = { ".txt": "text/plain; charset=utf-8", ".m
 // llms.txt, llms-full.txt and skill.md at the site root, plus the JSON-LD in index.html.
 function forAgents(): Plugin {
   return {
-    name: "scrawl-agent-files",
+    name: "apparent-agent-files",
     transformIndexHtml: () => [{ tag: "script", attrs: { type: "application/ld+json" }, children: jsonLd(), injectTo: "head" }],
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
@@ -29,7 +29,7 @@ function forAgents(): Plugin {
 // The feature map in dev; scripts/prerender.ts writes it for builds.
 function featureMap(): Plugin {
   return {
-    name: "scrawl-feature-map",
+    name: "apparent-feature-map",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const path = req.url?.split("?")[0] ?? ""

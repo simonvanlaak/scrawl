@@ -8,8 +8,8 @@
   /// Records the app's own windows, not the screen, with the microphone into an H.264 `.mp4`.
   ///
   /// No screen-recording consent is needed: the microphone asks once and iOS remembers. If it's
-  /// denied, the movie is video only. ScrawlKit's `OverlayWindow` is left out, so the strip, ink,
-  /// and toasts never appear in the movie; Scrawl on the Mac draws touches and strokes
+  /// denied, the movie is video only. ApparentKit's `OverlayWindow` is left out, so the strip, ink,
+  /// and toasts never appear in the movie; Apparent on the Mac draws touches and strokes
   /// from the timeline.
   ///
   /// Frames are drawn on the main thread (UIKit requires it) into pixel buffers from the writer's
@@ -19,21 +19,21 @@
   /// both stamped on the host clock (`CMClockGetHostTimeClock`, the clock behind `CACurrentMediaTime`),
   /// and the writer's session starts at the first frame, so movie time 0 is the timeline's t=0.
   @MainActor
-  final class AppFrameRecorder: NSObject, ScrawlRecorder {
+  final class AppFrameRecorder: NSObject, ApparentRecorder {
     /// Movie pixels per point: 1.5× (capped at `maxLongEdge`) keeps main-thread drawing and
     /// encoding within a 120 Hz frame budget on Pro Max phones (660×1434 on a 440×956-point phone,
-    /// matching Scrawl's 1600 px phone keyframe cap) while keeping 10.5 pt code and UI text sharp.
+    /// matching Apparent's 1600 px phone keyframe cap) while keeping 10.5 pt code and UI text sharp.
     nonisolated static let pixelsPerPoint: CGFloat = 1.5
     nonisolated static let maxLongEdge: CGFloat = 1600
     nonisolated static let framesPerSecond: Float = 30
     /// Average H.264 bitrate for recordings sent to a Mac: about 0.76 MB a second with audio.
     nonisolated static let videoBitRate = 6_000_000
     /// For HTTPS endpoints, whose uploads must stay under 95 MB: 3 Mbps video plus 96 kbps audio
-    /// is about 0.39 MB a second, so the 3-minute cap (`Scrawl.hostedRecordingLimit`) comes to
+    /// is about 0.39 MB a second, so the 3-minute cap (`Apparent.hostedRecordingLimit`) comes to
     /// about 70 MB, leaving room for the encoder overshooting its average.
     nonisolated static let hostedVideoBitRate = 3_000_000
     nonisolated static let audioBitRate = 96000
-    nonisolated static let signposter = OSSignposter(subsystem: "dev.kitlangton.scrawl", category: "PointsOfInterest")
+    nonisolated static let signposter = OSSignposter(subsystem: "dev.kitlangton.apparent", category: "PointsOfInterest")
 
     private enum State { case idle, starting, recording, finished }
 
@@ -43,7 +43,7 @@
     private(set) var pacer = FramePacer()
     static private(set) var lastMetrics: FramePacer.Metrics?
     private let videoBitRate: Int
-    var method: ScrawlCaptureMethod { .appFrames }
+    var method: ApparentCaptureMethod { .appFrames }
     var isAvailable: Bool { true }
 
     private var state = State.idle
@@ -60,7 +60,7 @@
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
     private let temporaryMovie = FileManager.default.temporaryDirectory
-      .appending(path: "scrawl-\(UUID().uuidString).mp4")
+      .appending(path: "apparent-\(UUID().uuidString).mp4")
 
     init(videoBitRate: Int = AppFrameRecorder.videoBitRate) {
       self.videoBitRate = videoBitRate
@@ -140,7 +140,7 @@
     }
 
     private func begin(audio: Bool, at start: CMTime) {
-      guard let scene = Scrawl.activeScene else {
+      guard let scene = Apparent.activeScene else {
         failStart(RecorderError.noScene)
         return
       }
@@ -212,7 +212,7 @@
       )
       tearDown()
       // finishWriting has to complete even if the stop came from the app leaving the foreground.
-      backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Scrawl recording") { [weak self] in
+      backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Apparent recording") { [weak self] in
         MainActor.assumeIsolated { self?.endBackgroundTask() }
       }
       let temporaryMovie = temporaryMovie
@@ -285,10 +285,10 @@
       guard state == .recording, let writer else { return }
       let now = CACurrentMediaTime()
       let time = capturedFirstFrame ? MovieWriter.now() : firstFrameTime
-      if let moveTime = Scrawl.shared.lastTouchMoveMediaTime {
+      if let moveTime = Apparent.shared.lastTouchMoveMediaTime {
         pacer.noteInteractionMovement(at: moveTime)
       }
-      let interacting = Scrawl.shared.isInteractingForCapture
+      let interacting = Apparent.shared.isInteractingForCapture
       let writerReady = writer.isReadyForVideo(at: time)
       let decision = pacer.decide(
         linkTimestamp: link.timestamp,
@@ -320,7 +320,7 @@
     /// the writer queue. Returns the main-thread draw duration in seconds when a frame was captured.
     @discardableResult
     private func renderFrame(at time: CMTime, interacting: Bool = false) -> TimeInterval? {
-      guard state == .recording, let writer, let scene = Scrawl.activeScene,
+      guard state == .recording, let writer, let scene = Apparent.activeScene,
             let pixelBuffer = writer.dequeuePixelBuffer(for: time)
       else { return nil }
       let signpostID = Self.signposter.makeSignpostID()
@@ -511,7 +511,7 @@
       var audioSamples = 0
     }
 
-    private let queue = DispatchQueue(label: "dev.kitlangton.scrawl.writer", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "dev.kitlangton.apparent.writer", qos: .userInitiated)
     private let stateLock = NSLock()
     private var state = WriterState()
     private let writer: AVAssetWriter
@@ -830,7 +830,7 @@
 
   /// The microphone through `AVAudioEngine`. AVFAudio only: AVFoundation's capture-session and
   /// capture-device APIs would make App Store review demand a camera purpose string
-  /// (ITMS-90683) from every app that links ScrawlKit.
+  /// (ITMS-90683) from every app that links ApparentKit.
   ///
   /// A tap on the input node delivers PCM buffers stamped with host time; each becomes a
   /// `CMSampleBuffer` on the host clock and goes to the `MovieWriter`. Starting, stopping, and
@@ -840,7 +840,7 @@
     var startupTrace: StartupTrace?
     // Audio-session ownership is process-wide: an old capture must finish restoring before
     // the next capture snapshots it. Separate per-capture queues raced on rapid restarts.
-    private static let audioQueue = DispatchQueue(label: "dev.kitlangton.scrawl.microphone", qos: .userInitiated)
+    private static let audioQueue = DispatchQueue(label: "dev.kitlangton.apparent.microphone", qos: .userInitiated)
     private var queue: DispatchQueue { Self.audioQueue }
     private let lock = NSLock()
     private var writer: MovieWriter?
@@ -912,7 +912,7 @@
         try installTapAndStart()
         startupTrace?.mark("microphoneReady")
       } catch {
-        print("Scrawl: microphone unavailable: \(error.localizedDescription)")
+        print("Apparent: microphone unavailable: \(error.localizedDescription)")
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         snapshot.restore()
@@ -954,7 +954,7 @@
         try AVAudioSession.sharedInstance().setActive(true)
         try installTapAndStart()
       } catch {
-        print("Scrawl: microphone could not restart: \(error.localizedDescription)")
+        print("Apparent: microphone could not restart: \(error.localizedDescription)")
       }
     }
 

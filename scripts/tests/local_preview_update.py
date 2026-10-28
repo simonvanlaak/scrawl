@@ -23,7 +23,7 @@ def run(*args):
 def prepare(mode):
     home = Path.home()
     root = Path(__file__).resolve().parents[2]
-    app = root / "dist/Scrawl Preview.app"
+    app = root / "dist/Apparent Preview.app"
     plist = app / "Contents/Info.plist"
     with plist.open("rb") as handle:
         info = plistlib.load(handle)
@@ -37,7 +37,7 @@ def prepare(mode):
     run("codesign", "--force", "--sign", "-", "--identifier", info["CFBundleIdentifier"], str(app))
     run("codesign", "--verify", "--deep", "--strict", str(app))
     if mode == "a":
-        installed = home / "Applications/Scrawl Preview.app"
+        installed = home / "Applications/Apparent Preview.app"
         installed.parent.mkdir(exist_ok=True)
         if installed.exists():
             shutil.rmtree(installed)
@@ -46,18 +46,18 @@ def prepare(mode):
         print("A installed:", installed, "version", version)
         return
 
-    serve = home / "scrawl-preview-e2e"
+    serve = home / "apparent-preview-e2e"
     serve.mkdir(exist_ok=True)
-    archive = serve / "Scrawl-Preview-0.9000.2-arm64.zip"
+    archive = serve / "Apparent-Preview-0.9000.2-arm64.zip"
     run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive))
     sparkle = run(str(root / "scripts/setup-sparkle.sh"))
-    signature = run(str(Path(sparkle) / "bin/sign_update"), "--account", "scrawl-preview-disposable", str(archive))
+    signature = run(str(Path(sparkle) / "bin/sign_update"), "--account", "apparent-preview-disposable", str(archive))
     match = re.fullmatch(r'sparkle:edSignature="([A-Za-z0-9+/=]+)" length="([0-9]+)"', signature)
     if not match or int(match[2]) != archive.stat().st_size:
         raise SystemExit("Sparkle did not sign the local archive")
     rss = ET.Element("rss", {"version": "2.0"})
     channel = ET.SubElement(rss, "channel")
-    ET.SubElement(channel, "title").text = "Scrawl Preview local update probe"
+    ET.SubElement(channel, "title").text = "Apparent Preview local update probe"
     item = ET.SubElement(channel, "item")
     ET.SubElement(item, "title").text = version
     ET.SubElement(item, f"{{{SPARKLE}}}version").text = "9000.2"

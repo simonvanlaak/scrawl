@@ -23,7 +23,7 @@ final class Outbox: NSObject, @unchecked Sendable {
   static let defaultMaxPayloadBytes: Int64 = 95_000_000
 
   enum Failure: String, Codable, Sendable {
-    /// 401/403: the Scrawl link was revoked or is wrong.
+    /// 401/403: the Apparent link was revoked or is wrong.
     case unauthorized
     /// 413, or the payload is over the size limit before sending.
     case tooLarge
@@ -97,7 +97,7 @@ final class Outbox: NSObject, @unchecked Sendable {
 
   let directory: URL
   let maxPayloadBytes: Int64
-  private let queue = DispatchQueue(label: "dev.kitlangton.scrawl.outbox")
+  private let queue = DispatchQueue(label: "dev.kitlangton.apparent.outbox")
   private let onEvent: @Sendable (Event) -> Void
   private let now: @Sendable () -> Date
   private var session: URLSession!
@@ -376,7 +376,7 @@ final class Outbox: NSObject, @unchecked Sendable {
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     // Apple reserves `Authorization` for the URL loading system, so a background session may drop
     // or replace it; the server also accepts the token here.
-    request.setValue(token, forHTTPHeaderField: "X-Scrawl-Token")
+    request.setValue(token, forHTTPHeaderField: "X-Apparent-Token")
     request.setValue(String(entry.payloadBytes), forHTTPHeaderField: "Content-Length")
     let task = session.uploadTask(with: request, fromFile: payloadURL(entry.id))
     task.taskDescription = entry.id

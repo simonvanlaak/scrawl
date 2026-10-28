@@ -1,5 +1,5 @@
 {
-  "capture": "scrawl-1792532925341-c160-19.scrawl",
+  "capture": "apparent-1792532925341-c160-19.apparent",
   "savedDecision": "send CANVAS",
   "page": {
     "url": "https://studio.taila8e7c7.ts.net:8444/raw/lot-2026-10-20/iteration-2.jpg",
@@ -81,7 +81,7 @@
   },
   "bundle": {
     "version": 1,
-    "id": "scrawl-1792532925341-c160-19",
+    "id": "apparent-1792532925341-c160-19",
     "createdAtMs": 1792532977736,
     "durationMs": 52094,
     "target": {
@@ -1277,9 +1277,9 @@
       },
       {
         "id": "ses_edb816b31ffe4B3nexhh9rqAJp",
-        "title": "SCRAWL",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "title": "APPARENT",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792532863981,
         "viewedMs": 1792532693610
       },
@@ -1381,8 +1381,8 @@
       {
         "id": "ses_eb4805506ffdExxfN3euuGJzSR",
         "title": "Quick check-in",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792472119901,
         "viewedMs": 1792302248443
       },
@@ -1443,9 +1443,9 @@
       },
       {
         "id": "ses_ead37e06cffeRfPkN2vrbdNWDs",
-        "title": "SCRAWL RECORDER",
-        "directory": "/Users/kit/code/open-source/scrawl",
-        "repo": "/Users/kit/code/open-source/scrawl",
+        "title": "APPARENT RECORDER",
+        "directory": "/Users/kit/code/open-source/apparent",
+        "repo": "/Users/kit/code/open-source/apparent",
         "updatedMs": 1792391837251,
         "viewedMs": 1792391837366
       },

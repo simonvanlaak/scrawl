@@ -163,5 +163,5 @@ export function BrushIcon({ style }: { style?: CSSProperties }) {
 
 // The flat icon in the 3D brush's place, light enough to render before three.js loads.
 export function BrushFallback() {
-  return createElement("div", { style: BRUSH_BOX, role: "img", "aria-label": "Scrawl" }, createElement(BrushIcon))
+  return createElement("div", { style: BRUSH_BOX, role: "img", "aria-label": "Apparent" }, createElement(BrushIcon))
 }

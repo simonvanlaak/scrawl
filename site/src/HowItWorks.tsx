@@ -412,7 +412,7 @@ function CropDiagram({ t, script }: { t: number; script: Script | null }) {
 
 /* ---------- 4. A closer look when needed ---------- */
 
-const COMMAND = `scrawl zoom latest --at "colliding"`
+const COMMAND = `apparent zoom latest --at "colliding"`
 const TYPE: [number, number] = [300, 300 + COMMAND.length * 28]
 const CELLS_AT = TYPE[1] + 350
 const CELL = { w: 102, h: 58, gap: 8, top: 58 }

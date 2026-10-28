@@ -93,7 +93,7 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
   var microphone: (id: String, name: String)?
   lazy var session = AVCaptureSession()
   lazy var movieOutput = AVCaptureMovieFileOutput()
-  let queue = DispatchQueue(label: "dev.kitlangton.scrawl.helper.session")
+  let queue = DispatchQueue(label: "dev.kitlangton.apparent.helper.session")
   var phoneInput: AVCaptureDeviceInput?
   var window: MirrorPanel?
   var caseView: PhoneCaseView?
@@ -117,11 +117,11 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
     showWindow(title: "iPhone", orderFront: !hiddenPreview)
     AVCaptureDevice.requestAccess(for: .video) { granted in
       DispatchQueue.main.async {
-        guard granted else { return self.die("Camera access denied; allow Scrawl in System Settings › Privacy & Security › Camera") }
+        guard granted else { return self.die("Camera access denied; allow Apparent in System Settings › Privacy & Security › Camera") }
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
           DispatchQueue.main.async {
             if !micGranted {
-              self.warn("Microphone access denied; recording without narration (allow Scrawl in System Settings › Privacy & Security › Microphone)")
+              self.warn("Microphone access denied; recording without narration (allow Apparent in System Settings › Privacy & Security › Microphone)")
             }
             Phone.publishScreenCaptureDevices()
             let deadline = Date().addingTimeInterval(12)
@@ -353,7 +353,7 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
   }
 
   /// The picture's frame in global display coordinates with a top-left origin, the space
-  /// `CGEventGetLocation` reports, so Scrawl can normalize pointer and pen positions into it.
+  /// `CGEventGetLocation` reports, so Apparent can normalize pointer and pen positions into it.
   private func emitRect() {
     guard let window, let primary = NSScreen.screens.first else { return }
     let frame = window.frame
@@ -563,7 +563,7 @@ final class PhoneCaseView: NSView {
 }
 
 func log(_ message: String) {
-  FileHandle.standardError.write(Data("scrawl-helper: \(message)\n".utf8))
+  FileHandle.standardError.write(Data("apparent-helper: \(message)\n".utf8))
 }
 
 func nowMs() -> Int {

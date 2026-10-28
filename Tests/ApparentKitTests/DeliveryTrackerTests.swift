@@ -1,5 +1,5 @@
 import Foundation
-@testable import ScrawlKit
+@testable import ApparentKit
 import Testing
 
 struct DeliveryTrackerTests {

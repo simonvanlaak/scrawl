@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "scrawl-site",
+      "name": "apparent-site",
       "dependencies": {
         "knobs": "npm:@kitlangton/knobs@0.3.0",
         "perfect-freehand": "^1.2.3",

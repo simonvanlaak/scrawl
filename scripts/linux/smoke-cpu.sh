@@ -13,7 +13,7 @@ cd "$smoke"
 cp "$test_binary" ./speech-test
 lib="$smoke/squashfs-root/usr/lib"
 export LD_LIBRARY_PATH="$lib"
-export SCRAWL_TEST_MODEL_DIR="${SCRAWL_TEST_MODEL_DIR:-$smoke/model}"
+export APPARENT_TEST_MODEL_DIR="${APPARENT_TEST_MODEL_DIR:-$smoke/model}"
 # There must be no build-tree RPATH left in packaged libraries.
 if find "$lib" -name '*transcribe*.so*' -o -name '*ggml*.so*' | while read -r file; do
   patchelf --print-rpath "$file"
@@ -35,6 +35,6 @@ else
   "$@" -- ./speech-test speech::tests::downloads_and_runs_parakeet --exact --ignored --nocapture
   # Also exercise the shipped Rust binary's keyframe/render/bundle path, without
   # a display, microphone, clipboard or an installed speech model.
-  "$@" -- ./squashfs-root/usr/bin/scrawl demo --out "$smoke/demo.scrawl"
-  test -s "$smoke/demo.scrawl/scrawl.json"
+  "$@" -- ./squashfs-root/usr/bin/apparent demo --out "$smoke/demo.apparent"
+  test -s "$smoke/demo.apparent/apparent.json"
 fi

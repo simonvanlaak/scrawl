@@ -5,7 +5,7 @@
 /// A press this soon after a recording starts is a double press, not "finish".
 pub const DOUBLE_PRESS_MS: u64 = 400;
 
-/// What Scrawl is doing when the shortcut goes down.
+/// What Apparent is doing when the shortcut goes down.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Activity {
     /// Nothing recording (a finished capture's island may be showing).

@@ -3,7 +3,7 @@ use fframes::{
     Scene, Scenes, Svgr, Transform, Video, animation::Easing, include_media_dir,
 };
 
-include_media_dir!(pub struct ScrawlDemoMedia, "media");
+include_media_dir!(pub struct ApparentDemoMedia, "media");
 
 pub const WIDTH: usize = 1920;
 pub const HEIGHT: usize = 1080;
@@ -24,8 +24,8 @@ const FONT_SANS: &str = "DM Sans";
 const FONT_DISPLAY: &str = "Inter 24pt";
 const FONT_MONO: &str = "JetBrains Mono";
 
-pub struct ScrawlDemoVideo<'a> {
-    pub media: &'a ScrawlDemoMedia,
+pub struct ApparentDemoVideo<'a> {
+    pub media: &'a ApparentDemoMedia,
     intro: IntroScene<'a>,
     target: TargetScene,
     draw: DrawScene,
@@ -33,8 +33,8 @@ pub struct ScrawlDemoVideo<'a> {
     paste: PasteScene,
 }
 
-impl<'a> ScrawlDemoVideo<'a> {
-    pub fn new(media: &'a ScrawlDemoMedia, _title: &'a str) -> Self {
+impl<'a> ApparentDemoVideo<'a> {
+    pub fn new(media: &'a ApparentDemoMedia, _title: &'a str) -> Self {
         Self {
             media,
             intro: IntroScene { media },
@@ -46,13 +46,13 @@ impl<'a> ScrawlDemoVideo<'a> {
     }
 }
 
-impl std::fmt::Debug for ScrawlDemoVideo<'_> {
+impl std::fmt::Debug for ApparentDemoVideo<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScrawlDemoVideo").finish()
+        f.debug_struct("ApparentDemoVideo").finish()
     }
 }
 
-impl Video for ScrawlDemoVideo<'_> {
+impl Video for ApparentDemoVideo<'_> {
     const FPS: usize = 60;
     const WIDTH: usize = WIDTH;
     const HEIGHT: usize = HEIGHT;
@@ -133,7 +133,7 @@ fn render_keycap(x: f32, y: f32, w: f32, label: &str, pressed: f32) -> Svgr<'sta
 
 /// Scene 1 (0..4.4s): Hero Liquid Glass Icon + Dynamic Island HUD + ⌃⌥⇧S Trigger
 pub struct IntroScene<'a> {
-    media: &'a ScrawlDemoMedia,
+    media: &'a ApparentDemoMedia,
 }
 
 impl std::fmt::Debug for IntroScene<'_> {
@@ -209,7 +209,7 @@ impl Scene for IntroScene<'_> {
                     at 0.0 => 0.35, animate 0.55 => 1.0, Easing::EaseOut,
                 ))}>
                     <text x="960" y="545" text-anchor="middle" font-family={FONT_DISPLAY} font-weight="700" font-size="104" letter-spacing="-2" fill={TEXT_WHITE}>
-                        "Scrawl"
+                        "Apparent"
                     </text>
                     <text x="960" y="622" text-anchor="middle" font-family={FONT_SANS} font-weight="500" font-size="42" fill={TEXT_SOFT}>
                         "Screen, voice, and freehand ink for coding agents"
@@ -313,7 +313,7 @@ impl Scene for TargetScene {
                 <text x="246" y="282" font-family={FONT_DISPLAY} font-weight="700" font-size="28" fill={TEXT_SOFT}>"Sessions"</text>
                 <rect x="236" y="310" width="508" height="54" rx="10" fill="#232730" />
                 <text x="260" y="345" font-family={FONT_MONO} font-weight="400" font-size="24" fill={TEXT_WHITE}>"DESKTOP · opencode"</text>
-                <text x="260" y="415" font-family={FONT_MONO} font-weight="400" font-size="24" fill={TEXT_MUTED}>"SCRAWL · rust + gpui"</text>
+                <text x="260" y="415" font-family={FONT_MONO} font-weight="400" font-size="24" fill={TEXT_MUTED}>"APPARENT · rust + gpui"</text>
                 <text x="260" y="475" font-family={FONT_MONO} font-weight="400" font-size="24" fill={TEXT_MUTED}>" IOS BUILD SCALE"</text>
 
                 // Background Window B (Main Editor Window)
@@ -444,7 +444,7 @@ impl Scene for DrawScene {
                 <text x="280" y="574" font-family={FONT_DISPLAY} font-weight="700" font-size="30" fill={TEXT_SOFT}>"BLOG GAME"</text>
 
                 <rect x="240" y="645" width="680" height="78" rx="14" fill="#1c2029" />
-                <text x="280" y="694" font-family={FONT_DISPLAY} font-weight="700" font-size="30" fill={TEXT_SOFT}>"SCRAWL"</text>
+                <text x="280" y="694" font-family={FONT_DISPLAY} font-weight="700" font-size="30" fill={TEXT_SOFT}>"APPARENT"</text>
 
                 // Explanation Card on Right Side of Canvas
                 <rect x="1020" y="265" width="660" height="458" rx="18" fill={CARD_BG} stroke={LINE_SUBTLE} stroke-width="1.5" />
@@ -487,7 +487,7 @@ impl Scene for DrawScene {
 
 /// Scene 4 (14.8..19.8s): Real Contact Sheet + Single-Pass Aligned Transcript
 pub struct BundleScene<'a> {
-    media: &'a ScrawlDemoMedia,
+    media: &'a ApparentDemoMedia,
 }
 
 impl std::fmt::Debug for BundleScene<'_> {
@@ -520,7 +520,7 @@ impl Scene for BundleScene<'_> {
                     "3 · Labeled Frames in Image, Transcript in Text"
                 </text>
 
-                // Left: Real Contact Sheet Image from Scrawl
+                // Left: Real Contact Sheet Image from Apparent
                 <g transform={frame.animate(fframes::timeline!(
                     at 0.1, animate Transform::translate(-40, 0) => Transform::translate(0, 0),
                         Easing::Spring { mass: 1.0, stiffness: 180.0, damping: 20.0 },
@@ -542,7 +542,7 @@ impl Scene for BundleScene<'_> {
                         "summary.md  (time-aligned transcript + paths)"
                     </text>
                     <text x="1000" y="326" font-family={FONT_MONO} font-weight="400" font-size="26" fill={ACCENT_GREEN}>
-                        "[scrawl 0:32 · OpenCode]"
+                        "[apparent 0:32 · OpenCode]"
                     </text>
 
                     // Keyframe #1 Block
@@ -588,7 +588,7 @@ impl Scene for BundleScene<'_> {
                     </g>
 
                     <text x="1000" y="902" font-family={FONT_MONO} font-weight="400" font-size="22" fill={ACCENT_BLUE}>
-                        "Look closer: scrawl frames 'latest' --from 0:00 --to 0:32"
+                        "Look closer: apparent frames 'latest' --from 0:00 --to 0:32"
                     </text>
                 </g>
             </g>
@@ -666,7 +666,7 @@ impl Scene for PasteScene {
                 <g opacity={step2_txt_op}>
                     <rect x="290" y="428" width="1340" height="320" rx="16" fill="#12141a" stroke="#282d38" stroke-width="1.5" />
                     <text x="325" y="478" font-family={FONT_MONO} font-weight="400" font-size="24" fill={ACCENT_GREEN}>
-                        "[scrawl 0:32 · OpenCode]   ← 2nd ⌘V (160ms later) inserts aligned text"
+                        "[apparent 0:32 · OpenCode]   ← 2nd ⌘V (160ms later) inserts aligned text"
                     </text>
                     <text x="325" y="532" font-family={FONT_MONO} font-weight="400" font-size="23" fill={TEXT_WHITE}>
                         "- [#1 · 0:15] clicked (x 0.44, y 0.40) — “As I drag between these session tabs…”"
@@ -675,10 +675,10 @@ impl Scene for PasteScene {
                         "- [#2 · 0:17] marked region x 0.41–0.44 — “It would be nice if it always highlighted…”"
                     </text>
                     <text x="325" y="642" font-family={FONT_MONO} font-weight="400" font-size="21" fill={TEXT_MUTED}>
-                        "Video: ~/Library/Application Support/scrawl/captures/…/recording.mp4"
+                        "Video: ~/Library/Application Support/apparent/captures/…/recording.mp4"
                     </text>
                     <text x="325" y="688" font-family={FONT_MONO} font-weight="400" font-size="21" fill={ACCENT_BLUE}>
-                        "Look closer: scrawl frames 'latest' --from 0:00 --to 0:32 --fps 4"
+                        "Look closer: apparent frames 'latest' --from 0:00 --to 0:32 --fps 4"
                     </text>
                 </g>
 

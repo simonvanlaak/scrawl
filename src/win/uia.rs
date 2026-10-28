@@ -62,8 +62,8 @@ fn text(value: windows::core::Result<windows::core::BSTR>) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// The element at a global point in physical pixels (Scrawl is per-monitor DPI aware, as UI
-/// Automation's coordinates are). Scrawl's own windows let clicks through or are skipped. Stops
+/// The element at a global point in physical pixels (Apparent is per-monitor DPI aware, as UI
+/// Automation's coordinates are). Apparent's own windows let clicks through or are skipped. Stops
 /// reading attributes once `budget` is spent.
 pub fn hit_test(x: f64, y: f64, budget: Duration) -> Option<Hit> {
     let started = Instant::now();

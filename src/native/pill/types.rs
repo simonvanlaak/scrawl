@@ -28,9 +28,9 @@ impl PillStyle {
         }
     }
 
-    /// Resolves the active `PillStyle` from `SCRAWL_PILL_STYLE`, `tune.json`, or `config.json`.
+    /// Resolves the active `PillStyle` from `APPARENT_PILL_STYLE`, `tune.json`, or `config.json`.
     pub fn current() -> Self {
-        if let Ok(env) = std::env::var("SCRAWL_PILL_STYLE")
+        if let Ok(env) = std::env::var("APPARENT_PILL_STYLE")
             && let Some(style) = Self::from_str_opt(&env)
         {
             return style;
@@ -73,7 +73,7 @@ pub struct PillSnapshot {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mic_warning_accessibility_label(warning: crate::audio::InputWarning, chips: bool) -> String {
     format!(
-        "Scrawl recording controls. {}. {} available",
+        "Apparent recording controls. {}. {} available",
         warning.announcement(),
         if chips { "Cancel recording" } else { "Finish recording" }
     )

@@ -1,10 +1,10 @@
 //! Window geometry and cursor log for Screen-mode captures.
 //!
 //! While a full-screen capture records, a low-rate worker writes down which windows were on
-//! screen (front to back) and where the cursor was, so `scrawl autocrop` can work out which
+//! screen (front to back) and where the cursor was, so `apparent autocrop` can work out which
 //! window the narration and ink were about. Snapshots are deduped (only stored when the window
 //! list changes), cursor samples are deduped by movement, and window titles stay in
-//! `scrawl.json`: they never go into `summary.md` or the clipboard.
+//! `apparent.json`: they never go into `summary.md` or the clipboard.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -433,7 +433,7 @@ pub fn dock_rect(frame: TargetFrame) -> Option<[f64; 4]> {
     }
 }
 
-/// Reads the visible top-level windows (front to back): Scrawl's own floating windows, then the
+/// Reads the visible top-level windows (front to back): Apparent's own floating windows, then the
 /// window manager's list. Panels (GNOME's top bar, KDE's) are the `Dock` (layer 20), windows
 /// kept above sit above layer 0, and hidden ones have no alpha. On Wayland only X11 apps'
 /// windows are listed.
@@ -604,7 +604,7 @@ impl WindowLogger {
         let stop = Arc::clone(&stopping);
         let dock = dock_rect(frame);
         let worker = thread::Builder::new()
-            .name("scrawl-window-log".into())
+            .name("apparent-window-log".into())
             .spawn(move || run(frame, dock, started_at, &request, &stop))
             .ok();
         Self { stopping, worker }
@@ -621,7 +621,7 @@ impl WindowLogger {
             })
             .unwrap_or_default();
         if log.snapshot_calls > 0 {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "Window log: {} snapshots taken, {} stored, {:.2} ms each; {} cursor samples",
                 log.snapshot_calls,
                 log.windows.len(),
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn clicks_on_scrawl_windows_are_found_through_the_ink_overlay() {
+    fn clicks_on_apparent_windows_are_found_through_the_ink_overlay() {
         let window = |id, pid, bounds| RawWindow {
             id,
             pid,
@@ -823,7 +823,7 @@ mod tests {
             alpha: 1.0,
         };
         let windows = [
-            raw(1, 9, "Scrawl", "", [1000.0, 0.0, 300.0, 300.0], 0),
+            raw(1, 9, "Apparent", "", [1000.0, 0.0, 300.0, 300.0], 0),
             raw(
                 2,
                 10,
@@ -911,9 +911,9 @@ mod tests {
             settings[0].clone(),
         ];
         assert!(macos_is_asking(&quit_and_reopen));
-        // The same alert behind Scrawl's window.
+        // The same alert behind Apparent's window.
         let behind = [
-            window(11, "Scrawl Helper", [650.0, 145.0, 620.0, 532.0], 0),
+            window(11, "Apparent Helper", [650.0, 145.0, 620.0, 532.0], 0),
             quit_and_reopen[0].clone(),
             settings[0].clone(),
         ];

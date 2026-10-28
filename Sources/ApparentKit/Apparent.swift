@@ -4,12 +4,12 @@
   import SwiftUI
   import UIKit
 
-  /// Per-device Scrawl ingest configuration, stored in the Keychain under `dev.kitlangton.scrawl`.
-  public struct ScrawlConfig: Codable, Equatable, Sendable {
-    public static let keychainService = "dev.kitlangton.scrawl"
+  /// Per-device Apparent ingest configuration, stored in the Keychain under `dev.kitlangton.apparent`.
+  public struct ApparentConfig: Codable, Equatable, Sendable {
+    public static let keychainService = "dev.kitlangton.apparent"
     private static let legacyKeychainService = "dev.kitlangton.tether"
     private static let keychainAccount = "config"
-    private static let setupHosts: Set<String> = ["scrawl", "tether"]
+    private static let setupHosts: Set<String> = ["apparent", "tether"]
 
     public var urls: [URL]
     public var token: String
@@ -27,12 +27,12 @@
     }
 
     enum SetupAction: Equatable {
-      case configure(ScrawlConfig)
+      case configure(ApparentConfig)
       case reset
     }
 
-    /// Parses `<scheme>://scrawl?url=<base>[&url=<second>]&token=<token>[&session=ses_…]`
-    /// or `<scheme>://scrawl?reset=1` (also accepts the legacy `tether` host).
+    /// Parses `<scheme>://apparent?url=<base>[&url=<second>]&token=<token>[&session=ses_…]`
+    /// or `<scheme>://apparent?reset=1` (also accepts the legacy `tether` host).
     /// Only `http://` and `https://` base URLs are accepted.
     static func parseSetupURL(_ url: URL) -> SetupAction? {
       guard let scheme = url.scheme, !scheme.isEmpty,
@@ -60,7 +60,7 @@
         .first(where: { $0.name == "session" })?
         .value?
         .trimmingCharacters(in: .whitespacesAndNewlines)
-      let config = ScrawlConfig(urls: urls, token: token, sessionID: session)
+      let config = ApparentConfig(urls: urls, token: token, sessionID: session)
       guard config.isValid else { return nil }
       return .configure(config)
     }
@@ -92,7 +92,7 @@
       return result
     }
 
-    public static func loadFromKeychain() -> ScrawlConfig? {
+    public static func loadFromKeychain() -> ApparentConfig? {
       if let current = loadFromKeychain(service: keychainService) {
         return current
       }
@@ -104,7 +104,7 @@
       return nil
     }
 
-    private static func loadFromKeychain(service: String) -> ScrawlConfig? {
+    private static func loadFromKeychain(service: String) -> ApparentConfig? {
       let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service,
@@ -116,15 +116,15 @@
       let status = SecItemCopyMatching(query as CFDictionary, &result)
       guard status == errSecSuccess,
             let data = result as? Data,
-            let decoded = try? JSONDecoder().decode(ScrawlConfig.self, from: data)
+            let decoded = try? JSONDecoder().decode(ApparentConfig.self, from: data)
       else { return nil }
-      let normalized = ScrawlConfig(urls: decoded.urls, token: decoded.token, sessionID: decoded.sessionID)
+      let normalized = ApparentConfig(urls: decoded.urls, token: decoded.token, sessionID: decoded.sessionID)
       return normalized.isValid ? normalized : nil
     }
 
     @discardableResult
-    public static func saveToKeychain(_ config: ScrawlConfig) -> Bool {
-      let normalized = ScrawlConfig(urls: config.urls, token: config.token, sessionID: config.sessionID)
+    public static func saveToKeychain(_ config: ApparentConfig) -> Bool {
+      let normalized = ApparentConfig(urls: config.urls, token: config.token, sessionID: config.sessionID)
       guard normalized.isValid, let data = try? JSONEncoder().encode(normalized) else { return false }
       let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
@@ -157,33 +157,33 @@
     }
 
     /// Resolves the active configuration by overlaying launch arguments / environment variables
-    /// (`-scrawl-url`, `SCRAWL_URL`, `-scrawl-token`, `SCRAWL_TOKEN`, `-scrawl-session`,
-    /// `SCRAWL_SESSION`) on top of the Keychain configuration.
+    /// (`-apparent-url`, `APPARENT_URL`, `-apparent-token`, `APPARENT_TOKEN`, `-apparent-session`,
+    /// `APPARENT_SESSION`) on top of the Keychain configuration.
     static func resolved(
       arguments: [String] = ProcessInfo.processInfo.arguments,
       environment: [String: String] = ProcessInfo.processInfo.environment,
-      keychain: ScrawlConfig? = loadFromKeychain()
-    ) -> ScrawlConfig? {
+      keychain: ApparentConfig? = loadFromKeychain()
+    ) -> ApparentConfig? {
       var overrideURLStrings: [String] = []
       var index = 0
       while index < arguments.count {
-        if arguments[index] == "-scrawl-url", index + 1 < arguments.count {
+        if arguments[index] == "-apparent-url", index + 1 < arguments.count {
           overrideURLStrings.append(contentsOf: arguments[index + 1].split(separator: ",").map(String.init))
           index += 2
         } else {
           index += 1
         }
       }
-      if let envURL = environment["SCRAWL_URL"], !envURL.isEmpty {
+      if let envURL = environment["APPARENT_URL"], !envURL.isEmpty {
         overrideURLStrings.append(contentsOf: envURL.split(separator: ",").map(String.init))
       }
       let overrideURLs = validBaseURLs(overrideURLStrings.compactMap(parseHTTPBaseURL))
       let urls = !overrideURLs.isEmpty ? overrideURLs : (keychain?.urls ?? [])
 
       var overrideToken: String?
-      if let idx = arguments.firstIndex(of: "-scrawl-token"), idx + 1 < arguments.count {
+      if let idx = arguments.firstIndex(of: "-apparent-token"), idx + 1 < arguments.count {
         overrideToken = arguments[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
-      } else if let envToken = environment["SCRAWL_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      } else if let envToken = environment["APPARENT_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !envToken.isEmpty
       {
         overrideToken = envToken
@@ -191,39 +191,39 @@
       let token = (overrideToken?.isEmpty == false ? overrideToken : nil) ?? keychain?.token ?? ""
 
       var overrideSession: String?
-      if let idx = arguments.firstIndex(of: "-scrawl-session"), idx + 1 < arguments.count {
+      if let idx = arguments.firstIndex(of: "-apparent-session"), idx + 1 < arguments.count {
         overrideSession = arguments[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
-      } else if let envSession = environment["SCRAWL_SESSION"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      } else if let envSession = environment["APPARENT_SESSION"]?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !envSession.isEmpty
       {
         overrideSession = envSession
       }
       let sessionID = (overrideSession?.isEmpty == false ? overrideSession : nil) ?? keychain?.sessionID
 
-      let config = ScrawlConfig(urls: urls, token: token, sessionID: sessionID)
+      let config = ApparentConfig(urls: urls, token: token, sessionID: sessionID)
       return config.isValid ? config : nil
     }
   }
 
   /// Records your app's screen with narration, the touches that drove it, markers, freehand red
-  /// strokes, and app events, all on one clock, and sends the result straight to Scrawl on your Mac
+  /// strokes, and app events, all on one clock, and sends the result straight to Apparent on your Mac
   /// (falling back to the share sheet if your Mac isn't reachable).
   ///
-  ///     WindowGroup { ContentView().scrawl() }      // three-finger long press starts and stops
-  ///     Scrawl.event("Done tapped")                 // optional: what the app did, on the timeline
+  ///     WindowGroup { ContentView().apparent() }      // three-finger long press starts and stops
+  ///     Apparent.event("Done tapped")                 // optional: what the app did, on the timeline
   ///
-  /// Scrawl is completely inert until configured on the device via a `<scheme>://scrawl?...` setup
-  /// link (generated by `scrawl link --scheme <scheme>`) or debug launch arguments.
+  /// Apparent is completely inert until configured on the device via a `<scheme>://apparent?...` setup
+  /// link (generated by `apparent link --scheme <scheme>`) or debug launch arguments.
   ///
   /// While recording, a slim strip on the screen's edge (drag its dot to move it) toggles drawing
   /// red strokes, discards (with Undo), or sends to your Mac / agent. The trigger again also sends.
   /// Every touch goes on the timeline with the label of the element it hit; nothing is drawn for
-  /// it on screen (Scrawl on the Mac draws touches from the timeline). Holding still gives a tick.
+  /// it on screen (Apparent on the Mac draws touches from the timeline). Holding still gives a tick.
   @MainActor
   @Observable
-  public final class Scrawl {
-    public static let shared = Scrawl()
-    static let configurationDidChangeNotification = Notification.Name("dev.kitlangton.scrawl.configurationDidChange")
+  public final class Apparent {
+    public static let shared = Apparent()
+    static let configurationDidChangeNotification = Notification.Name("dev.kitlangton.apparent.configurationDidChange")
 
     public enum UploadStatus: Equatable, Sendable {
       case idle
@@ -241,9 +241,9 @@
     public private(set) var uploadStatus: UploadStatus = .idle
     /// Why the last delivery failed: no Mac answered (LAN; it waits for USB pickup or Share), the
     /// HTTPS endpoint answered 401/403 (link revoked) or 413, or it couldn't be saved for sending.
-    private(set) var deliveryFailure = ScrawlStrip.Failure.unreachable
+    private(set) var deliveryFailure = ApparentStrip.Failure.unreachable
     /// A short message beside the strip while recording (link expired, the length cap).
-    private(set) var notice: ScrawlStrip.Notice?
+    private(set) var notice: ApparentStrip.Notice?
     /// How much of the shown HTTPS upload has gone out (0…1), once it reports bytes.
     private(set) var sendProgress: Double?
     /// The shown HTTPS upload is running on a working network but hasn't moved in a while.
@@ -279,7 +279,7 @@
     /// `AppFrameRecorder.hostedVideoBitRate` is about 0.39 MB a second, so 3 minutes is about
     /// 70 MB. ReplayKit's bitrate can't be set (native resolution, an estimated 8–12 Mbps), so its
     /// recordings stop sooner. The strip warns `limitWarning` before the cap, then sends.
-    static func hostedRecordingLimit(for method: ScrawlCaptureMethod) -> Duration {
+    static func hostedRecordingLimit(for method: ApparentCaptureMethod) -> Duration {
       switch method {
       case .appFrames: .seconds(180)
       case .replayKit: .seconds(45)
@@ -310,19 +310,19 @@
     private(set) var preparedAt: Date?
     @ObservationIgnored private var failedRecording: Recording?
     /// The current recording's recorder.
-    @ObservationIgnored private var recorder: (any ScrawlRecorder)?
+    @ObservationIgnored private var recorder: (any ApparentRecorder)?
     /// The recorder is starting (or asking permission) and the overlay is already up.
     public private(set) var isStarting = false
     @ObservationIgnored private var pendingFinish: Bool?
-    @ObservationIgnored private let makeRecorder: @MainActor (ScrawlCaptureMethod, Bool) -> any ScrawlRecorder
+    @ObservationIgnored private let makeRecorder: @MainActor (ApparentCaptureMethod, Bool) -> any ApparentRecorder
     /// Optional startup measurements, called on the stage's own queue. Keep the callback cheap.
-    @ObservationIgnored public var startupObserver: (@Sendable (ScrawlStartupEvent) -> Void)?
+    @ObservationIgnored public var startupObserver: (@Sendable (ApparentStartupEvent) -> Void)?
     @ObservationIgnored var startupTrace: StartupTrace?
     @ObservationIgnored private var discardID = 0
     @ObservationIgnored private var discarded: FinishedRecording?
     /// Undo was tapped before the recorder finished writing this discard's movie.
     @ObservationIgnored private var undoneDiscardID: Int?
-    /// The Scrawl address that answered when the current recording started.
+    /// The Apparent address that answered when the current recording started.
     @ObservationIgnored private var reachableURL: URL?
     @ObservationIgnored private var lastSetupURLHandled: (url: URL, at: ContinuousClock.Instant)?
     /// Durable delivery to an HTTPS endpoint; exists only while paired with one.
@@ -356,9 +356,9 @@
     /// How recordings are captured: the app's own windows (the default; no screen-recording
     /// prompt) or ReplayKit (exact screen pixels, behind iOS's consent alert). Takes effect on the
     /// next recording.
-    public var captureMethod: ScrawlCaptureMethod = .appFrames
+    public var captureMethod: ApparentCaptureMethod = .appFrames
     /// Whether to turn off iOS's three-finger text-editing gestures (undo, redo, cut, copy, paste,
-    /// and their Undo · Cut · Copy · Redo bar) in this app while ScrawlKit's three-finger trigger
+    /// and their Undo · Cut · Copy · Redo bar) in this app while ApparentKit's three-finger trigger
     /// is installed, so starting a recording with a text field focused doesn't open that bar.
     /// Only on paired (configured) devices; set `false` to keep the system gestures.
     public var suppressesSystemEditingGestures = true {
@@ -370,18 +370,18 @@
     }
     /// Whether to show the share sheet when a recording stops (used as fallback if Mac ingest is unreachable).
     public var sharesWhenDone = true
-    /// Candidate Scrawl ingest URLs on the Mac (from Keychain or launch args / env).
+    /// Candidate Apparent ingest URLs on the Mac (from Keychain or launch args / env).
     public var serverURLs: [URL] = [] {
       didSet { notifyConfigurationChanged() }
     }
-    /// Bearer token for authenticating with Scrawl's ingest server.
+    /// Bearer token for authenticating with Apparent's ingest server.
     public var token: String? {
       didSet { notifyConfigurationChanged() }
     }
     /// Optional OpenCode session ID (`ses_...`) to route this app's captures to.
     public var sessionID: String?
 
-    /// Whether this device has a valid Scrawl configuration (at least one `http`/`https` base URL and a token).
+    /// Whether this device has a valid Apparent configuration (at least one `http`/`https` base URL and a token).
     public static var isConfigured: Bool {
       shared.isConfigured
     }
@@ -391,8 +391,8 @@
     }
 
     init(
-      config: ScrawlConfig? = ScrawlConfig.resolved(),
-      makeRecorder: @escaping @MainActor (ScrawlCaptureMethod, Bool) -> any ScrawlRecorder = { $0.makeRecorder(hosted: $1) }
+      config: ApparentConfig? = ApparentConfig.resolved(),
+      makeRecorder: @escaping @MainActor (ApparentCaptureMethod, Bool) -> any ApparentRecorder = { $0.makeRecorder(hosted: $1) }
     ) {
       self.makeRecorder = makeRecorder
       if let initial = config {
@@ -402,13 +402,13 @@
       }
     }
 
-    /// Handles a `<scheme>://scrawl?url=<urlencoded base>[&url=<second>]&token=<token>[&session=ses_…]`
-    /// setup link or `<scheme>://scrawl?reset=1` reset link (also accepts the legacy `tether` host).
+    /// Handles a `<scheme>://apparent?url=<urlencoded base>[&url=<second>]&token=<token>[&session=ses_…]`
+    /// setup link or `<scheme>://apparent?reset=1` reset link (also accepts the legacy `tether` host).
     /// Stores or clears the configuration in the Keychain, triggers haptic feedback, and returns
-    /// `true` when `url` was a valid Scrawl link.
+    /// `true` when `url` was a valid Apparent link.
     @discardableResult
     public static func handleSetupURL(_ url: URL) -> Bool {
-      guard let action = ScrawlConfig.parseSetupURL(url) else { return false }
+      guard let action = ApparentConfig.parseSetupURL(url) else { return false }
       let now = ContinuousClock.now
       let isDuplicateEvent = shared.lastSetupURLHandled.map {
         $0.url == url && ($0.at.duration(to: now) < .milliseconds(250))
@@ -417,14 +417,14 @@
 
       switch action {
       case let .configure(newConfig):
-        ScrawlConfig.saveToKeychain(newConfig)
-        shared.applyConfig(ScrawlConfig.resolved(keychain: newConfig) ?? newConfig)
+        ApparentConfig.saveToKeychain(newConfig)
+        shared.applyConfig(ApparentConfig.resolved(keychain: newConfig) ?? newConfig)
         if !isDuplicateEvent {
           UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
       case .reset:
-        ScrawlConfig.deleteFromKeychain()
-        shared.applyConfig(ScrawlConfig.resolved(keychain: nil))
+        ApparentConfig.deleteFromKeychain()
+        shared.applyConfig(ApparentConfig.resolved(keychain: nil))
         if !isDuplicateEvent {
           UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
@@ -440,19 +440,19 @@
     @ObservationIgnored public var onRecordingSubmitted: (@MainActor @Sendable (URL, URL) async -> Bool)?
 
     /// Configures or clears a team-feedback endpoint in memory without altering the device's
-    /// saved personal Scrawl Keychain configuration. Passing `nil` restores the saved config.
+    /// saved personal Apparent Keychain configuration. Passing `nil` restores the saved config.
     public func setTeamEndpoint(url: URL?, token: String?) {
       if let url, let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
         teamEndpoint = (url, token)
-        applyConfig(ScrawlConfig(urls: [url], token: token, sessionID: nil))
+        applyConfig(ApparentConfig(urls: [url], token: token, sessionID: nil))
       } else {
         teamEndpoint = nil
-        applyConfig(ScrawlConfig.resolved())
+        applyConfig(ApparentConfig.resolved())
       }
     }
 
-    private func applyConfig(_ config: ScrawlConfig?) {
-      let effective = teamEndpoint.map { ScrawlConfig(urls: [$0.url], token: $0.token, sessionID: nil) } ?? config
+    private func applyConfig(_ config: ApparentConfig?) {
+      let effective = teamEndpoint.map { ApparentConfig(urls: [$0.url], token: $0.token, sessionID: nil) } ?? config
       serverURLs = effective?.urls ?? []
       token = effective?.token
       sessionID = effective?.sessionID
@@ -473,7 +473,7 @@
     }
 
     /// Posted on the next turn of the main queue: with @Observable, these properties' didSet runs
-    /// inside init too, and a listener reading `Scrawl.shared` then would deadlock its creation.
+    /// inside init too, and a listener reading `Apparent.shared` then would deadlock its creation.
     private func notifyConfigurationChanged() {
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
@@ -494,12 +494,12 @@
 
     /// The background `URLSession` identifier the outbox uploads on.
     public static var backgroundSessionIdentifier: String {
-      "dev.kitlangton.scrawl.outbox.\(Bundle.main.bundleIdentifier ?? "app")"
+      "dev.kitlangton.apparent.outbox.\(Bundle.main.bundleIdentifier ?? "app")"
     }
 
     /// Optional: forward `application(_:handleEventsForBackgroundURLSession:completionHandler:)`
     /// here so iOS can relaunch a killed app to finish reporting background uploads. Returns
-    /// `false` (without calling `completionHandler`) for sessions that aren't ScrawlKit's. Without
+    /// `false` (without calling `completionHandler`) for sessions that aren't ApparentKit's. Without
     /// it, finished uploads are still picked up the next time the app launches.
     @discardableResult
     public static func handleBackgroundURLSessionEvents(identifier: String, completionHandler: @escaping () -> Void) -> Bool {
@@ -512,8 +512,8 @@
       shared.backgroundEventsCompletion = completionHandler
       outbox.handleBackgroundEvents {
         Task { @MainActor in
-          let completion = Scrawl.shared.backgroundEventsCompletion
-          Scrawl.shared.backgroundEventsCompletion = nil
+          let completion = Apparent.shared.backgroundEventsCompletion
+          Apparent.shared.backgroundEventsCompletion = nil
           completion?()
         }
       }
@@ -546,19 +546,19 @@
 
     private func makeOutbox() -> Outbox {
       let outbox = Outbox(
-        directory: URL.applicationSupportDirectory.appending(path: "ScrawlOutbox", directoryHint: .isDirectory),
+        directory: URL.applicationSupportDirectory.appending(path: "ApparentOutbox", directoryHint: .isDirectory),
         configuration: Outbox.backgroundConfiguration(identifier: Self.backgroundSessionIdentifier)
       ) { event in
-        Task { @MainActor in Scrawl.shared.handle(event) }
+        Task { @MainActor in Apparent.shared.handle(event) }
       }
       self.outbox = outbox
       let center = NotificationCenter.default
       outboxObservers = [
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
-          MainActor.assumeIsolated { Scrawl.shared.outbox?.kick(force: true) }
+          MainActor.assumeIsolated { Apparent.shared.outbox?.kick(force: true) }
         },
         center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-          MainActor.assumeIsolated { Scrawl.shared.showPendingSent() }
+          MainActor.assumeIsolated { Apparent.shared.showPendingSent() }
         },
       ]
       // Back online: try everything waiting now rather than at its backoff time.
@@ -567,9 +567,9 @@
       monitor.pathUpdateHandler = { [weak outbox] path in
         let satisfied = path.status == .satisfied
         if reachability.update(satisfied) { outbox?.kick(force: true) }
-        Task { @MainActor in Scrawl.shared.pathChanged(satisfied: satisfied) }
+        Task { @MainActor in Apparent.shared.pathChanged(satisfied: satisfied) }
       }
-      monitor.start(queue: DispatchQueue(label: "dev.kitlangton.scrawl.outbox.path"))
+      monitor.start(queue: DispatchQueue(label: "dev.kitlangton.apparent.outbox.path"))
       pathMonitor = monitor
       // Launch: whatever was waiting from earlier sessions.
       outbox.kick(force: true)
@@ -609,7 +609,7 @@
         showPendingSent()
       case let .failed(id, failure):
         guard isIdleForStatus else { return }
-        Task { await presentFailure(ScrawlStrip.Failure(failure), entry: id) }
+        Task { await presentFailure(ApparentStrip.Failure(failure), entry: id) }
       case .started, .progress, .retrying:
         break
       }
@@ -674,7 +674,7 @@
         self.delivery = nil
         guard showing || isIdleForStatus else { return }
         shownEntry = nil
-        Task { await presentFailure(ScrawlStrip.Failure(failure), entry: delivery.entry) }
+        Task { await presentFailure(ApparentStrip.Failure(failure), entry: delivery.entry) }
       }
     }
 
@@ -796,7 +796,7 @@
             self.rebaseEarlyInput(by: shift)
             self.startedAt = startedAt
             KeyboardTracker.shared.recordingWillBegin()
-            ScrawlAppContext.shared.begin(at: startedAt)
+            ApparentAppContext.shared.begin(at: startedAt)
             self.isRecording = true
             if hosted { self.startLimit(for: recorder.method, startedAt: startedAt) }
             if let discarding = self.pendingFinish {
@@ -804,7 +804,7 @@
               self.finish(discarding: discarding)
             }
           case let .failure(error):
-            print("Scrawl: could not start recording: \(error.localizedDescription)")
+            print("Apparent: could not start recording: \(error.localizedDescription)")
             self.recorder = nil
             self.startedAt = nil
             self.pendingFinish = nil
@@ -892,7 +892,7 @@
       if let sessionID, !sessionID.isEmpty {
         info["session"] = sessionID
       }
-      info.merge(ScrawlAppContext.shared.end()) { current, _ in current }
+      info.merge(ApparentAppContext.shared.end()) { current, _ in current }
       self.startedAt = nil
       completedStrokes = []
       overlay?.clearInk(animated: true)
@@ -900,7 +900,7 @@
         Task { @MainActor in
           guard let self else { return }
           if let error {
-            print("Scrawl: recording failed: \(error.localizedDescription)")
+            print("Apparent: recording failed: \(error.localizedDescription)")
             self.uploadStatus = .idle
             if discardToken == self.discardID { self.isDiscardPending = false }
             await self.hideOverlayAfterExit()
@@ -994,19 +994,19 @@
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
-    /// Where recordings for a Mac are kept: Documents/Scrawl. (Recordings for an HTTPS endpoint
-    /// are kept in the outbox, Application Support/ScrawlOutbox, until they're sent.)
+    /// Where recordings for a Mac are kept: Documents/Apparent. (Recordings for an HTTPS endpoint
+    /// are kept in the outbox, Application Support/ApparentOutbox, until they're sent.)
     public static var directory: URL {
-      URL.documentsDirectory.appending(path: "Scrawl", directoryHint: .isDirectory)
+      URL.documentsDirectory.appending(path: "Apparent", directoryHint: .isDirectory)
     }
 
     /// Where a recording for an HTTPS endpoint is written before it becomes an outbox entry.
     private static var stagingDirectory: URL {
-      URL.temporaryDirectory.appending(path: "ScrawlStaging", directoryHint: .isDirectory)
+      URL.temporaryDirectory.appending(path: "ApparentStaging", directoryHint: .isDirectory)
     }
 
     /// Warns shortly before an HTTPS recording's length cap, then sends it.
-    private func startLimit(for method: ScrawlCaptureMethod, startedAt: Date) {
+    private func startLimit(for method: ApparentCaptureMethod, startedAt: Date) {
       limitTask?.cancel()
       let limit = Self.hostedRecordingLimit(for: method)
       limitTask = Task { [weak self] in
@@ -1021,7 +1021,7 @@
     }
 
     /// Shows `text` beside the strip while recording, for `duration` (or until it stops).
-    private func showNotice(_ text: ScrawlStrip.Notice, for duration: Duration?) {
+    private func showNotice(_ text: ApparentStrip.Notice, for duration: Duration?) {
       noticeID += 1
       let id = noticeID
       notice = text
@@ -1074,7 +1074,7 @@
             let scene = Self.activeScene else { return }
       let start = CACurrentMediaTime()
       preparedAt = Date()
-      overlay = OverlayWindow(windowScene: scene, scrawl: self)
+      overlay = OverlayWindow(windowScene: scene, apparent: self)
       overlay?.prepareLayout()
       startupObserver?(.init(stage: "prewarm", milliseconds: (CACurrentMediaTime() - start) * 1000, onMainThread: true))
       prewarmExpiry = Task { [weak self] in
@@ -1321,7 +1321,7 @@
       let bearerToken = token?.trimmingCharacters(in: .whitespacesAndNewlines)
       let deliveryMarker = Self.deliveryMarker(for: sentMarker)
       let deliveredReply: IngestReply? = await withTaskGroup(of: IngestReply?.self) { group in
-        // 1. Direct HTTP POST to Scrawl on the Mac (LAN + Tailscale in parallel). The Mac
+        // 1. Direct HTTP POST to Apparent on the Mac (LAN + Tailscale in parallel). The Mac
         // answers once it has built the bundle and tried to send it on (or after `replyWait`).
         if let bearerToken, !bearerToken.isEmpty {
           for base in urls {
@@ -1330,7 +1330,7 @@
             }
           }
         }
-        // 2. USB / CoreDevice fallback: Scrawl.app copies the files with `devicectl`, builds the
+        // 2. USB / CoreDevice fallback: Apparent.app copies the files with `devicectl`, builds the
         // bundle, and writes `<stamp>.delivery` (its reply) and then `<stamp>.sent` back.
         group.addTask {
           for _ in 0 ..< 75 {
@@ -1387,14 +1387,14 @@
         )
       } catch {
         // The staged files stay so Share still has them.
-        print("Scrawl: could not save the recording for sending: \(error.localizedDescription)")
+        print("Apparent: could not save the recording for sending: \(error.localizedDescription)")
         await presentFailure(.notSaved, recording: finished.recording)
         return
       }
       // The outbox holds the only copy from here on.
       Self.delete(finished)
       if let failure = entry.failure {
-        await presentFailure(ScrawlStrip.Failure(failure), entry: entry.id)
+        await presentFailure(ApparentStrip.Failure(failure), entry: entry.id)
         return
       }
       // Unless a new recording took the strip over while this one was being written.
@@ -1441,7 +1441,7 @@
     }
 
     /// The failed bubble, with Share (of a LAN `recording`, or of an outbox `entry`).
-    private func presentFailure(_ failure: ScrawlStrip.Failure, recording: Recording? = nil, entry: String? = nil) async {
+    private func presentFailure(_ failure: ApparentStrip.Failure, recording: Recording? = nil, entry: String? = nil) async {
       statusID += 1
       let id = statusID
       deliveryFailure = failure
@@ -1473,7 +1473,7 @@
       } else if let entry, let outbox {
         // The payload stays queued; the share sheet gets temporary copies of its files.
         Task {
-          let folder = URL.temporaryDirectory.appending(path: "ScrawlShare", directoryHint: .isDirectory)
+          let folder = URL.temporaryDirectory.appending(path: "ApparentShare", directoryHint: .isDirectory)
           guard let files = try? await outbox.extract(id: entry, into: folder) else { return }
           Self.share([files.movie, files.timeline]) {
             try? FileManager.default.removeItem(at: files.movie)
@@ -1483,7 +1483,7 @@
       }
     }
 
-    /// Checks each Scrawl address (Macs and the HTTPS endpoint alike) and remembers the first that
+    /// Checks each Apparent address (Macs and the HTTPS endpoint alike) and remembers the first that
     /// answers. The HTTPS endpoint answering 401 means the link was revoked: the strip says so,
     /// the recording carries on, and it's kept in the outbox as failed until the link is renewed.
     private func findMac() async {
@@ -1527,7 +1527,7 @@
       sentMarker.deletingPathExtension().appendingPathExtension("delivery")
     }
 
-    /// Uploads to a Mac, which answers within `replyWait` seconds (`X-Scrawl-Wait`) of the upload
+    /// Uploads to a Mac, which answers within `replyWait` seconds (`X-Apparent-Wait`) of the upload
     /// landing; the request's idle timeout leaves room for that.
     private nonisolated static func postIngest(base: URL, payload: Data, token: String, replyWait: Int) async -> IngestReply? {
       let endpoint = base.appending(path: "ingest")
@@ -1535,7 +1535,7 @@
       request.httpMethod = "POST"
       request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-      request.setValue(String(replyWait), forHTTPHeaderField: "X-Scrawl-Wait")
+      request.setValue(String(replyWait), forHTTPHeaderField: "X-Apparent-Wait")
       request.timeoutInterval = TimeInterval(replyWait + 15)
       do {
         let (data, response) = try await URLSession.shared.upload(for: request, from: payload)
@@ -1552,7 +1552,7 @@
       guard let scene = Self.activeScene else { return }
       startupTrace?.mark("sceneFound")
       if overlay == nil {
-        overlay = OverlayWindow(windowScene: scene, scrawl: self)
+        overlay = OverlayWindow(windowScene: scene, apparent: self)
         startupTrace?.mark("overlayCreated")
       }
       overlay?.present(trace: startupTrace)

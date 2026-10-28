@@ -5,7 +5,7 @@
 //! transcription).
 //!
 //! The encoder is the first one installed of `x264enc` (gst-plugins-ugly), `openh264enc`
-//! (gst-plugins-bad) and VA-API's. With none, Scrawl records no movie and keeps sharper
+//! (gst-plugins-bad) and VA-API's. With none, Apparent records no movie and keeps sharper
 //! candidates instead (`capture::CANDIDATE_EDGE_NO_VIDEO`), as it does whenever a movie fails.
 
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
-use crate::capture::{CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, Sampler, scrawl_log};
+use crate::capture::{CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, Sampler, apparent_log};
 use crate::helper::FrameTimes;
 use crate::model::{CaptureMode, RgbaFrame};
 
@@ -29,7 +29,7 @@ fn init() -> Result<()> {
     let ready = *READY.get_or_init(|| match gst::init() {
         Ok(()) => true,
         Err(error) => {
-            scrawl_log(format!("GStreamer failed to start: {error}"));
+            apparent_log(format!("GStreamer failed to start: {error}"));
             false
         }
     });
@@ -98,7 +98,7 @@ pub fn decoder_warning() -> Option<String> {
     let distro = os_release.lines().find_map(|line| line.strip_prefix("ID="))
         .unwrap_or_default().trim_matches('"');
     Some(format!(
-        "H.264 decoder missing. Install: {}. Restart Scrawl. MP4 recording may work, but full-quality keyframes use smaller candidate frames until fixed.",
+        "H.264 decoder missing. Install: {}. Restart Apparent. MP4 recording may work, but full-quality keyframes use smaller candidate frames until fixed.",
         decoder_repair_for(distro)
     ))
 }
@@ -135,7 +135,7 @@ fn source_launch(source: &Source) -> String {
     }
 }
 
-/// A running recording: GStreamer pushes frames through; Scrawl samples the newest one.
+/// A running recording: GStreamer pushes frames through; Apparent samples the newest one.
 struct Recorder {
     pipeline: gst::Pipeline,
     candidates: gst_app::AppSink,
@@ -261,7 +261,7 @@ impl Recorder {
     /// Sends end-of-stream and waits (a few seconds at most) for the movie to be finished.
     fn finish(self) -> bool {
         if !self.pipeline.send_event(gst::event::Eos::new()) {
-            scrawl_log("Movie failed to finish: end of stream was rejected");
+            apparent_log("Movie failed to finish: end of stream was rejected");
             let _ = self.pipeline.set_state(gst::State::Null);
             return false;
         }
@@ -308,12 +308,12 @@ impl Recorder {
         let finished = match message.as_ref().map(|m| m.view()) {
             Some(gst::MessageView::Eos(_)) => true,
             Some(gst::MessageView::Error(error)) => {
-                scrawl_log(format!("Movie failed to finish: {}", error.error()));
+                apparent_log(format!("Movie failed to finish: {}", error.error()));
                 false
             }
             _ if movie_finished => true,
             _ => {
-                scrawl_log("Movie failed to finish: no end of stream within 8 s");
+                apparent_log("Movie failed to finish: no end of stream within 8 s");
                 false
             }
         };
@@ -390,7 +390,7 @@ fn mask(rgba: &mut [u8], width: u32, height: u32, rect: [f64; 4]) {
     }
 }
 
-/// Scrawl's floating windows (the pill) over `frame` (global pixels), in the candidates' pixels:
+/// Apparent's floating windows (the pill) over `frame` (global pixels), in the candidates' pixels:
 /// X11 and GNOME record every window, so the candidates leave them out to keep the pill's clock
 /// from counting as activity. The ink overlay and picker cover a whole monitor and are skipped.
 fn own_window_masks(ids: &[u32], frame: [f64; 4], candidate: (u32, u32)) -> Vec<[f64; 4]> {
@@ -439,7 +439,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     });
     let mut recorder = match recorder {
         Ok(recorder) => {
-            scrawl_log(format!(
+            apparent_log(format!(
                 "Recording {}x{} ({:?}){}",
                 out.0,
                 out.1,
@@ -449,7 +449,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             Some(recorder)
         }
         Err(error) => {
-            scrawl_log(format!("Screen capture failed to start: {error:#}"));
+            apparent_log(format!("Screen capture failed to start: {error:#}"));
             None
         }
     };
@@ -479,7 +479,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         if let Some((r, _)) = recorder.as_ref() {
             if let Some(error) = r.error() {
-                scrawl_log(format!("Recording failed: {error}"));
+                apparent_log(format!("Recording failed: {error}"));
                 if let Some((r, _)) = recorder.take() {
                     let _ = r.pipeline.set_state(gst::State::Null);
                 }
@@ -792,7 +792,7 @@ mod tests {
             return;
         }
         let movie =
-            std::env::temp_dir().join(format!("scrawl-eos-test-{}.mp4", std::process::id()));
+            std::env::temp_dir().join(format!("apparent-eos-test-{}.mp4", std::process::id()));
         let _ = std::fs::remove_file(&movie);
         let mut recorder = Recorder::new(
             &Source::Test,
@@ -836,7 +836,7 @@ mod tests {
             return;
         }
         let movie = std::env::temp_dir().join(format!(
-            "scrawl-encoder-eos-test-{}.mp4",
+            "apparent-encoder-eos-test-{}.mp4",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&movie);

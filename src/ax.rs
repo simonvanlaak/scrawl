@@ -190,7 +190,7 @@ fn element_at(root: AxElement, x: f64, y: f64) -> Option<Owned> {
     (status == 0 && !out.is_null()).then_some(Owned(out))
 }
 
-/// The topmost element at a global top-left point, looking past Scrawl's own windows. Blocking;
+/// The topmost element at a global top-left point, looking past Apparent's own windows. Blocking;
 /// call it off the main thread.
 #[cfg(target_os = "macos")]
 pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
@@ -266,7 +266,7 @@ pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
     Some(hit)
 }
 
-/// The element at a global point (physical pixels) from UI Automation, looking past Scrawl's own
+/// The element at a global point (physical pixels) from UI Automation, looking past Apparent's own
 /// windows. Blocking; call it off the main thread.
 #[cfg(target_os = "windows")]
 pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
@@ -340,7 +340,7 @@ impl Prober {
             Arc::clone(&hits),
         );
         let _ = std::thread::Builder::new()
-            .name("scrawl-ax".into())
+            .name("apparent-ax".into())
             .spawn(move || {
                 for (job_session, target, x, y) in queue {
                     if job_session == worker_session.load(Ordering::Acquire)

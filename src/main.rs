@@ -78,7 +78,7 @@ use crate::audio::{AudioRecorder, RecordedAudio};
 use crate::capture::{ScreenCaptureSession, discover_target, write_bundle_artifacts};
 use crate::keyframes::select_keyframes;
 use crate::model::{
-    CaptureMode, DeviceInfo, InteractionEvent, Mark, RgbaFrame, SCALE, ScrawlBundle, Shape, Stroke,
+    CaptureMode, DeviceInfo, InteractionEvent, Mark, RgbaFrame, SCALE, ApparentBundle, Shape, Stroke,
     TargetFrame, TargetInfo, TranscriptData, TranscriptSegment, WordTiming, keyframe_budget,
     parse_clock_ms,
 };
@@ -87,7 +87,7 @@ use crate::sketch::{marks_of, summary_markdown};
 
 #[derive(Parser)]
 #[command(
-    name = "scrawl",
+    name = "apparent",
     version,
     about = "Shortcut-triggered screen, voice, and drawing capture for agents"
 )]
@@ -101,7 +101,7 @@ fn parse_engine(name: &str) -> Result<crate::transcribe::Engine, String> {
         .ok_or_else(|| "expected `apple`, `hex` or `command`".to_owned())
 }
 
-/// `scrawl hex status`: connection, models and what the next recording would use.
+/// `apparent hex status`: connection, models and what the next recording would use.
 fn hex_status() {
     let preferred = transcribe::Engine::configured();
     println!("Preferred transcriber: {}", preferred.name());
@@ -181,7 +181,7 @@ fn mic_list() {
 
 #[derive(Subcommand)]
 enum HexCommand {
-    /// Whether Hex is connected, its version, ready models and the transcriber Scrawl will use.
+    /// Whether Hex is connected, its version, ready models and the transcriber Apparent will use.
     Status,
 }
 
@@ -202,7 +202,7 @@ enum LabCommand {
     Pill {
         #[arg(value_enum)]
         scene: ui::LabScene,
-        /// Write a motion-lint trace of every frame here (same as `SCRAWL_MOTION_TRACE`).
+        /// Write a motion-lint trace of every frame here (same as `APPARENT_MOTION_TRACE`).
         #[arg(long)]
         trace: Option<PathBuf>,
         /// Times to play it; 0 repeats until stopped (tune while it loops).
@@ -233,7 +233,7 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Launch the GPUI menu-bar and review application (the default when macOS opens Scrawl.app).
+    /// Launch the GPUI menu-bar and review application.
     App {
         /// Start a capture session immediately on launch.
         #[arg(long)]
@@ -255,7 +255,7 @@ enum Command {
     },
     /// Generate a realistic annotated demo bundle (contact sheet + keyframes + transcript).
     Demo {
-        /// Output `.scrawl` bundle directory (defaults to Application Support).
+        /// Output `.apparent` bundle directory (defaults to Application Support).
         #[arg(long)]
         out: Option<PathBuf>,
         /// Copy the generated bundle to the macOS clipboard.
@@ -276,11 +276,11 @@ enum Command {
         /// Optional note to attach to the bundle.
         #[arg(long)]
         note: Option<String>,
-        /// Output `.scrawl` bundle directory.
+        /// Output `.apparent` bundle directory.
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Build a bundle from a ScrawlKit in-app recording (`.mp4` + timeline `.json`).
+    /// Build a bundle from a ApparentKit in-app recording (`.mp4` + timeline `.json`).
     Import {
         /// The recording or its timeline; defaults to the newest pair in ~/Downloads.
         recording: Option<PathBuf>,
@@ -290,7 +290,7 @@ enum Command {
         /// Optional note to attach to the bundle.
         #[arg(long)]
         note: Option<String>,
-        /// Output `.scrawl` bundle directory.
+        /// Output `.apparent` bundle directory.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Copy the summary to the clipboard.
@@ -316,18 +316,18 @@ enum Command {
     #[command(hide = true)]
     DecoderCheck { movie: PathBuf },
     /// Transcribe a bundle's audio again with Apple Speech, in place: its transcript, each
-    /// keyframe's words, `scrawl.json` and `summary.md`. Scrawl does this by itself for captures
+    /// keyframe's words, `apparent.json` and `summary.md`. Apparent does this for captures
     /// made while the speech model was still downloading.
     Retranscribe {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         bundle: PathBuf,
     },
     /// Rebuild a bundle from its own video, audio, and input log with the current transcriber
     /// and keyframe rules.
     Reprocess {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         bundle: PathBuf,
-        /// Output `.scrawl` bundle directory (a new bundle; the original is untouched).
+        /// Output `.apparent` bundle directory (a new bundle; the original is untouched).
         #[arg(long)]
         out: PathBuf,
         /// Run N iterations of the finish pipeline (with candidate frames pre-loaded for Screen
@@ -346,13 +346,13 @@ enum Command {
         #[arg(long = "experiment", value_name = "NAME")]
         experiments: Vec<String>,
     },
-    /// Build the bundles whose build died with the app (no `scrawl.json`) in place, once each:
+    /// Build the bundles whose build died with the app (no `apparent.json`) in place, once each:
     /// from their input log (`unfinished.json`) if they have one, else from `recording.mp4` and
     /// `audio.wav` alone. The app runs it at launch.
     Recover {
         /// One bundle to build now, even if it was tried before.
         bundle: Option<PathBuf>,
-        /// Captures folder (defaults to Scrawl's).
+        /// Captures folder (defaults to Apparent's).
         #[arg(long, conflicts_with = "bundle")]
         captures: Option<PathBuf>,
     },
@@ -363,7 +363,7 @@ enum Command {
         #[command(subcommand)]
         command: LabCommand,
     },
-    /// Tune the capsule's springs live: edits `~/.config/scrawl/tune.json`, which debug builds
+    /// Tune the capsule's springs live: edits `~/.config/apparent/tune.json`, which debug builds
     /// (the lab and the installed app) re-read within a quarter second.
     #[command(hide = true)]
     Tune {
@@ -375,30 +375,30 @@ enum Command {
         #[command(subcommand)]
         command: MicCommand,
     },
-    /// Check the Hex transcriber: is it running, which models are ready, which one Scrawl uses.
+    /// Check the Hex transcriber: is it running, which models are ready, which one Apparent uses.
     Hex {
         #[command(subcommand)]
         command: HexCommand,
     },
-    /// Print the agent-ready summary or JSON manifest for a `.scrawl` bundle (or `latest`).
+    /// Print the agent-ready summary or JSON manifest for a `.apparent` bundle (or `latest`).
     Inspect {
-        /// Path to `.scrawl` bundle directory, `scrawl.json`, or `latest`.
+        /// Path to `.apparent` bundle directory, `apparent.json`, or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
-        /// Emit raw `scrawl.json` instead of `summary.md` (with `--marks`, the marks as JSON).
+        /// Emit raw `apparent.json` instead of `summary.md` (with `--marks`, the marks as JSON).
         #[arg(long)]
         json: bool,
         /// List the marks: keyframe, number as the summary shows it (✎②), time, shape, what it
-        /// was drawn on, and id, for `scrawl zoom --mark`.
+        /// was drawn on, and id, for `apparent zoom --mark`.
         #[arg(long)]
         marks: bool,
         /// Turn an experiment on for this summary (e.g. `agentContext`). Repeatable.
         #[arg(long = "experiment", value_name = "NAME")]
         experiments: Vec<String>,
     },
-    /// Extract a dense burst of frames from a `.scrawl` bundle's time range (`M:SS` or seconds).
+    /// Extract a dense burst of frames from a `.apparent` bundle's time range (`M:SS` or seconds).
     Frames {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         bundle: PathBuf,
         /// Start time (`0:02` or `2.0`).
         #[arg(long)]
@@ -413,14 +413,14 @@ enum Command {
     /// Zoom into one moment: a dense contact sheet of frames around a time, a spoken phrase or a
     /// mark, with the bundle's ink and touches drawn in and each frame's time, plus what was said.
     Zoom {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
         /// The moment: a time (`0:12`, `12.5`) or a phrase from the narration ("width changes").
         #[arg(long, required_unless_present = "mark", conflicts_with = "mark")]
         at: Option<String>,
         /// A mark, centred with its ink drawn: its number in the summary (`2` for ✎②) or its id
-        /// (`m2`). `scrawl inspect --marks` lists them.
+        /// (`m2`). `apparent inspect --marks` lists them.
         #[arg(long)]
         mark: Option<String>,
         /// The keyframe whose ✎① ✎② `--mark` counts (`--frame 2` for #2), when several have one.
@@ -441,10 +441,10 @@ enum Command {
     /// with the ink and click ripples burned in, AAC audio in sync, and optionally Screen
     /// Studio-style auto-zoom (`--zoom`). Encoding runs in the helper with AVFoundation.
     Export {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
-        /// Output file (defaults to ~/Movies/Scrawl/<bundle>.mp4).
+        /// Output file (defaults to ~/Movies/Apparent/<bundle>.mp4).
         #[arg(long)]
         out: Option<PathBuf>,
         /// `full`, `auto` (the activity region), or `x,y,w,h` as fractions of the capture (all
@@ -486,7 +486,7 @@ enum Command {
     },
     /// Keep a bundle forever, out of cleanup (`--off` lets it go again).
     Pin {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
         #[arg(long)]
@@ -496,7 +496,7 @@ enum Command {
     /// activity and crop, and the cropped contact sheet. `--serve` reruns the crop live as
     /// settings change; without it the page shows the presets.
     Autocrop {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
         /// Open the playground in the default browser.
@@ -560,35 +560,35 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         repeat: u32,
     },
-    /// Copy a `.scrawl` bundle to the clipboard.
+    /// Copy a `.apparent` bundle to the clipboard.
     Copy {
-        /// Path to `.scrawl` bundle directory or `latest`.
+        /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
     },
-    /// Open a `.scrawl` bundle in the native GPUI review window.
+    /// Open a `.apparent` bundle in the native GPUI review window.
     Preview {
-        /// Path to `.scrawl` bundle directory or `latest`. Generates a demo bundle if none exists.
+        /// Path to `.apparent` bundle directory or `latest`. Generates a demo bundle if none exists.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
         /// Capture a window screenshot to this path and exit (for deterministic UI verification).
         #[arg(long)]
         capture_screenshot: Option<PathBuf>,
     },
-    /// Print a `<scheme>://scrawl?url=…&token=…` setup link (and QR code) for ScrawlKit on iPhone.
+    /// Print a `<scheme>://apparent?url=…&token=…` setup link (and QR code) for ApparentKit on iPhone.
     #[command(alias = "tether-link")]
     Link {
         /// URL scheme of the iOS app (for example `updown`).
         #[arg(long)]
         scheme: String,
-        /// Scrawl ingest base URL(s); defaults to this Mac's Tailscale and LAN IPs on `--port`.
+        /// Apparent ingest base URL(s); defaults to this Mac's Tailscale and LAN IPs on `--port`.
         #[arg(long = "url")]
         urls: Vec<String>,
         /// Ingest port used when discovering default Tailscale / LAN URLs.
         #[arg(long, default_value_t = phone::DEFAULT_INGEST_PORT)]
         port: u16,
     },
-    /// Run the headless ScrawlKit ingest server (HTTP + optional USB watcher, no GUI or clipboard).
+    /// Run the headless ApparentKit ingest server (HTTP + optional USB watcher, no GUI or clipboard).
     Serve {
         /// TCP port to listen on.
         #[arg(long, default_value_t = phone::DEFAULT_INGEST_PORT)]
@@ -597,12 +597,12 @@ enum Command {
         #[arg(long)]
         usb: bool,
     },
-    /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add kitlangton/scrawl` installs it).
+    /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add tryapparent/apparent` installs it).
     Skill,
 }
 
-/// `skills/scrawl/SKILL.md`, the same text `bunx skills add kitlangton/scrawl` installs.
-const SKILL: &str = include_str!("../skills/scrawl/SKILL.md");
+/// `skills/apparent/SKILL.md`, the same text `bunx skills add tryapparent/apparent` installs.
+const SKILL: &str = include_str!("../skills/apparent/SKILL.md");
 
 pub fn now_epoch_ms() -> u64 {
     SystemTime::now()
@@ -618,8 +618,8 @@ pub fn make_bundle_id() -> String {
     let ms = now_epoch_ms();
     let pid = std::process::id();
     match COUNT.fetch_add(1, Ordering::Relaxed) {
-        0 => format!("scrawl-{ms}-{pid:x}"),
-        n => format!("scrawl-{ms}-{pid:x}-{n}"),
+        0 => format!("apparent-{ms}-{pid:x}"),
+        n => format!("apparent-{ms}-{pid:x}-{n}"),
     }
 }
 
@@ -879,7 +879,7 @@ fn movie_frames_at_with(
     Ok(frames)
 }
 
-/// Core pipeline that turns raw frames, strokes, events, and audio/transcript into a complete `.scrawl` bundle on disk.
+/// Core pipeline that turns raw frames, strokes, events, and audio/transcript into a complete `.apparent` bundle on disk.
 #[allow(clippy::too_many_arguments)]
 ///
 /// The recording's candidate frames are small; the keyframes are decoded again from its video at
@@ -893,7 +893,7 @@ pub fn finalize_capture_bundle(
     recorded_audio: Option<RecordedAudio>,
     note: Option<String>,
     activity: windows::ActivityLog,
-) -> Result<(PathBuf, ScrawlBundle, String)> {
+) -> Result<(PathBuf, ApparentBundle, String)> {
     let started_at = activity
         .stop_started
         .unwrap_or_else(std::time::Instant::now);
@@ -1025,7 +1025,7 @@ pub fn finalize_capture_bundle(
 }
 
 /// Builds a Screen capture's bundle in `out`, which holds its video and `audio.wav`, from them
-/// and what the recording logged: `scrawl reprocess` and `scrawl recover`.
+/// and what the recording logged: `apparent reprocess` and `apparent recover`.
 pub fn rebuild_screen_bundle(out: &Path, old: recover::Unfinished) -> Result<String> {
     rebuild_screen_bundle_with(out, old, None, &recover::Media::SYSTEM)
 }
@@ -1102,7 +1102,7 @@ pub fn rebuild_screen_bundle_with(
 }
 
 /// A bundle without its transcript yet (the speech model was still downloading) gets it later.
-fn mark_transcript_pending(bundle_dir: &Path, bundle: &ScrawlBundle) {
+fn mark_transcript_pending(bundle_dir: &Path, bundle: &ApparentBundle) {
     if bundle.transcript.missing.as_ref().is_some_and(|m| m.retry) {
         speech_model::mark_pending(bundle_dir);
     }
@@ -1120,7 +1120,7 @@ pub fn build_bundle_from_parts(
     video_path: Option<PathBuf>,
     note: Option<String>,
     extras: SourceExtras,
-) -> Result<(PathBuf, ScrawlBundle, String)> {
+) -> Result<(PathBuf, ApparentBundle, String)> {
     let total_started = extras
         .timings
         .started_at
@@ -1142,7 +1142,7 @@ pub fn build_bundle_from_parts(
             frame: None,
         });
     }
-    let bench = std::env::var_os("SCRAWL_BENCH").is_some();
+    let bench = std::env::var_os("APPARENT_BENCH").is_some();
     let started = std::time::Instant::now();
     let selected = select_keyframes(
         &frames,
@@ -1206,7 +1206,7 @@ pub fn build_bundle_from_parts(
                         let total = selected.len();
                         let (merged, matched) = merge_full_keyframes(selected, full);
                         if matched < total {
-                            capture::scrawl_log(format!(
+                            capture::apparent_log(format!(
                                 "Full-quality keyframes: decoded {matched} of {total}"
                             ));
                             keyframe_warning = Some(format!("Only {matched} of {total} keyframes could be decoded at full quality; the rest use smaller candidate frames."));
@@ -1214,7 +1214,7 @@ pub fn build_bundle_from_parts(
                         merged
                     }
                     Err(error) => {
-                        capture::scrawl_log(format!("Full-quality keyframes failed: {error:#}"));
+                        capture::apparent_log(format!("Full-quality keyframes failed: {error:#}"));
                         keyframe_warning = Some(format!("Full-quality keyframes could not be decoded from the MP4. This capture uses smaller candidate frames.{}", if cfg!(target_os = "linux") { " Check Settings › Recording for an H.264 decoder repair instruction." } else { "" }));
                         selected
                     }
@@ -1276,7 +1276,7 @@ pub fn build_bundle_from_parts(
     let id = bundle_dir
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("scrawl-bundle")
+        .unwrap_or("apparent-bundle")
         .to_string();
     let video_rel = video_path.and_then(|p| {
         p.exists()
@@ -1288,7 +1288,7 @@ pub fn build_bundle_from_parts(
         .exists()
         .then(|| "audio.wav".to_string());
 
-    let bundle = ScrawlBundle {
+    let bundle = ApparentBundle {
         version: 1,
         id,
         created_at_ms: now_epoch_ms(),
@@ -1343,7 +1343,7 @@ pub fn build_bundle_from_parts(
                 }
             }
             let manifest_bytes = serde_json::to_vec_pretty(&bundle)?;
-            std::fs::write(bundle_dir.join("scrawl.json"), manifest_bytes)?;
+            std::fs::write(bundle_dir.join("apparent.json"), manifest_bytes)?;
             std::fs::write(bundle_dir.join("summary.md"), summary.as_bytes())?;
         }
         BundleOutput::Rendered {
@@ -1398,7 +1398,7 @@ pub fn build_bundle_from_parts(
         format!("write {write_ms}ms"),
         format!("total {total_ms}ms"),
     ]);
-    capture::scrawl_log(format!("finish timings: {} · {}", bundle.id, parts.join(" · ")));
+    capture::apparent_log(format!("finish timings: {} · {}", bundle.id, parts.join(" · ")));
     let trace = FinishTrace {
         version: 1,
         stop_ms: extras.timings.stop_ms,
@@ -1414,7 +1414,7 @@ pub fn build_bundle_from_parts(
         prepared_visuals: matches_prepared,
     };
     if let Err(error) = save_finish_trace(bundle_dir, &trace) {
-        capture::scrawl_log(format!("Could not save finish trace: {error:#}"));
+        capture::apparent_log(format!("Could not save finish trace: {error:#}"));
     }
     if bench && !matches_prepared {
         for (name, elapsed) in [
@@ -1433,9 +1433,9 @@ pub fn build_bundle_from_parts(
 }
 
 /// Generates a rich, deterministic multi-frame demo bundle showcasing clicks, circles, arrows, pins, and aligned speech.
-pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBundle, String)> {
+pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBundle, String)> {
     let bundle_dir = out.unwrap_or_else(|| {
-        handoff::default_captures_dir().join(format!("{}.scrawl", make_bundle_id()))
+        handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
     });
     let (fw, fh) = (1280_u32, 800_u32);
     let target = TargetInfo {
@@ -1611,17 +1611,17 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBund
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     linux::prepare_process();
-    if std::env::var_os("SCRAWL_BENCH_START").is_some() {
+    if std::env::var_os("APPARENT_BENCH_START").is_some() {
         ui::run_start_benchmark();
         return Ok(());
     }
     let cli = Cli::parse();
     let command = match cli.command {
         Some(command) => command,
-        // `scrawl` typed in a terminal (on PATH through Settings › Agents or Homebrew) would
+        // `apparent` typed in a terminal (on PATH through Settings › Agents or Homebrew) would
         // start a second menu-bar app. macOS opens the app with stdin on /dev/null.
-        // On Windows `scrawl.exe` is a console program and Explorer gives it a console too, so a
-        // bare launch always starts the app. Linux desktops start `scrawl app` (scrawl.desktop).
+        // On Windows `apparent.exe` is a console program and Explorer gives it a console too, so a
+        // bare launch always starts the app. Linux desktops start `apparent app` (apparent.desktop).
         None if cfg!(any(target_os = "macos", target_os = "linux"))
             && std::io::IsTerminal::is_terminal(&std::io::stdin()) =>
         {
@@ -1640,7 +1640,7 @@ fn main() -> Result<()> {
                 win::shell::release_own_console();
                 win::shell::wait_for_relauncher();
             }
-            // Launching Scrawl again (from the app grid) opens the running one's Settings: GNOME
+            // Launching Apparent again (from the app grid) opens the running one's Settings: GNOME
             // shows no tray icon without the AppIndicator extension.
             #[cfg(target_os = "linux")]
             if linux::ipc::running() {
@@ -1649,7 +1649,7 @@ fn main() -> Result<()> {
             }
             #[cfg(target_os = "linux")]
             if let Err(error) = linux::update::record_running() {
-                eprintln!("Scrawl could not record its running version in config: {error:#}");
+                eprintln!("Apparent could not record its running version in config: {error:#}");
             }
             ui::run_app(None, record, iphone, None);
             Ok(())
@@ -1696,7 +1696,7 @@ fn main() -> Result<()> {
             out,
         } => {
             let bundle_dir = out.unwrap_or_else(|| {
-                handoff::default_captures_dir().join(format!("{}.scrawl", make_bundle_id()))
+                handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
             std::fs::create_dir_all(&bundle_dir)?;
             let dev_id = window.or_else(|| {
@@ -1738,7 +1738,7 @@ fn main() -> Result<()> {
         } => {
             let target = discover_target(window.as_deref());
             let bundle_dir = out.unwrap_or_else(|| {
-                handoff::default_captures_dir().join(format!("{}.scrawl", make_bundle_id()))
+                handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
             std::fs::create_dir_all(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
@@ -1790,7 +1790,7 @@ fn main() -> Result<()> {
             let (movie, timeline) =
                 phone::resolve_import(recording.as_deref(), timeline.as_deref())?;
             let bundle_dir = out.unwrap_or_else(|| {
-                handoff::default_captures_dir().join(format!("{}.scrawl", make_bundle_id()))
+                handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
             let (dir, _bundle, summary) =
                 phone::import(&movie, timeline.as_deref(), &bundle_dir, note)?;
@@ -1846,7 +1846,7 @@ fn main() -> Result<()> {
                     let iter_out = if i + 1 == iters {
                         out.clone()
                     } else {
-                        out.with_file_name(format!("bench-{i}.scrawl"))
+                        out.with_file_name(format!("bench-{i}.apparent"))
                     };
                     let _ = std::fs::remove_dir_all(&iter_out);
                     std::fs::create_dir_all(&iter_out)?;
@@ -2074,10 +2074,10 @@ fn main() -> Result<()> {
             // Set before the app starts any thread; the lab reads them once.
             unsafe {
                 if let Some(trace) = trace {
-                    std::env::set_var("SCRAWL_MOTION_TRACE", trace);
+                    std::env::set_var("APPARENT_MOTION_TRACE", trace);
                 }
                 if let Some(scale) = time_scale {
-                    std::env::set_var("SCRAWL_TIME_SCALE", scale.to_string());
+                    std::env::set_var("APPARENT_TIME_SCALE", scale.to_string());
                 }
             }
             ui::run_lab(ui::LabOptions {
@@ -2116,7 +2116,7 @@ fn main() -> Result<()> {
         } => {
             let inputs = mic::inputs();
             if id != "default" && inputs.find(&id).is_none() {
-                anyhow::bail!("No connected microphone has id {id}; see `scrawl mic list`");
+                anyhow::bail!("No connected microphone has id {id}; see `apparent mic list`");
             }
             mic::save_in(&handoff::default_config_path(), &id, &inputs)?;
             mic_list();
@@ -2393,7 +2393,7 @@ fn main() -> Result<()> {
             };
             let mut dirs = Vec::new();
             for path in bundles {
-                if path.join("scrawl.json").is_file() {
+                if path.join("apparent.json").is_file() {
                     dirs.push(path);
                 } else {
                     let mut found: Vec<PathBuf> = std::fs::read_dir(&path)?
@@ -2502,15 +2502,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cli_identifies_as_apparent() {
+        assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
     fn demo_bundle_saves_finish_trace_without_configuration() {
-        let dir = std::env::temp_dir().join(format!("{}.scrawl", make_bundle_id()));
+        let dir = std::env::temp_dir().join(format!("{}.apparent", make_bundle_id()));
         let (built, _, _) = generate_demo_bundle(Some(dir.clone())).unwrap();
         assert_eq!(built, dir);
         let trace: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("finish-trace.json")).unwrap()).unwrap();
         assert_eq!(trace["version"], 1);
         assert!(trace["totalMs"].is_u64());
-        assert!(dir.join("scrawl.json").exists());
+        assert!(dir.join("apparent.json").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2545,11 +2550,11 @@ mod tests {
     #[test]
     fn artifact_failures_do_not_publish_a_manifest() {
         let root = std::env::temp_dir().join(make_bundle_id());
-        let (_, mut bundle, _) = generate_demo_bundle(Some(root.join("demo.scrawl"))).unwrap();
+        let (_, mut bundle, _) = generate_demo_bundle(Some(root.join("demo.apparent"))).unwrap();
         let frame = RgbaFrame::new(0, 1, 1, vec![20, 30, 40, 255]);
         let mut key = bundle.keyframes[0].clone();
         key.file = "frames/missing/frame.png".into();
-        let frame_failure = root.join("frame-failure.scrawl");
+        let frame_failure = root.join("frame-failure.apparent");
         assert!(
             write_bundle_artifacts(
                 &frame_failure,
@@ -2560,17 +2565,17 @@ mod tests {
             )
             .is_err()
         );
-        assert!(!frame_failure.join("scrawl.json").exists());
+        assert!(!frame_failure.join("apparent.json").exists());
 
         bundle.contact_sheet = "missing/contact-sheet.png".into();
-        let sheet_failure = root.join("sheet-failure.scrawl");
+        let sheet_failure = root.join("sheet-failure.apparent");
         assert!(write_bundle_artifacts(&sheet_failure, &bundle, &[], &frame, "summary").is_err());
-        assert!(!sheet_failure.join("scrawl.json").exists());
+        assert!(!sheet_failure.join("apparent.json").exists());
 
         bundle.contact_sheet = "contact-sheet.png".into();
-        let empty_frames = root.join("empty-frames.scrawl");
+        let empty_frames = root.join("empty-frames.apparent");
         write_bundle_artifacts(&empty_frames, &bundle, &[], &frame, "summary").unwrap();
-        assert!(empty_frames.join("scrawl.json").exists());
+        assert!(empty_frames.join("apparent.json").exists());
         assert!(empty_frames.join("contact-sheet.png").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -2610,7 +2615,7 @@ mod tests {
     #[test]
     fn failed_full_decode_explains_candidate_frames_in_written_summary() {
         let dir = std::env::temp_dir().join(make_bundle_id());
-        let bundle_dir = dir.join("fallback.scrawl");
+        let bundle_dir = dir.join("fallback.apparent");
         let target = TargetInfo {
             mode: CaptureMode::Window,
             app: None, bundle_id: None, window_title: None, window_id: None,

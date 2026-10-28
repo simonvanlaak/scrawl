@@ -33,7 +33,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::{
     CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, LiveOverlayEvent,
     Sampler, SharedCaptureTelemetry, ShortcutConfig, ShortcutKind, clean_label, hotkey_combos,
-    layout_default_keycode, pick_display, poll_clicks, scrawl_log, shortcut_label, shortcut_matches,
+    layout_default_keycode, pick_display, poll_clicks, apparent_log, shortcut_label, shortcut_matches,
     track_shift_ink,
 };
 use crate::model::{CaptureMode, InteractionEvent, TargetFrame, TargetInfo};
@@ -56,7 +56,7 @@ const KEY_Z: u16 = 0x5A;
 /// front doesn't open its menu bar (or the Start menu) on the lone modifier release.
 const VK_MASK: u16 = 0xE8;
 
-/// `%LOCALAPPDATA%\Scrawl\Logs`.
+/// `%LOCALAPPDATA%\Apparent\Logs`.
 pub fn log_dir() -> Option<PathBuf> {
     Some(win::local_dir().join("Logs"))
 }
@@ -91,7 +91,7 @@ pub fn screen_capture_usable(_probe: bool) -> bool {
     true
 }
 
-/// The primary display's size (`scrawl sck-probe`); Windows.Graphics.Capture needs no grant.
+/// The primary display's size (`apparent sck-probe`); Windows.Graphics.Capture needs no grant.
 pub fn screen_capture_probe() -> Result<(u32, u32), String> {
     let monitor = win::primary_monitor().ok_or("no display")?;
     Ok((monitor.rect[2] as u32, monitor.rect[3] as u32))
@@ -234,7 +234,7 @@ pub fn record_external_frontmost_app() {
     }
 }
 
-/// Puts the last app that was in front (before Scrawl's own window took focus) back in front,
+/// Puts the last app that was in front (before Apparent's own window took focus) back in front,
 /// so a paste lands in it.
 pub fn ensure_external_app_active() {
     if let Some(front) = win::foreground_window()
@@ -271,12 +271,12 @@ fn external_front_window() -> Option<win::WindowInfo> {
     }
 }
 
-/// The frontmost app's pid, or the last external one while Scrawl itself is in front.
+/// The frontmost app's pid, or the last external one while Apparent itself is in front.
 pub fn frontmost_external_pid() -> Option<i32> {
     external_front_window().map(|w| w.pid as i32)
 }
 
-/// The frontmost app (pid, name, executable as its identifier), or the last one before Scrawl.
+/// The frontmost app (pid, name, executable as its identifier), or the last one before Apparent.
 pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
     let front = external_front_window()?;
     let (name, id) = win::app_identity(front.pid)?;
@@ -299,7 +299,7 @@ fn frame_of(rect: [f64; 4], scale: f64) -> TargetFrame {
     }
 }
 
-/// Selectable app windows (not Scrawl's), front to back, with their app names.
+/// Selectable app windows (not Apparent's), front to back, with their app names.
 fn app_windows() -> Vec<(win::WindowInfo, String, String)> {
     let mut names: std::collections::HashMap<u32, Option<(String, String)>> =
         std::collections::HashMap::new();
@@ -391,7 +391,7 @@ pub(super) fn raw_windows_now() -> Vec<crate::windows::RawWindow> {
     crate::windows::raw_windows()
 }
 
-/// Windows has no `scrawl-helper`: every Scrawl window is in its own process.
+/// Windows has no `apparent-helper`: every Apparent window is in its own process.
 pub(super) fn is_helper_process(_pid: i32) -> bool {
     false
 }
@@ -441,7 +441,7 @@ pub fn post_synthetic_cmd_v() {
         inputs.push(keyboard_input(VK_CONTROL.0, KEYEVENTF_KEYUP));
     }
     if !send(&inputs) {
-        scrawl_log("Ctrl+V was refused (an elevated app in front ignores Scrawl's input)");
+        apparent_log("Ctrl+V was refused (an elevated app in front ignores Apparent's input)");
     }
 }
 
@@ -548,7 +548,7 @@ fn register_shortcuts(
         for (i, (code, mods)) in hotkey_combos(kind, cfg).into_iter().enumerate() {
             let id = hotkey_id(kind, i);
             let ok = unsafe { RegisterHotKey(None, id, hot_key_modifiers(mods), code) }.is_ok();
-            scrawl_log(format!(
+            apparent_log(format!(
                 "RegisterHotKey({kind:?} {}) -> {}",
                 if i == 0 {
                     cfg.label.clone()
@@ -602,7 +602,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
     let _ = HOTKEY_REQUESTS.set(Mutex::new(request_tx));
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let spawned = thread::Builder::new()
-        .name("scrawl-hotkeys".into())
+        .name("apparent-hotkeys".into())
         .spawn(move || {
             let mut msg = MSG::default();
             // Make the thread's message queue before anyone posts to it.
@@ -614,7 +614,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
             let mut ids = Vec::new();
             let (record, paste) = telemetry.shortcuts();
             if let Err(kind) = register_shortcuts(&mut ids, &record, &paste) {
-                scrawl_log(format!(
+                apparent_log(format!(
                     "install_global_hotkeys: {kind:?} shortcut could not be registered"
                 ));
             }
@@ -683,7 +683,7 @@ pub fn set_shortcuts(
     Ok(())
 }
 
-/// While Settings records a new shortcut, Scrawl's own stop answering, so pressing the current
+/// While Settings records a new shortcut, Apparent's own stop answering, so pressing the current
 /// combo reaches the recorder instead of starting a capture.
 pub fn pause_shortcuts(telemetry: &SharedCaptureTelemetry, paused: bool) {
     if telemetry.shortcuts_paused.swap(paused, Ordering::AcqRel) == paused {
@@ -702,7 +702,7 @@ pub fn update_global_shortcut(telemetry: &SharedCaptureTelemetry, config: Shortc
     let (_, paste) = telemetry.shortcuts();
     match set_shortcuts(telemetry, config.clone(), paste) {
         Ok(()) => crate::settings::save_shortcut(ShortcutKind::Record, &config),
-        Err(kind) => scrawl_log(format!("update_global_shortcut: {kind:?} refused")),
+        Err(kind) => apparent_log(format!("update_global_shortcut: {kind:?} refused")),
     }
 }
 
@@ -882,8 +882,8 @@ fn handle_hook_event(telemetry: &SharedCaptureTelemetry, event: HookEvent) {
             let t_ms = telemetry.elapsed_ms();
             // A Shift-press is never a click: a Shift-click drops a pin, a Shift-drag is ink.
             if down {
-                // Scrawl's own controls (the HUD) aren't part of what is being shown.
-                if !telemetry.on_scrawl_window(x, y) {
+                // Apparent's own controls (the HUD) aren't part of what is being shown.
+                if !telemetry.on_apparent_window(x, y) {
                     if !pure_shift {
                         telemetry.pointer_down(t_ms, x, y);
                     } else if !right {
@@ -898,7 +898,7 @@ fn handle_hook_event(telemetry: &SharedCaptureTelemetry, event: HookEvent) {
             }
         }
         HookEvent::Wheel { x, y, dx, dy } => {
-            if !telemetry.active.load(Ordering::Acquire) || telemetry.on_scrawl_window(x, y) {
+            if !telemetry.active.load(Ordering::Acquire) || telemetry.on_apparent_window(x, y) {
                 return;
             }
             let t_ms = telemetry.elapsed_ms();
@@ -927,7 +927,7 @@ fn check_tap(telemetry: &SharedCaptureTelemetry) -> bool {
     let was_keys = telemetry.tap_live.swap(keys, Ordering::AcqRel);
     let was_mouse = telemetry.mouse_live.swap(mouse, Ordering::AcqRel);
     if (was_keys, was_mouse) != (keys, mouse) {
-        scrawl_log(format!(
+        apparent_log(format!(
             "input hooks: keyboard {}, mouse {}",
             if keys { "live" } else { "off (polling keys)" },
             if mouse { "live" } else { "off (polling the mouse buttons)" },
@@ -943,20 +943,20 @@ pub fn start_global_input_tap(telemetry: Arc<SharedCaptureTelemetry>) {
     }
     let worker_telemetry = Arc::clone(&telemetry);
     let _ = thread::Builder::new()
-        .name("scrawl-input-events".into())
+        .name("apparent-input-events".into())
         .spawn(move || {
             while let Ok(event) = receiver.recv() {
                 handle_hook_event(&worker_telemetry, event);
             }
         });
     let _ = thread::Builder::new()
-        .name("scrawl-input-hooks".into())
+        .name("apparent-input-hooks".into())
         .spawn(|| {
             let module: Option<HINSTANCE> = None;
             let keyboard =
                 unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0) };
             let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), module, 0) };
-            scrawl_log(format!(
+            apparent_log(format!(
                 "input hooks: keyboard {}, mouse {}",
                 if keyboard.is_ok() { "ok" } else { "failed" },
                 if mouse.is_ok() { "ok" } else { "failed" }
@@ -970,7 +970,7 @@ pub fn start_global_input_tap(telemetry: Arc<SharedCaptureTelemetry>) {
         });
     let poller_telemetry = Arc::clone(&telemetry);
     let _ = thread::Builder::new()
-        .name("scrawl-key-poller".into())
+        .name("apparent-key-poller".into())
         .spawn(move || run_key_poller(poller_telemetry));
 }
 
@@ -1068,7 +1068,7 @@ fn run_key_poller(telemetry: Arc<SharedCaptureTelemetry>) {
             buttons,
             (x, y),
             shift && !win && !ctrl && !alt,
-            |x, y| telemetry.on_scrawl_window(x, y),
+            |x, y| telemetry.on_apparent_window(x, y),
         );
 
         let pure_shift = shift && !win && !ctrl && !alt && !await_shift_release;

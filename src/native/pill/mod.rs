@@ -1,4 +1,4 @@
-//! Native AppKit `NSPanel` + `CAMetalLayer` + Metal renderer for the Scrawl recording pill.
+//! Native AppKit `NSPanel` + `CAMetalLayer` + Metal renderer for the Apparent recording pill.
 //!
 //! Replaces the GPUI `HudPillWindow` with a single fixed-size `NSPanel` (`640 × 84 pt` at `y = 34`
 //! below the menu bar) that never resizes or moves during morphs. Supports two backdrop looks via
@@ -124,11 +124,11 @@ define_class!(
     #[unsafe(super = NSView)]
     #[thread_kind = MainThreadOnly]
     #[ivars = PillViewIvars]
-    struct ScrawlPillView;
+    struct ApparentPillView;
 
-    unsafe impl NSObjectProtocol for ScrawlPillView {}
+    unsafe impl NSObjectProtocol for ApparentPillView {}
 
-    impl ScrawlPillView {
+    impl ApparentPillView {
         #[unsafe(method(acceptsFirstMouse:))]
         fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
             true
@@ -169,13 +169,13 @@ define_class!(
                 Some((Some(warning), chips)) => NSString::from_str(
                     &types::mic_warning_accessibility_label(warning, chips)
                 ),
-                _ => NSString::from_str("Scrawl Recording Controls"),
+                _ => NSString::from_str("Apparent Recording Controls"),
             }
         }
     }
 );
 
-impl ScrawlPillView {
+impl ApparentPillView {
     fn new(mtm: MainThreadMarker, frame: NSRect, action_tx: flume::Sender<PillAction>) -> Retained<Self> {
         let this = mtm.alloc::<Self>().set_ivars(PillViewIvars {
             action_tx,
@@ -309,7 +309,7 @@ struct SharedNativePill {
 
 pub struct NativePill {
     shared: Arc<SharedNativePill>,
-    root_view: Retained<ScrawlPillView>,
+    root_view: Retained<ApparentPillView>,
     display_link: Option<CVDisplayLink>,
     display_link_ctx: Option<*const SharedNativePill>,
     action_rx: flume::Receiver<PillAction>,
@@ -358,7 +358,7 @@ impl NativePill {
             NSPoint::new(0.0, 0.0),
             NSSize::new(f64::from(PANEL_W), f64::from(PANEL_H)),
         );
-        let root_view = ScrawlPillView::new(mtm, local_bounds, action_tx.clone());
+        let root_view = ApparentPillView::new(mtm, local_bounds, action_tx.clone());
         root_view.setWantsLayer(true);
 
         // Optional AppKit Liquid Glass view (`NSGlassEffectView` on macOS 26+).
@@ -1547,7 +1547,7 @@ mod tests {
         }
     }
 
-    /// The Completed island's routing states, drawn offscreen. With `SCRAWL_PILL_STILLS=DIR` the
+    /// The Completed island's routing states, drawn offscreen. With `APPARENT_PILL_STILLS=DIR` the
     /// stills, and frames of the morph from "Copied" to the question, are written there.
     #[test]
     fn route_chips_render_offscreen() {
@@ -1570,7 +1570,7 @@ mod tests {
             ),
             ("4-sent", completed("Sent to OPENCODE IOS", &[])),
         ];
-        let out = std::env::var_os("SCRAWL_PILL_STILLS").map(std::path::PathBuf::from);
+        let out = std::env::var_os("APPARENT_PILL_STILLS").map(std::path::PathBuf::from);
         if let Some(dir) = &out {
             std::fs::create_dir_all(dir).unwrap();
         }

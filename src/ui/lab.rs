@@ -1,6 +1,6 @@
-//! `scrawl lab pill <scene>`: drives the capsule through exact states on a fixed timeline, with a
+//! `apparent lab pill <scene>`: drives the capsule through exact states on a fixed timeline, with a
 //! pretend recording (no capture, microphone, files, overlay, hotkeys or ingest server), so a
-//! motion can be replayed, traced (`SCRAWL_MOTION_TRACE`), filmed and tuned (`scrawl tune`).
+//! motion can be replayed, traced (`APPARENT_MOTION_TRACE`), filmed and tuned (`apparent tune`).
 
 use std::time::Duration;
 
@@ -9,7 +9,7 @@ use gpui::{
     div, point, prelude::*, px, rgb, size,
 };
 
-use super::{ScrawlCoordinator, SelectionMode, motion};
+use super::{ApparentCoordinator, SelectionMode, motion};
 use crate::capture::SharedCaptureTelemetry;
 use crate::model::{CaptureMode, TargetFrame, TargetInfo};
 
@@ -135,7 +135,7 @@ pub(super) fn target() -> TargetInfo {
     }
 }
 
-fn apply(step: Step, coord: &mut ScrawlCoordinator, cx: &mut gpui::Context<ScrawlCoordinator>) {
+fn apply(step: Step, coord: &mut ApparentCoordinator, cx: &mut gpui::Context<ApparentCoordinator>) {
     motion::trace_event(format!("lab:{step:?}"));
     match step {
         Step::Tap => coord.record_screen_now(cx),
@@ -160,7 +160,7 @@ pub fn run(options: Options) {
         let (sender, _receiver) = flume::unbounded();
         let telemetry = SharedCaptureTelemetry::new(sender);
         let coordinator = cx.new(|_| {
-            let mut coord = ScrawlCoordinator::new(telemetry, None);
+            let mut coord = ApparentCoordinator::new(telemetry, None);
             coord.lab = true;
             coord
         });
@@ -312,7 +312,7 @@ impl Render for Backdrop {
 /// A plain light panel behind the capsule's window, so recordings don't show whatever is on the
 /// desktop. It takes no input.
 fn open_backdrop(display: [f32; 2], cx: &mut App) {
-    let theme = std::env::var("SCRAWL_LAB_BACKDROP")
+    let theme = std::env::var("APPARENT_LAB_BACKDROP")
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();

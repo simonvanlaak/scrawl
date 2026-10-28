@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-@testable import ScrawlKit
+@testable import ApparentKit
 import Testing
 
 struct FramePacerTests {
@@ -121,7 +121,7 @@ struct FramePacerTests {
     pacer.recordCapture(at: 0, drawDuration: 0.018, turnElapsed: 0.001, isInteracting: true)
 
     // Even with 18 ms * 8 = 144 ms raw backoff, targetInterval is capped at 100 ms (10 fps)
-    // so every timestamp stays within ±50 ms of a frame for scrawl-helper's 80 ms decode tolerance.
+    // so every timestamp stays within ±50 ms of a frame for apparent-helper's 80 ms decode tolerance.
     #expect(pacer.targetInterval(interacting: true) == 0.1)
     #expect(pacer.metrics.estimatedHitches120Hz == 1)
     #expect(pacer.metrics.estimatedHitches60Hz == 1)
@@ -465,7 +465,7 @@ struct FramePacerTests {
       let aAllMean = afterAllTicksMainThreadMs.reduce(0, +) / Double(afterAllTicksMainThreadMs.count)
 
       print("""
-      === SCRAWLKIT IOS SCROLL BENCHMARK (60 ticks @ 30 Hz = 2.0s: 1.4s scroll + 0.6s settled) ===
+      === APPARENTKIT IOS SCROLL BENCHMARK (60 ticks @ 30 Hz = 2.0s: 1.4s scroll + 0.6s settled) ===
       BEFORE (2.0x 880x1912, 2 windows, black fill, uncached keyboard, sync pool+append, no FramePacer):
         framesCaptured=\(beforeDrawMs.count)/\(totalTicks) skipped=0
         drawMs: mean=\(String(format: "%.2f", bDraw.mean)) p50=\(String(format: "%.2f", bDraw.p50)) p95=\(String(format: "%.2f", bDraw.p95)) max=\(String(format: "%.2f", bDraw.max))

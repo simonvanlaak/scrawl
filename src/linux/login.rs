@@ -1,4 +1,4 @@
-//! Launch at login: an XDG autostart entry (`~/.config/autostart/scrawl.desktop`), which GNOME,
+//! Launch at login: an XDG autostart entry (`~/.config/autostart/apparent.desktop`), which GNOME,
 //! KDE and the other freedesktop.org desktops start at login. GNOME Tweaks' Startup Applications
 //! and KDE's Autostart settings list it, and can turn it off with `Hidden=true`.
 
@@ -9,10 +9,10 @@ use anyhow::{Context, Result};
 fn entry() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("autostart/scrawl.desktop")
+        .join("autostart/apparent.desktop")
 }
 
-/// The command the desktop runs at login: this executable's tray app (the AppImage when Scrawl
+/// The command the desktop runs at login: this executable's tray app (the AppImage when Apparent
 /// runs from one, which `$APPIMAGE` names).
 fn command() -> Result<String> {
     let exe = std::env::var_os("APPIMAGE")
@@ -23,7 +23,7 @@ fn command() -> Result<String> {
 
 fn desktop_entry(exec: &str) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Scrawl\nComment=Show an agent what you mean\nExec={exec}\nIcon=dev.kitlangton.scrawl\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        "[Desktop Entry]\nType=Application\nName=Apparent\nComment=Show an agent what you mean\nExec={exec}\nIcon=dev.kitlangton.apparent\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
     )
 }
 
@@ -80,16 +80,16 @@ mod tests {
 
     #[test]
     fn the_autostart_entry_starts_the_tray_app() {
-        let text = desktop_entry("\"/opt/Scrawl.AppImage\" app");
+        let text = desktop_entry("\"/opt/Apparent.AppImage\" app");
         assert!(text.starts_with("[Desktop Entry]\n"));
-        assert!(text.contains("\nExec=\"/opt/Scrawl.AppImage\" app\n"));
+        assert!(text.contains("\nExec=\"/opt/Apparent.AppImage\" app\n"));
         assert!(text.contains("\nTerminal=false\n"));
     }
 
     #[test]
     fn a_moved_appimage_needs_its_autostart_command_refreshed() {
-        let text = desktop_entry("\"/old/Scrawl.AppImage\" app");
-        assert!(command_stale_in(&text, "\"/new/Scrawl.AppImage\" app"));
-        assert!(!command_stale_in(&text, "\"/old/Scrawl.AppImage\" app"));
+        let text = desktop_entry("\"/old/Apparent.AppImage\" app");
+        assert!(command_stale_in(&text, "\"/new/Apparent.AppImage\" app"));
+        assert!(!command_stale_in(&text, "\"/old/Apparent.AppImage\" app"));
     }
 }

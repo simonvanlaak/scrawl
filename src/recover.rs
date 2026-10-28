@@ -1,7 +1,7 @@
 //! A Screen capture writes `unfinished.json` beside its video and audio before its bundle is built
-//! and removes it once `scrawl.json` is there: the target, ink, clicks and window log that only
+//! and removes it once `apparent.json` is there: the target, ink, clicks and window log that only
 //! lived in memory. If the build dies with the process (#58: transcription crashed on CPUs without
-//! AVX-512), the next launch runs `scrawl recover` in a child process, which builds the bundle
+//! AVX-512), the next launch runs `apparent recover` in a child process, which builds the bundle
 //! from those files in place. Each bundle gets one try (`.recovering`), so a crash that happens
 //! again can't take every launch down with it.
 //!
@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::capture::scrawl_log;
+use crate::capture::apparent_log;
 use crate::model::{
     CaptureMode, InteractionEvent, RgbaFrame, Stroke, TargetFrame, TargetInfo, TranscriptData,
 };
@@ -62,7 +62,7 @@ pub fn write(bundle_dir: &Path, unfinished: &Unfinished) {
         .map_err(anyhow::Error::from)
         .and_then(|bytes| Ok(std::fs::write(bundle_dir.join(UNFINISHED), bytes)?));
     if let Err(error) = written {
-        scrawl_log(format!("recover: could not write {UNFINISHED}: {error:#}"));
+        apparent_log(format!("recover: could not write {UNFINISHED}: {error:#}"));
     }
 }
 
@@ -90,7 +90,7 @@ fn orphaned(dir: &Path) -> bool {
 
 /// Whether a build is still owed to `dir`: nothing built it and it hasn't been tried.
 pub fn owed(dir: &Path) -> bool {
-    !dir.join("scrawl.json").exists()
+    !dir.join("apparent.json").exists()
         && !dir.join(RECOVERING).exists()
         && (dir.join(UNFINISHED).is_file() || orphaned(dir))
 }
@@ -109,7 +109,7 @@ pub fn pending(captures: &Path, now: SystemTime) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|dir| {
-            dir.extension().is_some_and(|ext| ext == "scrawl")
+            dir.extension().is_some_and(|ext| ext == "apparent")
                 && owed(dir)
                 && if orphaned(dir) {
                     [dir.clone(), dir.join(VIDEO), dir.join(AUDIO)]
@@ -177,12 +177,12 @@ impl Media {
 /// tried first so a crash here isn't repeated at every launch.
 pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
     anyhow::ensure!(
-        !dir.join("scrawl.json").exists(),
-        "{} is already built; `scrawl reprocess` rebuilds it into a new bundle",
+        !dir.join("apparent.json").exists(),
+        "{} is already built; `apparent reprocess` rebuilds it into a new bundle",
         dir.display()
     );
     let _ = std::fs::write(dir.join(RECOVERING), "");
-    scrawl_log(format!("recover: rebuilding {}", dir.display()));
+    apparent_log(format!("recover: rebuilding {}", dir.display()));
     let result = if dir.join(UNFINISHED).is_file() {
         read(dir)
             .and_then(|unfinished| crate::rebuild_screen_bundle_with(dir, unfinished, None, media))
@@ -209,9 +209,9 @@ pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
     match &result {
         Ok(_) => {
             finished(dir);
-            scrawl_log(format!("recover: rebuilt {}", dir.display()));
+            apparent_log(format!("recover: rebuilt {}", dir.display()));
         }
-        Err(error) => scrawl_log(format!(
+        Err(error) => apparent_log(format!(
             "recover: could not rebuild {}: {error:#}",
             dir.display()
         )),
@@ -226,7 +226,7 @@ pub fn start() {
         return;
     }
     let _ = std::thread::Builder::new()
-        .name("scrawl-recover".into())
+        .name("apparent-recover".into())
         .spawn(move || {
             let Ok(exe) = std::env::current_exe() else {
                 return;
@@ -246,13 +246,13 @@ pub fn start() {
                 command.creation_flags(CREATE_NO_WINDOW);
             }
             match command.status() {
-                Ok(status) => scrawl_log(format!("recover: finished ({status})")),
-                Err(error) => scrawl_log(format!("recover: could not start: {error}")),
+                Ok(status) => apparent_log(format!("recover: finished ({status})")),
+                Err(error) => apparent_log(format!("recover: could not start: {error}")),
             }
         });
 }
 
-/// `scrawl recover`: rebuilds each pending bundle once, in place.
+/// `apparent recover`: rebuilds each pending bundle once, in place.
 pub fn run(captures: &Path) -> Vec<(PathBuf, Result<String>)> {
     pending(captures, SystemTime::now())
         .into_iter()
@@ -269,7 +269,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("scrawl-recover-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("apparent-recover-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -297,12 +297,12 @@ mod tests {
             write(&dir, &unfinished());
             dir
         };
-        let crashed = bundle("a.scrawl");
-        let built = bundle("b.scrawl");
-        std::fs::write(built.join("scrawl.json"), "{}").unwrap();
-        let tried = bundle("c.scrawl");
+        let crashed = bundle("a.apparent");
+        let built = bundle("b.apparent");
+        std::fs::write(built.join("apparent.json"), "{}").unwrap();
+        let tried = bundle("c.apparent");
         std::fs::write(tried.join(RECOVERING), "").unwrap();
-        std::fs::create_dir_all(captures.join("d.scrawl")).unwrap();
+        std::fs::create_dir_all(captures.join("d.apparent")).unwrap();
 
         let now = SystemTime::now();
         assert!(pending(&captures, now).is_empty(), "still settling");
@@ -400,9 +400,9 @@ mod tests {
         transcribe: fake_transcript,
     };
 
-    fn assert_rebuilt(dir: &Path) -> crate::model::ScrawlBundle {
-        let bundle: crate::model::ScrawlBundle =
-            serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
+    fn assert_rebuilt(dir: &Path) -> crate::model::ApparentBundle {
+        let bundle: crate::model::ApparentBundle =
+            serde_json::from_slice(&std::fs::read(dir.join("apparent.json")).unwrap()).unwrap();
         assert!(!bundle.keyframes.is_empty());
         for keyframe in &bundle.keyframes {
             assert!(dir.join(&keyframe.file).is_file(), "{}", keyframe.file);
@@ -426,19 +426,19 @@ mod tests {
     #[test]
     fn recover_picks_up_old_video_and_audio_without_a_journal_but_never_a_live_capture() {
         let captures = temp_dir("orphans");
-        let lost = orphan(&captures, "a.scrawl");
+        let lost = orphan(&captures, "a.apparent");
         // Recording now: the movie grows, the audio is still in memory.
-        let live = captures.join("b.scrawl");
+        let live = captures.join("b.apparent");
         std::fs::create_dir_all(&live).unwrap();
         std::fs::write(live.join(VIDEO), b"movie").unwrap();
-        let built = orphan(&captures, "c.scrawl");
-        std::fs::write(built.join("scrawl.json"), "{}").unwrap();
-        let tried = orphan(&captures, "d.scrawl");
+        let built = orphan(&captures, "c.apparent");
+        std::fs::write(built.join("apparent.json"), "{}").unwrap();
+        let tried = orphan(&captures, "d.apparent");
         std::fs::write(tried.join(RECOVERING), "").unwrap();
         // Since 0.3.11 the journal follows the audio, and the journal decides.
-        let journaled = orphan(&captures, "e.scrawl");
+        let journaled = orphan(&captures, "e.apparent");
         write(&journaled, &unfinished());
-        let phone = orphan(&captures, "f.scrawl");
+        let phone = orphan(&captures, "f.apparent");
         std::fs::write(phone.join("timeline.json"), "{}").unwrap();
 
         let now = SystemTime::now();
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn recover_rebuilds_a_bundle_from_its_video_and_audio_alone() {
         let captures = temp_dir("rebuild");
-        let dir = orphan(&captures, "lost.scrawl");
+        let dir = orphan(&captures, "lost.apparent");
         rebuild(&dir, &FAKE).unwrap();
         let bundle = assert_rebuilt(&dir);
         assert!(
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn recover_tries_an_orphan_once_and_retries_only_when_asked() {
         let captures = temp_dir("once");
-        let dir = orphan(&captures, "broken.scrawl");
+        let dir = orphan(&captures, "broken.apparent");
         fn no_probe(_: &Path) -> Result<crate::helper::Probe> {
             anyhow::bail!("unreadable movie")
         }
@@ -491,11 +491,11 @@ mod tests {
     }
 
     /// A real movie through the platform's decoder: Media Foundation on Windows, AVFoundation
-    /// via `scrawl-helper` on a Mac (with ffmpeg on the PATH to make the movie).
+    /// via `apparent-helper` on a Mac (with ffmpeg on the PATH to make the movie).
     #[test]
     fn recover_rebuilds_a_real_movie() {
         let captures = temp_dir("real");
-        let dir = orphan(&captures, "real.scrawl");
+        let dir = orphan(&captures, "real.apparent");
         let frames: Vec<(u64, [u8; 3])> = (0..MOVIE_MS)
             .step_by(100)
             .map(|t| (t, colour_at(t)))
@@ -517,7 +517,7 @@ mod tests {
                 .status()
                 .is_ok_and(|status| status.success());
             if !made || crate::helper::path().is_err() {
-                eprintln!("skipped: needs ffmpeg and scrawl-helper");
+                eprintln!("skipped: needs ffmpeg and apparent-helper");
                 return;
             }
         }

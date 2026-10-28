@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::capture::scrawl_log;
-use crate::model::{ScrawlBundle, format_clock};
+use crate::capture::apparent_log;
+use crate::model::{ApparentBundle, format_clock};
 
 const CAPACITY: usize = 8;
 
@@ -23,7 +23,7 @@ pub struct InboxEntry {
 }
 
 impl InboxEntry {
-    pub fn new(dir: &Path, bundle: &ScrawlBundle, source: &str, received_at_ms: u64) -> Self {
+    pub fn new(dir: &Path, bundle: &ApparentBundle, source: &str, received_at_ms: u64) -> Self {
         Self {
             dir: dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()),
             source: source.to_owned(),
@@ -143,7 +143,7 @@ impl Inbox {
             Ok(())
         })();
         if let Err(err) = result {
-            scrawl_log(format!("inbox save failed: {err:#}"));
+            apparent_log(format!("inbox save failed: {err:#}"));
         }
     }
 }
@@ -159,7 +159,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root =
-                std::env::temp_dir().join(format!("scrawl-inbox-{}", crate::make_bundle_id()));
+                std::env::temp_dir().join(format!("apparent-inbox-{}", crate::make_bundle_id()));
             std::fs::create_dir_all(&root).unwrap();
             let root = root.canonicalize().unwrap();
             Self { root }
@@ -170,7 +170,7 @@ mod tests {
         }
 
         fn bundle(&self, name: &str) -> PathBuf {
-            let dir = self.root.join(format!("{name}.scrawl"));
+            let dir = self.root.join(format!("{name}.apparent"));
             std::fs::create_dir_all(&dir).unwrap();
             dir
         }
@@ -235,7 +235,7 @@ mod tests {
         inbox.add(fx.entry("b", 2));
         // Same bundle through a non-canonical path.
         let mut again = fx.entry("a", 3);
-        again.dir = fx.root.join(".").join("a.scrawl");
+        again.dir = fx.root.join(".").join("a.apparent");
         inbox.add(again);
         assert_eq!(inbox.len(), 2);
         assert_eq!(inbox.newest().unwrap().received_at_ms, 3);
@@ -248,7 +248,7 @@ mod tests {
         let mut inbox = Inbox::load(fx.store());
         inbox.add(fx.entry("a", 1));
         inbox.add(fx.entry("b", 2));
-        assert!(inbox.remove(&fx.root.join(".").join("b.scrawl")));
+        assert!(inbox.remove(&fx.root.join(".").join("b.apparent")));
         assert!(!inbox.remove(&fx.bundle("b")));
         assert!(!inbox.remove(Path::new("latest")));
         assert_eq!(dirs(&inbox), [fx.bundle("a")]);

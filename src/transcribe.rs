@@ -1,4 +1,4 @@
-//! Transcription: Apple's SpeechAnalyzer through `scrawl-helper` (measured word and segment
+//! Transcription: Apple's SpeechAnalyzer through `apparent-helper` (measured word and segment
 //! timings), Hex when `"transcriber": "hex"` is set and Hex is connected (`crate::hex`; word
 //! times estimated), or a program of the user's when `"transcriber": "command"`
 //! (`crate::command_transcriber`). Any Hex or command trouble falls back to Apple for that
@@ -119,7 +119,7 @@ pub fn menu_state(
     }
 }
 
-/// Pins the engine for this process (`scrawl reprocess --transcriber`).
+/// Pins the engine for this process (`apparent reprocess --transcriber`).
 pub fn set_override(engine: Engine) {
     OVERRIDE.store(
         match engine {
@@ -155,7 +155,7 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
             if let Some(pause) = pause {
                 match pause.finish(&audio.wav_bytes) {
                     Ok(transcript) => return transcript,
-                    Err(error) => crate::capture::scrawl_log(format!("Pause transcription failed, transcribing the recording: {error:#}")),
+                    Err(error) => crate::capture::apparent_log(format!("Pause transcription failed, transcribing the recording: {error:#}")),
                 }
             }
             live.and_then(|live| finish_live(live, audio))
@@ -171,7 +171,7 @@ fn finish_live(
 ) -> Option<TranscriptData> {
     match live.finish(&audio.wav_bytes) {
         Ok(done) => {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "Live transcription: {} words, {} of {} ms streamed, tail {} ms",
                 done.transcript.words.len(),
                 done.streamed_samples as u64 * 1_000 / 16_000,
@@ -181,7 +181,7 @@ fn finish_live(
             Some(done.transcript)
         }
         Err(error) => {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "Live transcription failed, transcribing the recording: {error:#}"
             ));
             None
@@ -205,7 +205,7 @@ fn run(
     match other() {
         Ok(Some(transcript)) => return transcript,
         Ok(None) => {}
-        Err(error) => crate::capture::scrawl_log(format!(
+        Err(error) => crate::capture::apparent_log(format!(
             "{name} transcription failed, using {LOCAL_ENGINE_TITLE}: {error:#}"
         )),
     }
@@ -219,7 +219,7 @@ fn try_command(wav: &Path, audio: &RecordedAudio) -> Result<Option<TranscriptDat
         Ok(program) => program,
         Err(unusable) => {
             LOGGED_NO_COMMAND.call_once(|| {
-                crate::capture::scrawl_log(format!(
+                crate::capture::apparent_log(format!(
                     "Command transcriber preferred but {unusable}; using {LOCAL_ENGINE_TITLE}"
                 ));
             });
@@ -228,7 +228,7 @@ fn try_command(wav: &Path, audio: &RecordedAudio) -> Result<Option<TranscriptDat
     };
     let transcript =
         crate::command_transcriber::transcribe(&program, wav, audio.sample_count, &mut |line| {
-            crate::capture::scrawl_log(line)
+            crate::capture::apparent_log(line)
         })?;
     Ok(Some(transcript))
 }
@@ -236,7 +236,7 @@ fn try_command(wav: &Path, audio: &RecordedAudio) -> Result<Option<TranscriptDat
 fn try_hex(audio: &RecordedAudio) -> Result<Option<TranscriptData>> {
     let not_connected = |reason: String| {
         LOGGED_NOT_CONNECTED.call_once(|| {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "Hex preferred but unavailable ({reason}); using {LOCAL_ENGINE_TITLE}"
             ));
         });
@@ -256,7 +256,7 @@ fn try_hex(audio: &RecordedAudio) -> Result<Option<TranscriptData>> {
 
 fn apple(wav: &Path) -> TranscriptData {
     let transcript = crate::helper::transcribe(wav).unwrap_or_else(|error| {
-        crate::capture::scrawl_log(format!("{LOCAL_ENGINE_TITLE} failed: {error:#}"));
+        crate::capture::apparent_log(format!("{LOCAL_ENGINE_TITLE} failed: {error:#}"));
         TranscriptData {
             source: "offline".into(),
             missing: Some(crate::model::MissingTranscript {
@@ -267,7 +267,7 @@ fn apple(wav: &Path) -> TranscriptData {
         }
     });
     if let Some(missing) = &transcript.missing {
-        crate::capture::scrawl_log(format!("No transcript: {}", missing.reason));
+        crate::capture::apparent_log(format!("No transcript: {}", missing.reason));
         if missing.retry {
             crate::speech_model::ensure();
         }
@@ -309,7 +309,7 @@ mod tests {
     fn the_preferred_engine_is_used_when_it_answers() {
         for (engine, source) in [
             (Engine::Hex, "hex:parakeet_v3"),
-            (Engine::Command, "command:whisper-scrawl"),
+            (Engine::Command, "command:whisper-apparent"),
         ] {
             let result = run(
                 engine,

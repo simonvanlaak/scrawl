@@ -1,4 +1,4 @@
-//! Lowers the output volume while recording (`lowerPlayback`). A warm `scrawl-helper
+//! Lowers the output volume while recording (`lowerPlayback`). A warm `apparent-helper
 //! playback-volume` ramps it without blocking recording or the UI, and puts it back when told
 //! to stop, when this process exits or crashes (its stdin closes), or when it is terminated.
 use std::io::Write;
@@ -44,7 +44,7 @@ pub fn warm_up() {
     if load_config_from(&default_config_path()).lower_playback == Some(true)
         && let Err(error) = command(None)
     {
-        crate::capture::scrawl_log(format!("Playback helper: {error:#}"));
+        crate::capture::apparent_log(format!("Playback helper: {error:#}"));
     }
 }
 
@@ -58,7 +58,7 @@ impl Guard {
         match command(Some(&format!("start {}", config.recording_volume()))) {
             Ok(()) => Some(Self),
             Err(error) => {
-                crate::capture::scrawl_log(format!("Playback volume: {error:#}"));
+                crate::capture::apparent_log(format!("Playback volume: {error:#}"));
                 None
             }
         }
@@ -68,7 +68,7 @@ impl Guard {
 impl Drop for Guard {
     fn drop(&mut self) {
         if let Err(error) = command(Some("stop")) {
-            crate::capture::scrawl_log(format!("Restoring playback volume: {error:#}"));
+            crate::capture::apparent_log(format!("Restoring playback volume: {error:#}"));
         }
     }
 }

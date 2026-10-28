@@ -26,7 +26,7 @@ use windows::core::PCWSTR;
 
 use super::wide;
 
-/// The shell, unlike the file system, rejects `/` in a path (`…\scrawl/captures\…`), so an
+/// The shell, unlike the file system, rejects `/` in a path (`…\apparent/captures\…`), so an
 /// absolute path is rebuilt from its components with `\` between them. URLs pass through.
 fn shell_path(target: &Path) -> std::path::PathBuf {
     if target.is_absolute() {
@@ -41,7 +41,7 @@ pub fn open(target: &Path) -> Result<()> {
     let target = wide(&shell_path(target).to_string_lossy());
     let verb = wide("open");
     // ShellExecute pumps messages while it starts the handler. On GPUI's thread that runs queued
-    // tasks while the calling event still holds the app, and their panic aborts Scrawl.
+    // tasks while the calling event still holds the app, and their panic aborts Apparent.
     let result = std::thread::spawn(move || {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
         unsafe {
@@ -188,7 +188,7 @@ pub fn change_time(path: &Path) -> Option<SystemTime> {
 }
 
 /// Closes the console window Windows opened for this process when it was launched from
-/// Explorer or the Start menu (`scrawl.exe` is a console program so the CLI works). A console
+/// Explorer or the Start menu (`apparent.exe` is a console program so the CLI works). A console
 /// shared with a terminal it was started from stays, so its log keeps printing there.
 pub fn release_own_console() {
     use windows::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
@@ -200,7 +200,7 @@ pub fn release_own_console() {
 }
 
 /// Set on a copy started by `onboarding::relaunch`: the process id of the copy that started it.
-pub const RELAUNCHED_BY: &str = "SCRAWL_RELAUNCHED_BY";
+pub const RELAUNCHED_BY: &str = "APPARENT_RELAUNCHED_BY";
 
 /// A copy started by `onboarding::relaunch` waits (at most 10 s) for the one that started it to
 /// quit, so there are never two running.
@@ -272,12 +272,12 @@ mod tests {
 
     #[test]
     fn absolute_paths_lose_their_forward_slashes_and_urls_stay() {
-        let mixed = Path::new(r"C:\Users\a\AppData\Local\scrawl/captures\one.scrawl");
+        let mixed = Path::new(r"C:\Users\a\AppData\Local\apparent/captures\one.apparent");
         assert_eq!(
             shell_path(mixed).to_string_lossy(),
-            r"C:\Users\a\AppData\Local\scrawl\captures\one.scrawl"
+            r"C:\Users\a\AppData\Local\apparent\captures\one.apparent"
         );
-        let url = Path::new("https://github.com/kitlangton/scrawl/releases");
+        let url = Path::new("https://github.com/tryapparent/apparent/releases");
         assert_eq!(shell_path(url), url);
     }
 }

@@ -1,4 +1,4 @@
-//! Displays, and the coordinate spaces Scrawl moves between on a Mac with more than one.
+//! Displays, and the coordinate spaces Apparent moves between on a Mac with more than one.
 //!
 //! - **Global** points, top-left origin at the primary display's top-left corner: `CGEvent`
 //!   locations, `CGDisplayBounds`, `SCDisplay`/`SCWindow` frames and every `TargetFrame`. A
@@ -110,7 +110,7 @@ pub fn source_rect(area: Rect, display: Rect) -> Rect {
     [lx, ly, w, h]
 }
 
-/// The smallest area Scrawl records, points a side.
+/// The smallest area Apparent records, points a side.
 pub const MIN_AREA: f64 = 32.0;
 
 /// Where an area dragged in the picker is recorded: on the display holding its centre (the

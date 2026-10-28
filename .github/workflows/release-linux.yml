@@ -57,8 +57,8 @@ jobs:
         run: |
           cargo test --release --locked -- --test-threads=2
           cargo test --release --locked speech:: -- --nocapture
-          cargo test --release --locked --bin scrawl --no-run --message-format=json > target/test-artifacts.jsonl
-          test=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "scrawl" and .profile.test) | .executable // empty' target/test-artifacts.jsonl)
+          cargo test --release --locked --bin apparent --no-run --message-format=json > target/test-artifacts.jsonl
+          test=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "apparent" and .profile.test) | .executable // empty' target/test-artifacts.jsonl)
           test -f "$test"
           echo "SPEECH_TEST=$test" >> "$GITHUB_ENV"
       - name: No build-machine CPU specialization
@@ -80,10 +80,10 @@ jobs:
             echo "Tag $TAG does not match Cargo.toml $version" >&2
             exit 1
           fi
-          ./scripts/linux/appimage.sh target/release/scrawl
-          name="Scrawl-$version-linux-${{ matrix.arch }}.AppImage"
+          ./scripts/linux/appimage.sh target/release/apparent
+          name="Apparent-$version-linux-${{ matrix.arch }}.AppImage"
           mkdir -p dist
-          cp "target/appimage/Scrawl-${{ matrix.arch }}.AppImage" "dist/$name"
+          cp "target/appimage/Apparent-${{ matrix.arch }}.AppImage" "dist/$name"
           (cd dist && sha256sum "$name" > "$name.sha256")
           echo "name=$name" >> "$GITHUB_OUTPUT"
       - name: AppImage runs headless without FUSE
@@ -98,7 +98,7 @@ jobs:
         if: matrix.arch == 'x86_64'
         timeout-minutes: 30
         env:
-          SCRAWL_TEST_NO_AVX_VNNI: "1"
+          APPARENT_TEST_NO_AVX_VNNI: "1"
         run: |
           sde=$(find "$SDE_PATH" -type f -name sde64 -print -quit)
           test -x "$sde"
@@ -116,7 +116,7 @@ jobs:
         run: |
           # The Mac/Windows job may create it concurrently. Re-read on a create conflict.
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --verify-tag --title "Scrawl ${TAG#v}" --notes "Release notes to follow." || \
+            gh release create "$TAG" --verify-tag --title "Apparent ${TAG#v}" --notes "Release notes to follow." || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" dist/* --clobber
 
@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v5
         with:
-          pattern: Scrawl-*.AppImage
+          pattern: Apparent-*.AppImage
           path: dist
           merge-multiple: true
       - name: Publish both checked AppImages before updating the feed

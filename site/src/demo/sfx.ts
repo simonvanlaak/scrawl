@@ -648,7 +648,7 @@ export function getDiagnostics(): AudioDiagnostics {
 }
 
 if (typeof window !== "undefined") {
-  ;(window as unknown as { __scrawlAudio?: () => AudioDiagnostics }).__scrawlAudio = getDiagnostics
+  ;(window as unknown as { __apparentAudio?: () => AudioDiagnostics }).__apparentAudio = getDiagnostics
 }
 
 // ---------- Scripted cues ----------

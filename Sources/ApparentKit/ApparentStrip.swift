@@ -5,8 +5,8 @@
   import UIKit
 
   extension Color {
-    /// #FF3B30, Scrawl's ink.
-    static let scrawlRed = Color(red: 1.0, green: 0.231, blue: 0.188)
+    /// #FF3B30, Apparent's ink.
+    static let apparentRed = Color(red: 1.0, green: 0.231, blue: 0.188)
   }
 
   /// Parts of the overlay that take touches; everything else passes through to the app.
@@ -29,7 +29,7 @@
   /// A): one glass body that stretches out of a droplet, pours into the button you tap, buds
   /// bubbles off a liquid neck, and squashes as it's thrown. `LiquidStrip` runs the springs; this
   /// view draws its geometry.
-  struct ScrawlStrip: View {
+  struct ApparentStrip: View {
     enum Mode: Equatable {
       case recording(startedAt: Date, isDrawing: Bool)
       case sending(Sending)
@@ -78,7 +78,7 @@
       var notice: Notice {
         switch self {
         case .unreachable: Notice("Mac didn't answer")
-        case .linkExpired: Notice("Scrawl link expired", detail: "Ask Kit for a new one")
+        case .linkExpired: Notice("Apparent link expired", detail: "Ask Kit for a new one")
         case .tooLarge: Notice("Too large to send")
         case .rejected: Notice("Couldn't send", detail: "The server rejected it")
         case .notSaved: Notice("Couldn't save to send")
@@ -128,7 +128,7 @@
 
     @GestureState private var dotPress = DotPress.idle
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.scrawlStartupTrace) private var startupTrace
+    @Environment(\.apparentStartupTrace) private var startupTrace
 
     private enum DotPress {
       case idle, holding, dragging
@@ -229,7 +229,7 @@
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 32, height: 32)
-            .background(Color.scrawlRed, in: .circle)
+            .background(Color.apparentRed, in: .circle)
             .frame(width: Metrics.hit, height: Metrics.row)
             .contentShape(Rectangle())
         }
@@ -387,11 +387,11 @@
     static let hit: CGFloat = 44
     static let row: CGFloat = 44
     /// The dot sits at the centre of the strip's rounded top.
-    static let dotRow: CGFloat = ScrawlStrip.width
+    static let dotRow: CGFloat = ApparentStrip.width
     static let divider: CGFloat = 9
     /// Each row's centre relative to the strip's centre: dot, draw, divider, discard, send.
     static let rowCenters: [Double] = {
-      var top = -Double(ScrawlStrip.expandedHeight) / 2
+      var top = -Double(ApparentStrip.expandedHeight) / 2
       return [dotRow, row, divider, row, row].map { height in
         defer { top += Double(height) }
         return top + Double(height) / 2
@@ -488,14 +488,14 @@
   // MARK: - Liquid strip model
 
   /// The strip's springs, in the overlay's coordinates. A display link steps them only while
-  /// something is moving (SwiftUI's `Spring.update`), and `geometry` is what `ScrawlStrip` draws.
+  /// something is moving (SwiftUI's `Spring.update`), and `geometry` is what `ApparentStrip` draws.
   /// A hand-run spring set, rather than `withAnimation`, because the motion needs per-edge springs
   /// (the far edge leads a pour), staggered per-row springs, velocity kicks (shake, throw), and
   /// stretch that follows a drag's speed.
   @MainActor
   @Observable
   final class LiquidStrip {
-    typealias Phase = ScrawlStrip.Mode.Phase
+    typealias Phase = ApparentStrip.Mode.Phase
 
     struct Row: Equatable {
       var opacity = 0.0
@@ -522,10 +522,10 @@
     }
 
     enum Bubble: Equatable {
-      case elapsed, sent(IngestReply), queued, failed(ScrawlStrip.Failure), discarded
+      case elapsed, sent(IngestReply), queued, failed(ApparentStrip.Failure), discarded
       case sending(stalled: Bool)
       /// A message while recording (link expired, the length cap).
-      case notice(ScrawlStrip.Notice)
+      case notice(ApparentStrip.Notice)
 
       /// Only bubbles with a button (Share, Undo) take touches; the rest let them reach the app.
       var isInteractive: Bool {
@@ -630,7 +630,7 @@
     /// Where the controls gather from or into, relative to the strip's centre.
     @ObservationIgnored private var gatherY = 0.0
     @ObservationIgnored private var bubbleActive = false
-    @ObservationIgnored private var notice: ScrawlStrip.Notice?
+    @ObservationIgnored private var notice: ApparentStrip.Notice?
     @ObservationIgnored private var bubbleY = 0.0
     @ObservationIgnored private var measured: (bubble: Bubble, size: CGSize)?
     @ObservationIgnored private var restPoint: CGPoint?
@@ -640,8 +640,8 @@
 
     // MARK: Inputs
 
-    /// The strip's state from `Scrawl`. A new phase starts its transition.
-    func apply(_ mode: ScrawlStrip.Mode?) {
+    /// The strip's state from `Apparent`. A new phase starts its transition.
+    func apply(_ mode: ApparentStrip.Mode?) {
       if case let .recording(startedAt, isDrawing) = mode {
         if self.startedAt != startedAt { self.startedAt = startedAt }
         if self.isDrawing != isDrawing { self.isDrawing = isDrawing }
@@ -701,7 +701,7 @@
     }
 
     /// A message beside the dot while recording; holding the dot shows the time over it.
-    func setNotice(_ notice: ScrawlStrip.Notice?) {
+    func setNotice(_ notice: ApparentStrip.Notice?) {
       guard notice != self.notice else { return }
       self.notice = notice
       guard phase == .recording, !holding else { return }
@@ -794,8 +794,8 @@
       to(.scale, 1, StripMotion.change)
       to(.squashX, 1, StripMotion.unsquash)
       to(.squashY, 1, StripMotion.unsquash)
-      to(.top, -Double(ScrawlStrip.expandedHeight) / 2, StripMotion.change)
-      to(.bottom, Double(ScrawlStrip.expandedHeight) / 2, StripMotion.stretchLag)
+      to(.top, -Double(ApparentStrip.expandedHeight) / 2, StripMotion.change)
+      to(.bottom, Double(ApparentStrip.expandedHeight) / 2, StripMotion.stretchLag)
       to(.gather, 0, StripMotion.change)
       // Middle row first, then outward.
       let ring = [2, 1, 0, 1, 2]
@@ -806,7 +806,7 @@
 
     /// The body pours into the tapped button (far edge first), becomes its status circle, and
     /// buds the status bubble off.
-    private func toStatus(_ status: Phase, mode: ScrawlStrip.Mode?, from previous: Phase?) {
+    private func toStatus(_ status: Phase, mode: ApparentStrip.Mode?, from previous: Phase?) {
       let fromStrip = previous == .recording
       let target: Double = if fromStrip {
         Metrics.rowCenters[status == .discarded ? Metrics.discardIndex : Metrics.sendIndex]
@@ -823,7 +823,7 @@
       to(.alpha, 1, StripMotion.quick)
       to(.slide, 0, StripMotion.change)
       to(.scale, 1, StripMotion.change)
-      let radius = Double(ScrawlStrip.width) / 2
+      let radius = Double(ApparentStrip.width) / 2
       to(.top, target - radius, StripMotion.change)
       to(.bottom, target + radius, StripMotion.pourLag)
       if fromStrip {
@@ -1033,7 +1033,7 @@
       let ax = self[.placeX] + Double(dir) * (self[.slide] + self[.shake])
       let ay = self[.placeY]
       let scale = self[.scale]
-      let width = Double(ScrawlStrip.width) * self[.squashX] * self[.throwX] * scale
+      let width = Double(ApparentStrip.width) * self[.squashX] * self[.throwX] * scale
       let height = max(0, (self[.bottom] - self[.top]) * self[.squashY] * self[.throwY] * scale)
       let cy = ay + (self[.top] + self[.bottom]) / 2
 
@@ -1235,7 +1235,7 @@
             .accessibilityLabel(Self.spoken(elapsed))
         }
         Circle()
-          .fill(Color.scrawlRed)
+          .fill(Color.apparentRed)
           .frame(width: 8, height: 8)
           .phaseAnimator(reduceMotion ? [true] : [true, false]) { dot, bright in
             dot.scaleEffect(bright ? 1 : 0.78).opacity(bright ? 1 : 0.55)
@@ -1269,7 +1269,7 @@
   private struct StripButton<Icon: View>: View {
     let label: String
     var value = ""
-    /// Tinted Scrawl red while on (the draw toggle).
+    /// Tinted Apparent red while on (the draw toggle).
     var isActive = false
     let action: @MainActor () -> Void
     @ViewBuilder let icon: Icon
@@ -1278,9 +1278,9 @@
       Button { action() } label: {
         icon
           .font(.system(size: 17, weight: .medium))
-          .foregroundStyle(isActive ? Color.scrawlRed : .white.opacity(0.85))
+          .foregroundStyle(isActive ? Color.apparentRed : .white.opacity(0.85))
           .frame(width: 32, height: 32)
-          .background(Color.scrawlRed.opacity(isActive ? 0.22 : 0), in: .circle)
+          .background(Color.apparentRed.opacity(isActive ? 0.22 : 0), in: .circle)
           .frame(width: Metrics.hit, height: Metrics.row)
           .contentShape(Rectangle())
           .animation(.snappy(duration: 0.15), value: isActive)
@@ -1306,20 +1306,20 @@
   /// app), inside the safe area and above the keyboard. Dragging the dot moves it; a throw lands
   /// on the nearer edge, stretching along the way.
   ///
-  /// `mode` comes straight from `Scrawl`; the first layout already seeds the entrance.
+  /// `mode` comes straight from `Apparent`; the first layout already seeds the entrance.
   struct StripPlacement: View {
-    let mode: ScrawlStrip.Mode?
-    let actions: ScrawlStrip.Actions
+    let mode: ApparentStrip.Mode?
+    let actions: ApparentStrip.Actions
     /// Pins the edge (previews) instead of the remembered one.
     var sideOverride: StripSide?
     /// A message beside the dot while recording.
-    var notice: ScrawlStrip.Notice?
+    var notice: ApparentStrip.Notice?
 
-    @AppStorage("dev.kitlangton.scrawl.strip.side") private var storedSide = StripSide.trailing
+    @AppStorage("dev.kitlangton.apparent.strip.side") private var storedSide = StripSide.trailing
     /// 0 is the top of the space the strip can move in, 1 the bottom.
-    @AppStorage("dev.kitlangton.scrawl.strip.position") private var position = 0.5
+    @AppStorage("dev.kitlangton.apparent.strip.position") private var position = 0.5
     @State private var liquid = LiquidStrip()
-    @State private var latest: ScrawlStrip.Mode?
+    @State private var latest: ApparentStrip.Mode?
     @State private var isReady = false
     @State private var pressOrigin: CGPoint?
     @State private var isDragging = false
@@ -1334,7 +1334,7 @@
       GeometryReader { geometry in
         let area = StripArea(geometry, keyboardTop: keyboardTop)
         let rest = area.center(side: side, position: position)
-        ScrawlStrip(model: liquid, actions: placed(actions, in: area), glass: glass)
+        ApparentStrip(model: liquid, actions: placed(actions, in: area), glass: glass)
           .onAppear { liquid.rest(at: rest, animated: false) }
           .onChange(of: rest) { _, rest in liquid.rest(at: rest, animated: true) }
       }
@@ -1366,13 +1366,13 @@
       }
     }
 
-    private func placed(_ actions: ScrawlStrip.Actions, in area: StripArea) -> ScrawlStrip.Actions {
+    private func placed(_ actions: ApparentStrip.Actions, in area: StripArea) -> ApparentStrip.Actions {
       var actions = actions
       actions.gripMoved = { translation, velocity in
         let origin = pressOrigin ?? liquid.place
         if pressOrigin == nil { pressOrigin = origin }
         if !isDragging {
-          guard translation.magnitude > ScrawlStrip.dragThreshold else { return }
+          guard translation.magnitude > ApparentStrip.dragThreshold else { return }
           isDragging = true
           UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
@@ -1424,8 +1424,8 @@
     init(_ geometry: GeometryProxy, keyboardTop: CGFloat?) {
       size = geometry.size
       let keyboardOverlap = keyboardTop.map { max(0, geometry.frame(in: .global).maxY - $0) } ?? 0
-      let halfWidth = ScrawlStrip.width / 2
-      let halfHeight = ScrawlStrip.expandedHeight / 2
+      let halfWidth = ApparentStrip.width / 2
+      let halfHeight = ApparentStrip.expandedHeight / 2
       let minX = 6 + halfWidth
       let minY = 8 + halfHeight
       xRange = minX ... max(minX, size.width - 6 - halfWidth)
@@ -1484,9 +1484,9 @@
 
   #if DEBUG
     private struct StripPreview: View {
-      let mode: ScrawlStrip.Mode
+      let mode: ApparentStrip.Mode
       var side = StripSide.trailing
-      var notice: ScrawlStrip.Notice?
+      var notice: ApparentStrip.Notice?
 
       var body: some View {
         ZStack {
@@ -1501,7 +1501,7 @@
     /// appear, draw on, pour into send, sent bubble, slide off; appear, pour into discard, Undo
     /// toast, back to sending, failed with a shake, absorbed and gone.
     private struct StripCyclePreview: View {
-      private static let steps: [(mode: ScrawlStrip.Mode?, seconds: Double)] = [
+      private static let steps: [(mode: ApparentStrip.Mode?, seconds: Double)] = [
         (nil, 0.8),
         (.recording(startedAt: .now, isDrawing: false), 1.4),
         (.recording(startedAt: .now, isDrawing: true), 1.0),

@@ -613,13 +613,15 @@
     {
       "id": "agent-host",
       "group": "delivery",
-      "name": "Agent on another Mac",
-      "says": "Sends captures to the OpenCode server on another Mac over SSH, copying the bundle there first.",
-      "status": "stable@0.3.4",
+      "name": "Legacy agent host settings (inactive)",
+      "says": "Older agentHost and agentOpencode settings may remain in config, but Apparent no longer copies bundles over SSH or sends captures to remote OpenCode sessions.",
+      "status": "main",
+      "added": "2026-10-28",
       "platforms": ["mac"],
+      "docs": ["docs/iphone-and-routing.md"],
       "config": [
-        { "key": "agentHost", "value": "\"studio\"", "does": "SSH host whose OpenCode holds the sessions" },
-        { "key": "agentOpencode", "value": "\"opencode2\"", "does": "The opencode command on that host" }
+        { "key": "agentHost", "value": "\"studio\"", "does": "Legacy host value; no automatic delivery" },
+        { "key": "agentOpencode", "value": "\"opencode2\"", "does": "Legacy command value; no automatic delivery" }
       ]
     },
     {
@@ -762,7 +764,7 @@
       "id": "skill",
       "group": "cli",
       "name": "Agent skill",
-      "says": "bunx skills add tryapparent/apparent teaches an agent to read a paste and use the CLI; apparent skill prints it.",
+      "says": "bunx skills add tryapparent/apparent installs the capture-reading skill; apparent skill prints it. Install the separate make-it-apparent walkthrough with --skill make-it-apparent.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "linux"],
       "docs": ["skills/apparent/SKILL.md"]

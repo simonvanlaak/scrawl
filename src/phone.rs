@@ -1501,6 +1501,9 @@ fn accept_ingest_connection(
     {
         return Ok(None);
     }
+    // On macOS an accepted socket inherits O_NONBLOCK from the polling listener.
+    // The header and body readers require a blocking socket for their deadlines.
+    stream.set_nonblocking(false)?;
     Ok(Some(stream))
 }
 
@@ -2647,6 +2650,28 @@ mod tests {
         let fresh = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let (accepted, _) = listener.as_ref().unwrap().accept().unwrap();
         assert_eq!(accepted.peer_addr().unwrap(), fresh.local_addr().unwrap());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accepted_ingest_socket_waits_for_a_delayed_body_on_macos() {
+        use std::io::Read as _;
+
+        let listener = bind_ingest_listener(0, false).unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let mut accepted = accept_ingest_connection(&listener, false, 0).unwrap().unwrap();
+        accepted
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            (&client).write_all(b"body").unwrap();
+        });
+        let mut body = [0; 4];
+        let result = accepted.read_exact(&mut body);
+        writer.join().unwrap();
+        result.unwrap();
+        assert_eq!(&body, b"body");
     }
 
     #[test]

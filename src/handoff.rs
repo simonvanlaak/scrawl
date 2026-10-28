@@ -2010,7 +2010,9 @@ mod tests {
                 },
                 "summary",
                 |png, text| {
-                    calls.borrow_mut().push(format!("image:{}:{text}", png.len()));
+                    calls
+                        .borrow_mut()
+                        .push(format!("image:{}:{text}", png.len()));
                     Ok(true)
                 },
                 |text| {
@@ -2050,8 +2052,14 @@ mod tests {
         assert_eq!(
             *calls.borrow(),
             [
-                "text:summary", "read", "image:3:summary", "read", "text:summary",
-                "unsupported", "text:summary", "ownership-lost"
+                "text:summary",
+                "read",
+                "image:3:summary",
+                "read",
+                "text:summary",
+                "unsupported",
+                "text:summary",
+                "ownership-lost"
             ]
         );
     }

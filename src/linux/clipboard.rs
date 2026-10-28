@@ -31,8 +31,7 @@ fn native_wayland_clipboard() -> bool {
 /// clipboard contents: another process may have become the selection owner.
 pub fn combined_offer_supported() -> bool {
     native_wayland_clipboard()
-        && super::wayland_display()
-            .is_some_and(|display| helper_ready(&restore_helper(), &display))
+        && super::wayland_display().is_some_and(|display| helper_ready(&restore_helper(), &display))
 }
 
 fn helper_ready(helper: &std::path::Path, display: &std::ffi::OsStr) -> bool {
@@ -443,13 +442,21 @@ mod tests {
             let mut encoder = png::Encoder::new(&mut png, 1, 1);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
-            encoder.write_header().unwrap().write_image_data(&[7, 8, 9, 255]).unwrap();
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[7, 8, 9, 255])
+                .unwrap();
         }
         let text = "test summary";
         set_png_and_text(&png, text).unwrap();
         assert!(still_ours("image/png", &png).unwrap());
         assert!(still_ours("text/plain;charset=utf-8", text.as_bytes()).unwrap());
-        restore_text_wayland(previous, Some(("text/plain;charset=utf-8", text.as_bytes()))).unwrap();
+        restore_text_wayland(
+            previous,
+            Some(("text/plain;charset=utf-8", text.as_bytes())),
+        )
+        .unwrap();
     }
 
     #[test]

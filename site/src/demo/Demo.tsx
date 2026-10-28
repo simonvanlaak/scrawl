@@ -357,16 +357,6 @@ export function Demo() {
     }
   }, [pause, play, seek, tRef])
 
-  const switchMode = (next: Mode) => {
-    if (next === mode) return
-    sfx.stopNarration()
-    click("toggle")
-    setUser([])
-    seek(0)
-    setMode(next)
-    start(sound)
-  }
-
   const replay = () => {
     sfx.stopNarration()
     click("pulse")
@@ -459,8 +449,6 @@ export function Demo() {
   }, [t, playing, sound, cues, cursor, mode])
 
   const ended = started && !playing && t >= T.end - 50
-  const other: Mode = mode === "mac" ? "iphone" : "mac"
-
   const overTerminal =
     !!cursor && cursor.at[0] > AGENT.x && cursor.at[0] < AGENT.x + AGENT.w && cursor.at[1] > AGENT.y + 28 && cursor.at[1] < AGENT.y + AGENT.h
 
@@ -493,7 +481,6 @@ export function Demo() {
           </defs>
         </svg>
       )}
-      <ModeSwitch mode={mode} onMode={switchMode} />
       <div
         ref={wrapRef}
         className={`stage-wrap${drawing ? " drawing" : ""}`}
@@ -581,11 +568,6 @@ export function Demo() {
             <button className="stage-btn liquid-glass" onClick={replay}>
               <ReplayIcon />
               Replay
-            </button>
-            <button className="stage-btn primary liquid-glass liquid-glass-primary" onClick={() => switchMode(other)}>
-              {other === "iphone" ? <PhoneIcon /> : <MacIcon />}
-              {other === "iphone" ? "Watch iPhone Mirror" : "Watch Mac Screen"}
-              <span aria-hidden>→</span>
             </button>
           </div>
         )}
@@ -746,33 +728,3 @@ const ReplayIcon = () => (
     <path d="M7 1L5 3l2 2" />
   </svg>
 )
-
-const MacIcon = () => (
-  <svg viewBox="0 0 18 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden>
-    <rect x="1.5" y="1.5" width="15" height="10" rx="2" />
-    <path d="M6.5 14.5h5M9 11.5v3" strokeLinecap="round" />
-  </svg>
-)
-
-const PhoneIcon = () => (
-  <svg viewBox="0 0 12 18" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-    <rect x="1.5" y="1" width="9" height="16" rx="2.4" />
-    <path d="M4.6 3.2h2.8" strokeLinecap="round" strokeWidth="1.6" />
-  </svg>
-)
-
-function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
-  return (
-    <div className="mode-switch" role="tablist" aria-label="Capture source">
-      <span className={`mode-thumb ${mode}`} aria-hidden />
-      <button role="tab" aria-selected={mode === "mac"} className={mode === "mac" ? "on" : ""} onClick={() => onMode("mac")}>
-        <MacIcon />
-        Mac Screen
-      </button>
-      <button role="tab" aria-selected={mode === "iphone"} className={mode === "iphone" ? "on" : ""} onClick={() => onMode("iphone")}>
-        <PhoneIcon />
-        iPhone Mirror
-      </button>
-    </div>
-  )
-}

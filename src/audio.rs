@@ -107,6 +107,16 @@ impl InputHealth {
     }
 }
 
+/// Level of the newest 80 ms of captured mono PCM, not a speech or device-health verdict.
+fn input_level(samples: &[f32]) -> f32 {
+    let recent = &samples[samples.len().saturating_sub(1280)..];
+    if recent.is_empty() {
+        return 0.0;
+    }
+    let mean_square = recent.iter().map(|v| v * v).sum::<f32>() / recent.len() as f32;
+    (mean_square.sqrt() * 4.0).clamp(0.0, 1.0)
+}
+
 #[derive(Clone, Debug)]
 pub struct RecordedAudio {
     pub sample_count: usize,
@@ -130,6 +140,12 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
+    /// A read-only view of recorded samples. A repeated count means no new input arrived.
+    #[cfg(target_os = "linux")]
+    pub fn input_activity(&self) -> Option<(usize, f32)> {
+        let samples = self.samples.lock().ok()?;
+        Some((samples.len(), input_level(&samples)))
+    }
     pub fn start() -> Result<Self> {
         let started = std::time::Instant::now();
         let samples = Arc::new(Mutex::new(Vec::new()));
@@ -532,6 +548,16 @@ pub fn encode_wav_16k(samples_16k: &[f32]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_level_responds_to_real_samples_not_silence_or_an_old_peak() {
+        assert_eq!(input_level(&[]), 0.0);
+        assert_eq!(input_level(&vec![0.0; 1280]), 0.0);
+        let mut samples = vec![0.9; 1280];
+        samples.extend(vec![0.0; 1280]);
+        assert_eq!(input_level(&samples), 0.0, "old sound must leave the window");
+        assert!(input_level(&vec![0.2; 1280]) > 0.0);
+    }
     use std::time::Duration;
 
     #[test]

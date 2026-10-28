@@ -14,7 +14,7 @@
     { "id": "platforms", "title": "Platforms" }
   ],
   "flow": [
-    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone or ApparentKit", "group": "start" },
+    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone", "group": "start" },
     { "title": "Record", "detail": "Screen, voice, clicks and ⇧ ink on one clock", "group": "record" },
     { "title": "Bundle", "detail": "Keyframes, contact sheet, summary.md, apparent.json", "group": "agent" },
     { "title": "Deliver", "detail": "Clipboard and ⌥⇧V; no automatic session send", "group": "delivery" },
@@ -560,8 +560,8 @@
     {
       "id": "sdk-js",
       "group": "delivery",
-      "name": "Legacy /sdk.js registration (inactive)",
-      "says": "The script can still register a dev page, but captures no longer use its session or project folder.",
+      "name": "Dev-page event context (local)",
+      "says": "The script supplies click, mark and page-error context for local captures. Its legacy session and project registration does not route captures.",
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
@@ -611,16 +611,6 @@
       "pr": 65,
       "config": [{ "key": "agentPath", "value": "path", "does": "Where captures go on the remote host" }]
     },
-    {
-      "id": "security-defaults",
-      "group": "delivery",
-      "name": "Safer delivery defaults",
-      "says": "Ingest listens on loopback only, automatic delivery becomes opt-in, and pairing changes ask first.",
-      "status": "review:#27",
-      "platforms": ["mac", "windows", "linux"],
-      "added": "2026-10-20",
-      "pr": 27
-    },
 
     {
       "id": "cabled-iphone",
@@ -633,94 +623,6 @@
       "shortcuts": [{ "keys": "M", "does": "Flag a moment (iPhone mirror focused)" }],
       "docs": ["README.md#iphone", "docs/iphone-and-routing.md"]
     },
-    {
-      "id": "apparentkit",
-      "group": "iphone",
-      "name": "ApparentKit",
-      "says": "A Swift package for your iOS app: a three-finger long press records the app with narration, touches, strokes and events.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "iOS 18+; recordings go to Apparent on a Mac.",
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "apparentkit-https",
-      "group": "iphone",
-      "name": "HTTPS endpoint and outbox",
-      "says": "A setup link can point at an HTTPS endpoint; recordings queue on the phone and upload in the background with retries.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "Phone side; no Mac needed.",
-      "docs": ["README.md#sending-to-an-https-endpoint"]
-    },
-    {
-      "id": "apparentkit-context",
-      "group": "iphone",
-      "name": "App context",
-      "says": "The app names its screen and adds key/values, which the summary shows beside each keyframe.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "Phone side.",
-      "docs": ["README.md#app-context"]
-    },
-    {
-      "id": "apparentkit-hooks",
-      "group": "iphone",
-      "name": "Host app hooks",
-      "says": "A team endpoint, a timeline supplement and a submit hook let a host app handle recordings itself.",
-      "status": "main",
-      "platforms": ["mac"],
-      "added": "2026-10-21",
-      "note": "Phone side.",
-      "pr": 83
-    },
-    {
-      "id": "pairing",
-      "group": "iphone",
-      "name": "Pairing link",
-      "says": "apparent link prints a setup link and QR code with this Mac's Tailscale and LAN addresses; usbApps adds a cabled fallback.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "config": [
-        { "key": "ingestToken", "value": "generated", "does": "Bearer token for phone uploads" },
-        { "key": "usbApps", "value": "[\"com.example.App\"]", "does": "Apps whose recordings come over USB" }
-      ],
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "remote-phone-ingest",
-      "group": "iphone",
-      "name": "Remote phone uploads",
-      "says": "A Settings switch lets other devices reach the GUI ingest listener; off keeps local dev-page routing on loopback.",
-      "status": "main",
-      "platforms": ["mac", "linux", "windows"],
-      "config": [
-        { "key": "remotePhoneIngest", "value": "false", "does": "Allow the GUI ingest listener on other IPv4 interfaces; off binds loopback only" }
-      ],
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "import",
-      "group": "iphone",
-      "name": "Import a recording",
-      "says": "apparent import builds a bundle from an AirDropped .mp4 and its timeline.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#apparentkit-ios"]
-    },
-    {
-      "id": "serve",
-      "group": "iphone",
-      "name": "Headless ingest",
-      "says": "apparent serve takes ApparentKit uploads on an always-on Mac without the app running.",
-      "status": "stable@0.3.4",
-      "platforms": ["mac"],
-      "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#headless-ingest-server-apparent-serve"]
-    },
-
     {
       "id": "settings-window",
       "group": "settings",
@@ -929,11 +831,11 @@
       "id": "linux-appimage-updates",
       "group": "install",
       "name": "Linux AppImage update channels",
-      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or manually published main previews, a manual check, and live version status.",
+      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or nightly published main previews, a manual check, and live version status.",
       "status": "main",
       "platforms": ["linux"],
       "config": [
-        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux update feed" },
+        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux release channel" },
         { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with apparent update status" }
       ],
       "docs": ["docs/linux.md"]

@@ -280,7 +280,7 @@ pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
 }
 
 const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
-const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If you cannot record that screen, say so instead of claiming a video exists.";
+const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, use the make-it-apparent skill to record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If the skill is not installed or you cannot record that screen, say so instead of claiming a video exists.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.
 /// Read config on each handoff so file edits take effect without a restart.
@@ -715,14 +715,7 @@ pub struct Config {
     #[serde(default)]
     pub agent_opencode: Option<String>,
     #[serde(default)]
-    pub ingest_token: Option<String>,
-    /// Whether the GUI's ApparentKit listener accepts other devices (absent: loopback only).
-    #[serde(default)]
-    pub remote_phone_ingest: Option<bool>,
-    #[serde(default)]
     pub update_channel: Option<String>,
-    #[serde(default, alias = "tetherApps")]
-    pub usb_apps: Vec<String>,
     /// `false` turns Screen-capture auto-crop off; an object overrides its settings.
     #[serde(default)]
     pub autocrop: Option<serde_json::Value>,
@@ -931,65 +924,7 @@ fn config() -> Config {
     load_config_from(&default_config_path())
 }
 
-fn random_bytes_32() -> Result<[u8; 32]> {
-    let mut bytes = [0_u8; 32];
-    #[cfg(windows)]
-    {
-        crate::win::shell::random_bytes(&mut bytes)?;
-    }
-    #[cfg(not(windows))]
-    {
-        use std::io::Read as _;
-        let mut file = fs::File::open("/dev/urandom").context("Could not open /dev/urandom")?;
-        file.read_exact(&mut bytes)
-            .context("Could not read 32 bytes from /dev/urandom")?;
-    }
-    Ok(bytes)
-}
 
-fn random_hex_token_32() -> Result<String> {
-    use std::fmt::Write as _;
-    let bytes = random_bytes_32()?;
-    let mut token = String::with_capacity(64);
-    for byte in bytes {
-        let _ = write!(&mut token, "{byte:02x}");
-    }
-    Ok(token)
-}
-
-/// Returns `ingestToken` from `path`, generating a 32-byte hex token and writing `path` back with
-/// mode `0600` (while preserving all other JSON keys) if `ingestToken` is absent or empty.
-pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
-    let map = match fs::read(path) {
-        Ok(bytes) => {
-            match serde_json::from_slice::<serde_json::Value>(&bytes)
-                .with_context(|| format!("Invalid JSON in {}", path.display()))?
-            {
-                serde_json::Value::Object(map) => map,
-                _ => bail!("Expected a JSON object in {}", path.display()),
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
-        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
-    };
-
-    if let Some(existing) = map
-        .get("ingestToken")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return Ok(existing.to_owned());
-    }
-
-    let token = random_hex_token_32()?;
-    set_config_value_in(path, "ingestToken", token.clone().into())?;
-    Ok(token)
-}
-
-pub fn ensure_ingest_token() -> Result<String> {
-    ensure_ingest_token_in(&default_config_path())
-}
 
 /// `routing.apps` from config.json, `~` expanded. Tests see none.
 pub fn routing_apps() -> Vec<(String, PathBuf)> {
@@ -1177,17 +1112,6 @@ pub(crate) fn set_experiment_in(path: &Path, name: &str, on: bool) -> Result<()>
     set_config_value_in(path, "experiments", serde_json::Value::Object(experiments))
 }
 
-/// Bundle IDs whose `Documents/Apparent` (and legacy `Documents/Tether`) container the USB watcher
-/// checks (`usbApps` in config, with `tetherApps` accepted as a fallback alias; default empty so
-/// USB polling is off unless configured).
-pub fn usb_apps() -> Vec<String> {
-    config()
-        .usb_apps
-        .into_iter()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| safe_word(s))
-        .collect()
-}
 
 /// Safe to put unquoted in a remote shell command (host names, `~/bin/tool` paths).
 fn safe_word(text: &str) -> bool {
@@ -1689,7 +1613,7 @@ pub fn send_to_opencode(
     Ok(id)
 }
 
-/// The session a recording was addressed to: a ApparentKit `timeline.json`'s top-level `session`,
+/// The session an older imported recording was addressed to: its timeline's top-level `session`,
 /// else the `destination` a Mac capture of a dev site was routed to (`apparent.json`).
 /// `context.session` only names the session that was on screen, and never chooses a destination.
 pub fn recorded_destination(bundle_dir: &Path) -> Option<String> {
@@ -2544,51 +2468,6 @@ mod tests {
     }
 
     #[test]
-    fn token_generation_persists_with_0600_and_preserves_other_keys() {
-        let fixture = Fixture::new();
-        let config_path = fixture.0.join("nested/config.json");
-        fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-        fs::write(
-            &config_path,
-            br#"{"agentHost":"studio","agentOpencode":"~/bin/opencode2","usbApps":["com.kitlangton.UpDown"],"customKey":42}"#,
-        )
-        .unwrap();
-
-        let generated = ensure_ingest_token_in(&config_path).unwrap();
-        assert_eq!(generated.len(), 64);
-        assert!(generated.bytes().all(|b| b.is_ascii_hexdigit()));
-
-        // Calling a second time returns the same token without regenerating.
-        let second = ensure_ingest_token_in(&config_path).unwrap();
-        assert_eq!(generated, second);
-
-        // Other keys are preserved and parsed properly.
-        let parsed = load_config_from(&config_path);
-        assert_eq!(parsed.agent_host.as_deref(), Some("studio"));
-        assert_eq!(parsed.agent_opencode.as_deref(), Some("~/bin/opencode2"));
-        assert_eq!(parsed.ingest_token.as_deref(), Some(generated.as_str()));
-        assert_eq!(parsed.usb_apps, vec!["com.kitlangton.UpDown"]);
-
-        let legacy_path = fixture.0.join("nested/legacy.json");
-        fs::write(&legacy_path, br#"{"tetherApps":["com.kitlangton.UpDown"]}"#).unwrap();
-        assert_eq!(
-            load_config_from(&legacy_path).usb_apps,
-            vec!["com.kitlangton.UpDown"]
-        );
-
-        let raw: serde_json::Value =
-            serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
-        assert_eq!(raw["customKey"], serde_json::json!(42));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&config_path).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600);
-        }
-    }
-
-    #[test]
     fn apple_locale_round_trips_and_keeps_other_keys() {
         let fixture = Fixture::new();
         let path = fixture.0.join("config.json");
@@ -2606,7 +2485,7 @@ mod tests {
             set_config_value_in(&path, "appleLocale", value).unwrap();
             let config = load_config_from(&path);
             assert_eq!(apple_locale_from(&config).as_deref(), expected);
-            assert_eq!(config.ingest_token.as_deref(), Some("abc"));
+            assert_eq!(serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap()["ingestToken"], "abc");
             assert_eq!(config.auto_send, Some(false));
         }
         let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -2628,7 +2507,7 @@ mod tests {
         assert_eq!(config.transcriber.as_deref(), Some("hex"));
         assert_eq!(config.hex_model.as_deref(), Some("parakeet_v3"));
         assert_eq!(hex_language_from(&config), "nl");
-        assert_eq!(config.ingest_token.as_deref(), Some("abc"));
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap()["ingestToken"], "abc");
         assert_eq!(config.auto_send, Some(false));
         #[cfg(unix)]
         {
@@ -2665,7 +2544,7 @@ mod tests {
         set_config_value_in(&path, "autoSend", serde_json::Value::Bool(false)).unwrap();
         let config = load_config_from(&path);
         assert_eq!(config.auto_send, Some(false));
-        assert_eq!(config.ingest_token.as_deref(), Some("abc"));
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&fs::read(&path).unwrap()).unwrap()["ingestToken"], "abc");
         let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(raw["retention"]["mediaDays"], 7);
         #[cfg(unix)]
@@ -2687,15 +2566,6 @@ mod tests {
             assert!(set_config_value_in(&path, "autoSend", false.into()).is_err());
             assert_eq!(fs::read(&path).unwrap(), bytes);
         }
-    }
-
-    #[test]
-    fn token_generation_never_replaces_an_empty_existing_config() {
-        let fixture = Fixture::new();
-        let path = fixture.0.join("config.json");
-        fs::write(&path, b" \n ").unwrap();
-        assert!(ensure_ingest_token_in(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), b" \n ");
     }
 
     #[test]
@@ -2730,13 +2600,7 @@ mod tests {
         let missing = fixture.0.join("missing.json");
         let cfg = load_config_from(&missing);
         assert_eq!(cfg, Config::default());
-        assert!(cfg.usb_apps.is_empty());
 
-        let token = ensure_ingest_token_in(&missing).unwrap();
-        assert_eq!(token.len(), 64);
-        let cfg_after = load_config_from(&missing);
-        assert_eq!(cfg_after.ingest_token.as_deref(), Some(token.as_str()));
-        assert!(cfg_after.usb_apps.is_empty());
     }
 
     #[test]
@@ -2783,16 +2647,6 @@ mod tests {
         assert_eq!(cfg.pill_style.as_deref(), Some("glass"));
         assert_eq!(cfg.auto_send, None);
         assert_eq!(cfg.native_pill, None);
-        assert!(cfg.usb_apps.is_empty());
-        // Both spellings of one field: one is kept rather than neither.
-        fs::write(
-            &path,
-            r#"{"usbApps": ["a"], "tetherApps": ["b"], "agentHost": "pro"}"#,
-        )
-        .unwrap();
-        let cfg = load_config_from(&path);
-        assert_eq!(cfg.agent_host.as_deref(), Some("pro"));
-        assert_eq!(cfg.usb_apps.len(), 1);
     }
 
     #[test]
@@ -2837,8 +2691,9 @@ mod tests {
         let enabled = with_demo_video_request(original.clone(), true);
         assert!(enabled.starts_with(&original));
         assert!(enabled.contains("complex change"));
+        assert!(enabled.contains("use the make-it-apparent skill"));
         assert!(enabled.contains("recording.mp4"));
-        assert!(enabled.contains("If you cannot record that screen"));
+        assert!(enabled.contains("If the skill is not installed or you cannot record that screen"));
         assert_eq!(enabled.matches(DEMO_VIDEO_REQUEST).count(), 1);
     }
 

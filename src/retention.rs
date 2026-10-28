@@ -281,7 +281,6 @@ pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
     let mut actions = Vec::new();
     for dir in bundles {
         if dir.join(PINNED).exists()
-            || dir.join(crate::delivery::PENDING).exists()
             || is_claimed(&dir)
             || crate::recover::owed(&dir)
             || live_marker(&dir, crate::handoff::MEDIA_PENDING, now)
@@ -492,7 +491,6 @@ pub fn apply(actions: &[Action], policy: &Policy, trasher: Trasher, shrink: bool
         if live_marker(bundle, crate::handoff::MEDIA_PENDING, now)
             || live_marker(bundle, MEDIA_SENDING, now)
             || bundle.join(PINNED).exists()
-            || bundle.join(crate::delivery::PENDING).exists()
         {
             continue;
         }
@@ -988,13 +986,6 @@ mod tests {
         );
         let sending = bundle(&tmp.0, "apparent-sending", 40.0, false);
         marker(&sending, MEDIA_SENDING, later() - Duration::from_secs(3600));
-        // A bundle still waiting to reach OpenCode, however old its marker.
-        let undelivered = bundle(&tmp.0, "apparent-undelivered", 40.0, false);
-        marker(
-            &undelivered,
-            crate::delivery::PENDING,
-            later() - Duration::from_secs(40 * 24 * 3600),
-        );
         let busy = bundle(&tmp.0, "apparent-busy", 40.0, false);
         let held = claim(&busy).unwrap();
         assert!(claim(&busy).is_none(), "one claim at a time");

@@ -64,7 +64,7 @@ jobs:
           fi
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.sha }}
       - name: Install build and packaging dependencies
         run: ./scripts/linux/dependencies.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -156,11 +156,17 @@ jobs:
         run: |
           set -euo pipefail
           tag="linux-main-$GITHUB_SHA"
-          # A superseded build must not become the newest published preview.
-          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          if [[ "$head" != "$GITHUB_SHA" ]]; then
-            echo "Main moved to $head; not publishing an older preview"
-            exit 0
+          # Main can move during the build. Publish this checked commit unless a
+          # newer main preview has already been published out of run order.
+          latest=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -r '[.[][] | select(.prerelease and (.draft | not) and (.tag_name | test("^linux-main-[a-f0-9]{40}$")))] | max_by(.published_at) | .tag_name // empty')
+          if [[ -n "$latest" ]]; then
+            comparison=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...${latest#linux-main-}" --jq .status)
+            case "$comparison" in
+              ahead|identical) echo "Already published $latest; skipping older preview"; exit 0 ;;
+              behind) ;;
+              *) echo "Cannot order $tag against $latest: $comparison" >&2; exit 1 ;;
+            esac
           fi
           test "$(find dist -name '*.AppImage' | wc -l)" -eq 2
           gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \

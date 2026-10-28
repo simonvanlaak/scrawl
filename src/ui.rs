@@ -246,14 +246,8 @@ fn completed_label(inbox_count: usize, note: Option<&str>) -> String {
 fn no_words_warning(
     transcript: &crate::model::TranscriptData,
     audio_saved: bool,
-    enabled: bool,
 ) -> bool {
-    enabled && audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
-}
-
-fn no_words_warning_enabled() -> bool {
-    crate::handoff::experiment("missingTranscriptWarning")
-        || crate::handoff::experiment("liveWordWarning")
+    audio_saved && transcript.missing.is_none() && transcript.text.trim().is_empty()
 }
 
 fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ScrawlBundle) -> bool {
@@ -263,7 +257,6 @@ fn bundle_no_words_warning(dir: &std::path::Path, bundle: &ScrawlBundle) -> bool
             .audio
             .as_ref()
             .is_some_and(|file| dir.join(file).is_file()),
-        no_words_warning_enabled(),
     )
 }
 
@@ -3984,7 +3977,9 @@ impl Render for HudPillWindow {
                     .when(!has_shell, |d| {
                         d.bg(rgba(0x141416f5))
                             .border_1()
-                            .border_color(if is_completed {
+                            .border_color(if is_completed && completed_no_words {
+                                rgba(0xf5b54480)
+                            } else if is_completed {
                                 rgba(0x69d89f4d)
                             } else {
                                 rgba(0xffffff1a)
@@ -4825,9 +4820,7 @@ impl Render for BundleReviewWindow {
         let history_count = self.history.len();
         let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
         let no_words = bundle_no_words_warning(&dir, &bundle);
-        let missing_reason = no_words_warning_enabled()
-            .then(|| bundle.transcript.missing.as_ref())
-            .flatten()
+        let missing_reason = bundle.transcript.missing.as_ref()
             .filter(|_| bundle.transcript.text.trim().is_empty());
 
         let target_label = match (&bundle.target.app, &bundle.target.window_title) {
@@ -6067,14 +6060,13 @@ mod tests {
     #[test]
     fn no_words_warning_requires_saved_audio_and_successful_empty_recognition() {
         let empty = crate::model::TranscriptData::default();
-        assert!(no_words_warning(&empty, true, true));
-        assert!(!no_words_warning(&empty, true, false));
-        assert!(!no_words_warning(&empty, false, true));
+        assert!(no_words_warning(&empty, true));
+        assert!(!no_words_warning(&empty, false));
         let spoken = crate::model::TranscriptData {
             text: "hello".into(),
             ..Default::default()
         };
-        assert!(!no_words_warning(&spoken, true, true));
+        assert!(!no_words_warning(&spoken, true));
         let unavailable = crate::model::TranscriptData {
             missing: Some(crate::model::MissingTranscript {
                 reason: "Model unavailable".into(),
@@ -6082,7 +6074,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!no_words_warning(&unavailable, true, true));
+        assert!(!no_words_warning(&unavailable, true));
     }
 
     #[test]

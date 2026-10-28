@@ -335,7 +335,7 @@
       "group": "finish",
       "name": "Warn when saved audio has no transcribed words",
       "says": "After Stop, the completed capsule and Review distinguish an empty recognized transcript from a speech-model failure without guessing the cause.",
-      "status": "experiment:missingTranscriptWarning",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
     },

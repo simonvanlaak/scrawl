@@ -82,6 +82,10 @@ Every successfully built bundle has `finish-trace.json` beside `scrawl.json`, wi
 
 The old automatic OpenCode attachment policy is inactive. The full capture, keyframes, contact sheet, and video are still built and saved. Manual Paste remains image-first; `scrawl zoom` is available for closer inspection.
 
+## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
+
+On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes append a request to show complex changes with a short Scrawl recording, return the `recording.mp4` path or video link, and say what the video does not verify. If the agent cannot access the relevant screen, it should say so. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.
+
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`)
 
 Off by default; Windows only. A finished capture (and `scrawl copy`) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.

@@ -150,6 +150,7 @@ struct SettingsCommandLine: Decodable, Equatable {
 struct SettingsState: Decodable, Equatable {
   var version = "0.3.2"
   var login = SettingsLogin()
+  var agentDemoVideo = true
   var remotePhoneIngest = false
   var shortcuts: [SettingsShortcut] = [
     SettingsShortcut(),
@@ -1083,6 +1084,12 @@ struct SettingsView: View {
     let theme = SettingsTheme(scheme)
     let cli = state.commandLine
     return VStack(spacing: 0) {
+      SettingsGroup {
+        SettingsRow(title: "Ask for a Scrawl video on complex changes") {
+          SettingsSwitch(on: state.agentDemoVideo) { model.set("agentDemoVideo", $0) }
+        }
+      }
+      SettingsCaption(text: "Adds a video request to copied and pasted captures when the agent can record the result. On by default.")
       SettingsGroup {
         HStack(spacing: 12) {
           VStack(alignment: .leading, spacing: 1) {

@@ -44,6 +44,8 @@ Launch at login writes `"launchAtLogin": true|false` to `config.json` before cha
 
 Agents › Command-line tool (`src/command_line.rs`) symlinks the app's own binary (its real path, which is how it finds `scrawl-helper`) into the first writable of `/opt/homebrew/bin`, `/usr/local/bin`, else `~/.local/bin`; it never asks for admin, never touches a `scrawl` that doesn't link to a Scrawl.app, and the Homebrew cask's `binary` link reads as installed. A bare `scrawl` from a terminal prints help instead of starting a second app. Agents › Agent skill shows `bunx skills add kitlangton/scrawl` (`skills/scrawl/SKILL.md`, also printed by `scrawl skill`); keep that file true to the CLI.
 
+Agents › Ask for a Scrawl video on complex changes toggles `"experiments": {"agentDemoVideo": true|false}`. Absent is on; set it to false to disable. Settings preserves other experiment flags and config keys; the next copy or paste reads the file without a restart. It adds a conditional request to the copied/pasted agent prompt, not the archived `summary.md`; automatic session delivery has been removed. The agent should only demonstrate a result it can actually see and report if recording is unavailable.
+
 Render every pane (dark, light, each shortcut state: held, listening, partial, refused, accepted, custom; microphone chosen/missing/not allowed) with `scrawl-helper settings --render DIR`, and one take on the shortcuts as 60 fps PNGs for a video with `--render DIR --shortcut-clip [--light]`; test with `cargo test settings::`.
 
 ## Lower other audio while recording (`src/playback.rs`, `helper/PlaybackVolume.swift`)

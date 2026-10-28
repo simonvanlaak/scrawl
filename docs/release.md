@@ -8,7 +8,10 @@ It is dispatched manually from `tryapparent/apparent`'s `main`: **Actions → Ma
 Run workflow → main**. It builds on `macos-26`, assigns version `0.<workflow run>.<attempt>` and
 tag `preview-mac-<run>-<attempt>`, and creates a GitHub prerelease with the DMG, its SHA-256 and
 a Sparkle ZIP. A re-run gets a new attempt number; existing tags are never overwritten. The
-first install uses the release DMG. Installed previews then check their own signed Sparkle feed
+first install uses the release DMG: drag `Apparent Preview.app` into `/Applications`
+before launching it. Sparkle cannot update a copy running directly from the mounted DMG or
+Downloads; quit that copy, move it to Applications and relaunch it there. Installed previews
+then check their own signed Sparkle feed
 (`preview-mac-feed/appcast.xml`), including Settings → About → Check for Updates….
 
 Before the first dispatch, generate a **dedicated preview** Sparkle EdDSA key pair on a Mac using

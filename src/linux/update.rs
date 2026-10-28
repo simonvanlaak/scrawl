@@ -49,6 +49,17 @@ pub fn record_running() -> Result<()> {
         process_ticks(pid).context("cannot read Apparent process start time")?)
 }
 
+/// Mark the GPUI application as initialized for the update relaunch helper.
+pub fn mark_relaunch_ready() -> Result<()> {
+    let Some(path) = std::env::var_os("APPARENT_UPDATE_READY").map(PathBuf::from) else { return Ok(()) };
+    let image = target()?.context("relaunch readiness requires an AppImage")?;
+    let expected = format!(".{}.ready-", image.file_name().unwrap().to_string_lossy());
+    ensure!(path.parent() == image.parent() && path.file_name().is_some_and(|name| name.to_string_lossy().starts_with(&expected)),
+        "invalid relaunch readiness path");
+    OpenOptions::new().write(true).create_new(true).open(path)?.sync_all()?;
+    Ok(())
+}
+
 pub fn status_at(path: &Path) -> Result<serde_json::Value> {
     let config: serde_json::Value = match fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -137,10 +148,11 @@ fn relaunch_command(image: &Path, backup: &Path, pid: u32) -> Command {
     let marker = image.with_extension("AppImage.apparent-update.json");
     let previous_marker = backup.with_file_name(format!("{}.apparent-update.json", backup.file_name().unwrap().to_string_lossy()));
     let failed_marker = image.with_file_name(format!(".{}.failed-update.json", image.file_name().unwrap().to_string_lossy()));
+    let ready = image.with_file_name(format!(".{}.ready-{pid}", image.file_name().unwrap().to_string_lossy()));
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg("pid=$1; image=$2; backup=$3; marker=$4; previous_marker=$5; failed_marker=$6; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; if [ -x \"$backup\" ]; then if mv -f \"$backup\" \"$image\"; then if [ -f \"$marker\" ]; then mv -f \"$marker\" \"$failed_marker\" || rm -f \"$marker\"; fi; if [ -f \"$previous_marker\" ]; then mv -f \"$previous_marker\" \"$marker\" || rm -f \"$marker\"; else rm -f \"$marker\"; fi; exec \"$image\" app; fi; exec \"$backup\" app; fi; exit 1")
+        .arg("pid=$1; image=$2; backup=$3; marker=$4; previous_marker=$5; failed_marker=$6; ready=$7; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; rm -f \"$ready\"; APPARENT_UPDATE_READY=\"$ready\" \"$image\" app & child=$!; i=0; while [ \"$i\" -lt 150 ]; do if [ -f \"$ready\" ] && kill -0 \"$child\" 2>/dev/null; then rm -f \"$ready\"; exit 0; fi; if ! kill -0 \"$child\" 2>/dev/null; then break; fi; sleep 0.1; i=$((i+1)); done; if kill -0 \"$child\" 2>/dev/null; then kill \"$child\" 2>/dev/null; fi; wait \"$child\" 2>/dev/null; rm -f \"$ready\"; if [ -x \"$backup\" ]; then if mv -f \"$backup\" \"$image\"; then if [ -f \"$marker\" ]; then mv -f \"$marker\" \"$failed_marker\" || rm -f \"$marker\"; fi; if [ -f \"$previous_marker\" ]; then mv -f \"$previous_marker\" \"$marker\" || rm -f \"$marker\"; else rm -f \"$marker\"; fi; exec \"$image\" app; fi; exec \"$backup\" app; fi; exit 1")
         .arg("apparent-update-relaunch")
         .arg(pid.to_string())
         .arg(image)
@@ -148,6 +160,7 @@ fn relaunch_command(image: &Path, backup: &Path, pid: u32) -> Command {
         .arg(marker)
         .arg(previous_marker)
         .arg(failed_marker)
+        .arg(ready)
         .env_remove("APPIMAGE")
         .env_remove("APPDIR")
         .stdin(std::process::Stdio::null())
@@ -409,10 +422,14 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
         swapped = true;
         // The old AppImage is now at stage; it remains a rollback copy.
         if let Err(error) = fs::rename(&stage, &backup) {
-            crate::capture::apparent_log(format!("Linux update: previous AppImage remains at {}: {error}", stage.display()));
+            exchange(&stage, image).context("could not restore installed AppImage after backup failed")?;
+            swapped = false;
+            return Err(error).context("could not retain the previous AppImage");
         }
         if let Err(error) = fs::rename(&staged_sidecar, &sidecar) {
-            crate::capture::apparent_log(format!("Linux update: updated AppImage but could not write version marker: {error}"));
+            exchange(&backup, image).context("could not restore installed AppImage after marker failed")?;
+            let _ = fs::remove_file(&backup);
+            return Err(error).context("could not publish the updated version marker");
         }
         Ok(())
     })();
@@ -635,8 +652,20 @@ mod tests {
         fs::remove_file(&marker).unwrap();
         assert!(relaunch_command(&image, &backup, u32::MAX)
             .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
-        std::thread::sleep(Duration::from_secs(3));
-        assert!(!marker.exists(), "a later app failure must not resurrect the old image");
+        assert_eq!(fs::read(&marker).unwrap(), b"recovered", "a slow failure before GPUI readiness needs recovery");
+        fs::write(&backup, fs::read(&image).unwrap()).unwrap();
+        let mut permissions = fs::metadata(&backup).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&backup, permissions).unwrap();
+        fs::write(&image, b"#!/bin/sh\ntouch \"$APPARENT_UPDATE_READY\"\nsleep 5\nexit 1\n").unwrap();
+        let mut permissions = fs::metadata(&image).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&image, permissions).unwrap();
+        fs::remove_file(&marker).unwrap();
+        assert!(relaunch_command(&image, &backup, u32::MAX)
+            .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        std::thread::sleep(Duration::from_secs(6));
+        assert!(!marker.exists(), "a failure after GPUI readiness must not resurrect the old image");
         fs::remove_dir_all(dir).unwrap();
     }
 

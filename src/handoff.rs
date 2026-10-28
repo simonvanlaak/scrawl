@@ -646,6 +646,9 @@ fn opencode_binary() -> Result<PathBuf> {
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// Desired OS login registration. Missing leaves the OS's existing choice alone.
+    #[serde(default)]
+    pub launch_at_login: Option<bool>,
     #[serde(default)]
     pub agent_host: Option<String>,
     #[serde(default)]
@@ -884,8 +887,8 @@ fn random_hex_token_32() -> Result<String> {
 /// Returns `ingestToken` from `path`, generating a 32-byte hex token and writing `path` back with
 /// mode `0600` (while preserving all other JSON keys) if `ingestToken` is absent or empty.
 pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
-    let mut map = match fs::read(path) {
-        Ok(bytes) if !bytes.iter().all(u8::is_ascii_whitespace) => {
+    let map = match fs::read(path) {
+        Ok(bytes) => {
             match serde_json::from_slice::<serde_json::Value>(&bytes)
                 .with_context(|| format!("Invalid JSON in {}", path.display()))?
             {
@@ -893,7 +896,8 @@ pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
                 _ => bail!("Expected a JSON object in {}", path.display()),
             }
         }
-        Ok(_) | Err(_) => serde_json::Map::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
     };
 
     if let Some(existing) = map
@@ -906,37 +910,7 @@ pub fn ensure_ingest_token_in(path: &Path) -> Result<String> {
     }
 
     let token = random_hex_token_32()?;
-    map.insert(
-        "ingestToken".to_owned(),
-        serde_json::Value::String(token.clone()),
-    );
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    let mut body = serde_json::to_vec_pretty(&serde_json::Value::Object(map))?;
-    body.push(b'\n');
-    #[cfg(unix)]
-    {
-        use std::io::Write as _;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("Could not write {}", path.display()))?;
-        file.write_all(&body)?;
-        file.sync_all()?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, &body).with_context(|| format!("Could not write {}", path.display()))?;
-    }
+    set_config_value_in(path, "ingestToken", token.clone().into())?;
     Ok(token)
 }
 
@@ -1062,11 +1036,16 @@ pub fn pill_style() -> crate::native::pill::PillStyle {
 /// Sets one top-level key in `path` (`null` removes it), keeping the rest (and its `0600` mode,
 /// since it holds the ingest token).
 pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> Result<()> {
-    let mut config = fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
+    let mut config: serde_json::Value = match fs::read(path) {
+        Ok(bytes) => {
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes)
+                .with_context(|| format!("Invalid config at {}", path.display()))?;
+            anyhow::ensure!(parsed.is_object(), "Config at {} must be an object", path.display());
+            parsed
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(error).with_context(|| format!("Could not read {}", path.display())),
+    };
     match (value, config.as_object_mut()) {
         (serde_json::Value::Null, Some(map)) => {
             map.remove(key);
@@ -1078,16 +1057,31 @@ pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> 
     {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!("json.{}.tmp", crate::make_bundle_id()));
     let mut body = serde_json::to_vec_pretty(&config)?;
     body.push(b'\n');
-    fs::write(&tmp, body)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    let result = (|| -> Result<()> {
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            file.write_all(&body)?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        fs::write(&tmp, &body)?;
+        fs::rename(&tmp, path).with_context(|| format!("Could not write {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, path).with_context(|| format!("Could not write {}", path.display()))
+    result
 }
 
 /// Bundle IDs whose `Documents/Scrawl` (and legacy `Documents/Tether`) container the USB watcher
@@ -1703,7 +1697,6 @@ pub fn resolve_opencode_session_with(
 /// Queues a bundle's summary and pointers into an OpenCode session.
 pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
     ensure!(
         session.starts_with("ses")
             && session
@@ -1714,32 +1707,44 @@ pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     if let Some(host) = agent_host() {
         sync_bundle_to(&host, &directory)?;
     }
+    opencode_api(
+        "post",
+        &format!("/api/session/{session}/prompt"),
+        Some(&session_prompt(&directory, &bundle)),
+    )?;
+    Ok(())
+}
+
+fn session_prompt(directory: &Path, bundle: &ScrawlBundle) -> serde_json::Value {
+    let summary = crate::sketch::summary_markdown(bundle, directory);
     let quoted_directory = shell_quote(&directory.to_string_lossy());
     let contact_sheet = directory.join(&bundle.contact_sheet);
+    let clicked = bundle.has_screen_click();
+    let visual_note = if clicked {
+        format!("The contact sheet is attached ({}).", contact_sheet.display())
+    } else {
+        format!("No image is attached; the recorded visuals remain in {}. Look them up only if needed.", directory.display())
+    };
     let text = format!(
-        "{}\n\nThe contact sheet is attached ({}); read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said; open the PNG before acting on the feedback. This capture is {} ms long.",
+        "{}\n\n{} Read {} for timestamped transcript, marks, and interactions.\nTo look closely at a moment (an animation, a glitch, what the narration points at), run:\nscrawl zoom {} --at <M:SS or \"a phrase that was said\"> [--span 2] [--frames 12]\nIt saves a dense contact sheet of that moment with each frame's time and prints what was said. This capture is {} ms long.",
         summary.trim_end(),
-        contact_sheet.display(),
+        visual_note,
         directory.join("scrawl.json").display(),
         quoted_directory,
         bundle.duration_ms,
     );
     // The server reads `file://` attachments from its own disk; the bundle is at the same path
     // there (copied above when the agents run on another Mac).
-    opencode_api(
-        "post",
-        &format!("/api/session/{session}/prompt"),
-        Some(&serde_json::json!({
-            "text": text,
-            "files": [{
+    let files = if clicked {
+        serde_json::json!([{
                 "uri": file_uri(&contact_sheet),
                 "name": "contact-sheet.png",
                 "description": "Scrawl contact sheet: the capture's keyframes in order",
-            }],
-            "delivery": "queue",
-        })),
-    )?;
-    Ok(())
+            }])
+    } else {
+        serde_json::json!([])
+    };
+    serde_json::json!({ "text": text, "files": files, "delivery": "queue" })
 }
 
 /// A `file://` URL for an absolute path, percent-encoding everything but unreserved
@@ -2173,6 +2178,30 @@ mod tests {
     }
 
     #[test]
+    fn session_prompt_attaches_visuals_only_after_a_recorded_click() {
+        let fixture = Fixture::new();
+        let dir = fixture.bundle("speech", 100);
+        let (_, mut bundle) = load_bundle(&dir).unwrap();
+        bundle.events.push(crate::model::InteractionEvent::Drag {
+            t: 500, t1: 800, x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9,
+            label: None, button: None, path: vec![],
+        });
+        let text_only = session_prompt(&dir, &bundle);
+        assert_eq!(text_only["files"], serde_json::json!([]));
+        assert!(text_only["text"].as_str().unwrap().contains("scrawl zoom"));
+        assert!(!text_only["text"].as_str().unwrap().contains(crate::sketch::LOOK_AT_IMAGES));
+        assert!(!text_only["text"].as_str().unwrap().contains("contact sheet is attached"));
+        assert!(dir.join("frames/frame-000.png").exists());
+
+        bundle.events.push(crate::model::InteractionEvent::Click {
+            t: 1_000, x: 0.5, y: 0.5, button: None, label: None, role: None,
+        });
+        let with_click = session_prompt(&dir, &bundle);
+        assert_eq!(with_click["files"][0]["name"], "contact-sheet.png");
+        assert!(with_click["text"].as_str().unwrap().contains("contact sheet is attached"));
+    }
+
+    #[test]
     fn resolves_directory_manifest_and_newest_capture() {
         let fixture = Fixture::new();
         let older = fixture.bundle("old", 100);
@@ -2444,6 +2473,26 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn setting_a_key_never_replaces_an_invalid_existing_config() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        for bytes in [b"{\"ingestToken\":\"private\",".as_slice(), b"[]".as_slice()] {
+            fs::write(&path, bytes).unwrap();
+            assert!(set_config_value_in(&path, "autoSend", false.into()).is_err());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn token_generation_never_replaces_an_empty_existing_config() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        fs::write(&path, b" \n ").unwrap();
+        assert!(ensure_ingest_token_in(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b" \n ");
     }
 
     #[test]

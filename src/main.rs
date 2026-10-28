@@ -2467,6 +2467,7 @@ mod tests {
             None,
             None,
             windows::ActivityLog::default(),
+            None,
         )
         .err()
         .expect("a movie alone is not a safe screenshot candidate");

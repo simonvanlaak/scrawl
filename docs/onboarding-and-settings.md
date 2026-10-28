@@ -45,6 +45,34 @@ About has a Star on GitHub button below the update control. Its heading, action 
 Linux GPUI Settings currently renders its light palette. Hovered buttons and menu items pair black text with light lilac (`#c4a9e6`, 10.09:1); the selected sidebar keeps dark lilac (`#302442`) with cream text. Black on that dark lilac gives only 1.45:1. The dark palette's cream-on-dark hover pair (12.71:1) is covered by a contrast test but is not yet used by Settings.
 
 
+Settings › About keeps its existing **Check for Updates…** action. On Linux, a manual check
+shows Checking and ignores duplicate clicks until it completes. Its dismissible result has
+one line only: **Update available**, **No update available**, or **Update check failed**, with
+the same pixel frog jumping, lounging, or puzzled on its notched lily pad. Failures and
+unexpected worker responses are logged; they never become “No update available” or
+appear as raw diagnostics in the modal.
+The current Linux `check_cli` feed contract checks **and installs**: “Update available” also
+covers an image already installed for the next launch. It does not mean a discovery-only check.
+That result offers **Update now** (quit and launch the staged AppImage after exit) and
+**Update later** (dismiss, leaving it for the next launch). The primary Update now action
+uses brand Signal blue with Paper text; Update later uses Paper, Carbon text and border.
+Both use the brand's square geometry, 18px control type, and 44px hit height rather than
+the compact pill buttons in Settings rows. The result panel has a square Paper field,
+Carbon rule, 18px native status, and 8px-based spacing; failure text uses the semantic
+failure color. Other results use a matching secondary OK action. Enter chooses now;
+Escape defers. On other results Enter and Escape dismiss.
+The app checks that an update is still staged before quitting; a failed relaunch request
+shows the failure result instead of silently exiting. macOS continues to hand off to Sparkle's
+native updater; it does not synthesize a frog result from a Sparkle launch.
+
+The three embedded illustrations in `assets/settings/` isolate the frog-and-pond scenes
+from the selected concept. Each fits a transparent 256×192 device-pixel canvas; Settings
+shows it at native device size, including fractional DPI. The rounded lily pads, water
+ripples, coral cheeks, and the failed scene's broken cable and question mark remain.
+The generated card background and labels are removed; result text stays native. Moss,
+coral, and lavender in the artwork are **not new UI or status tokens**.
+
+
 Launch at login writes `"launchAtLogin": true|false` to `config.json` before changing OS registration; if registration fails, it restores the previous preference. An explicit value is reconciled with `SMAppService.mainApp` (only inside Apparent.app) or Linux XDG autostart on app launch and every two seconds while running; stale Linux launch commands are refreshed when enabled, an absent value leaves existing OS registration alone, and a disabled/approval-needed OS entry is not forced back on. OS approval is still done in System Settings. There's no Dock icon: gpui 0.2.2 makes the app Regular after launch despite `LSUIElement`, so `ui::stay_out_of_dock` sets Accessory again at the top of `run_app`. The menu keeps Record, Choose What to Record…, Open Latest Capture, Export (flag), Settings…, Check for Updates…, Quit.
 
 Agents › Command-line tool (`src/command_line.rs`) links the app's own binary as `apparent` without asking for admin or replacing a different program. On Mac it symlinks the real app binary (which is how it finds the helper) into the first writable of `/opt/homebrew/bin`, `/usr/local/bin`, else `~/.local/bin`; Linux's installed AppImage provides a `~/.local/bin/apparent` link. A bare `apparent` from a terminal prints help instead of starting a second app. Agents › Agent skill shows `bunx skills add tryapparent/apparent` (`skills/apparent/SKILL.md`, also printed by `apparent skill`), which is the capture-reading skill. The separate `make-it-apparent` walkthrough is installed explicitly with `bunx skills add tryapparent/apparent --skill make-it-apparent` (README › Agents); the default command does not guarantee its installation. This identity change does not migrate earlier captures, settings, OS permissions, or independently installed commands.

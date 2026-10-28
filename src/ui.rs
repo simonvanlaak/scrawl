@@ -1090,6 +1090,10 @@ impl ApparentCoordinator {
                 crate::onboarding::relaunch();
                 cx.quit();
             }
+            Effect::QuitForUpdate => {
+                self.settings = None;
+                cx.quit();
+            }
             _ => {}
         }
     }

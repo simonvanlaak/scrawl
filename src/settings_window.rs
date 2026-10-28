@@ -23,7 +23,7 @@ use crate::capture::{
     CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, ShortcutKind,
 };
 use crate::onboarding::{Permission, Status};
-use crate::settings::{Action, Event, Pane, Pressed};
+use crate::settings::{Action, Event, Pane, Pressed, UpdateResult};
 
 const WIDTH: f32 = 720.0;
 const HEIGHT: f32 = 530.0;
@@ -201,7 +201,22 @@ struct ViewState {
 #[serde(rename_all = "camelCase", default)]
 struct UpdateCheck {
     checking: bool,
-    message: Option<String>,
+    result: Option<UpdateResult>,
+}
+
+// Concept-derived 256×192 scenes stay at native device-pixel size in Settings.
+// Moss shades belong only to this character, never to the UI/status palette.
+fn update_frog(result: UpdateResult) -> Arc<Image> {
+    use std::sync::OnceLock;
+    static JUMP: OnceLock<Arc<Image>> = OnceLock::new();
+    static LOUNGE: OnceLock<Arc<Image>> = OnceLock::new();
+    static PUZZLED: OnceLock<Arc<Image>> = OnceLock::new();
+    let (cache, bytes): (_, &[u8]) = match result {
+        UpdateResult::Available => (&JUMP, include_bytes!("../assets/settings/frog-jump.png")),
+        UpdateResult::Current => (&LOUNGE, include_bytes!("../assets/settings/frog-lounge.png")),
+        UpdateResult::Failed => (&PUZZLED, include_bytes!("../assets/settings/frog-puzzled.png")),
+    };
+    cache.get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, bytes.to_vec()))).clone()
 }
 
 impl ViewState {
@@ -460,6 +475,11 @@ impl SettingsWindow {
                     if next.recording().is_none() {
                         self.live = gpui::Modifiers::default();
                     }
+                    if next.update_check.result.is_some()
+                        && self.state.as_ref().is_none_or(|state| state.update_check.result.is_none())
+                    {
+                        window.focus(&self.focus);
+                    }
                     self.state = Some(next);
                     self.sync_meter();
                 }
@@ -504,6 +524,14 @@ impl SettingsWindow {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent) {
+        if self.state.as_ref().is_some_and(|state| state.update_check.result.is_some())
+            && matches!(event.keystroke.key.as_str(), "escape" | "enter")
+        {
+            self.act(if event.keystroke.key == "enter"
+                && self.state.as_ref().is_some_and(|state| state.update_check.result == Some(UpdateResult::Available))
+            { Action::UpdateNow } else { Action::DismissUpdateCheck });
+            return;
+        }
         let Some(kind) = self.recording() else {
             return;
         };
@@ -729,6 +757,30 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
             d.cursor_pointer().hover(|s| s.bg(theme.hover()))
         })
         .when(!enabled, |d| d.opacity(0.45))
+        .child(title.to_owned())
+}
+
+/// The update decision uses the brand's primary and secondary action roles,
+/// rather than the compact pill buttons used by Settings rows.
+fn update_choice_button(id: &'static str, title: &str, primary: bool) -> Stateful<Div> {
+    let paper = rgb(0xf5f0e8);
+    let carbon = rgb(0x19161d);
+    let signal = rgb(0x0000f2);
+    div()
+        .id(id)
+        .flex_none()
+        .h(px(44.0))
+        .px(px(16.0))
+        .flex().items_center().justify_center()
+        .bg(if primary { signal } else { paper })
+        .border_2()
+        .border_color(if primary { signal } else { carbon })
+        .text_size(px(18.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(if primary { paper } else { carbon })
+        .cursor_pointer()
+        .when(primary, |d| d.hover(move |s| s.border_color(carbon)))
+        .when(!primary, |d| d.hover(|s| s.bg(rgb(0xe7e0ee))))
         .child(title.to_owned())
 }
 
@@ -1793,8 +1845,12 @@ impl SettingsWindow {
             ))
     }
 
-    fn update_result_layer(&self, theme: Theme, state: &ViewState, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        let message = state.update_check.message.as_ref()?;
+    fn update_result_layer(&self, theme: Theme, state: &ViewState, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let result = state.update_check.result?;
+        // GPUI's image sampler is linear. Keep the extracted concept scenes at
+        // native device pixels even at fractional desktop scales.
+        let frog_width = px(256.0 / window.scale_factor());
+        let frog_height = px(192.0 / window.scale_factor());
         Some(div()
             .id("settings-update-result-layer")
             .absolute().top_0().left_0().size_full()
@@ -1802,17 +1858,24 @@ impl SettingsWindow {
             .flex().items_center().justify_center()
             .child(div()
                 .id("settings-update-result")
-                .w(px(340.0)).p(px(20.0))
-                .rounded(px(12.0)).bg(theme.menu())
-                .border_1().border_color(theme.control_line())
-                .flex().flex_col().gap(px(14.0))
-                .child(div().text_size(px(16.0)).font_weight(FontWeight::SEMIBOLD).child("Update check finished"))
-                .child(div().text_size(px(13.0)).child(message.clone()))
-                .child(div().flex().justify_end().child(
-                    button(theme, "settings-update-dismiss", "OK", true)
-                        .on_click(cx.listener(|view, _, _, _| view.act(Action::DismissUpdateCheck)))
-                )))
-        )
+                .w(px(340.0)).p(px(24.0))
+                .bg(rgb(0xf5f0e8))
+                .border_1().border_color(rgb(0x19161d))
+                .flex().flex_col().gap(px(16.0))
+                .child(div().flex().justify_center().child(img(update_frog(result)).w(frog_width).h(frog_height).flex_shrink_0()))
+                .child(div().text_center().text_size(px(18.0)).font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(if result == UpdateResult::Failed { 0xb42318 } else { 0x19161d }))
+                    .child(result.label()))
+                .child(div().flex().justify_end().gap(px(8.0))
+                    .when(result == UpdateResult::Available, |row| row
+                        .child(update_choice_button("settings-update-later", "Update later", false)
+                            .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateLater))))
+                        .child(update_choice_button("settings-update-now", "Update now", true)
+                            .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateNow)))))
+                    .when(result != UpdateResult::Available, |row| row
+                        .child(update_choice_button("settings-update-dismiss", "OK", false)
+                            .on_click(cx.listener(|view, _, _, _| view.act(Action::DismissUpdateCheck))))))
+        ))
     }
 
     fn open_menu(
@@ -2031,13 +2094,43 @@ impl Render for SettingsWindow {
             .child(self.content(theme, &state, content, cx))
             .children(caption_buttons(theme))
             .children(self.menu_layer(theme, viewport, cx))
-            .children(self.update_result_layer(theme, &state, cx))
+            .children(self.update_result_layer(theme, &state, window, cx))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_frog_assets_preserve_the_approved_pond_scenes_without_baked_labels() {
+        let mut decoded = Vec::new();
+        for pose in ["jump", "lounge", "puzzled"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("assets/settings/frog-{pose}.png"));
+            let bytes = std::fs::read(&path).expect("each update outcome needs an actual sprite");
+            assert!(bytes.len() < 60_000, "the three illustrations should stay compact");
+            let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!((frame.width, frame.height), (256, 192));
+            assert_eq!(frame.color_type, png::ColorType::Rgba);
+            let pixels = &pixels[..frame.buffer_size()];
+            assert!(pixels.chunks_exact(4).any(|p| p[3] == 255));
+            assert_eq!(&pixels[..4], &[0, 0, 0, 0]);
+            let counts = pixels.chunks_exact(4).filter(|p| p[3] > 220).fold((0, 0, 0), |(green, coral, purple), p| {
+                (green + usize::from(p[1] > p[0] && p[0] > p[2]),
+                 coral + usize::from(p[0] > 175 && i16::from(p[0]) > i16::from(p[1]) + 40 && p[1] > p[2]),
+                 purple + usize::from(p[2] > p[0] && p[0] > p[1] && p[2] > 120))
+            });
+            assert!(counts.0 > 1_000, "{pose} lost its broad green lily pad");
+            assert!(counts.1 > 8, "{pose} lost its coral cheek");
+            assert!(counts.2 > 100, "{pose} lost its lavender pond details");
+            assert!(pixels[(190 * 256 * 4)..].chunks_exact(4).all(|p| p[3] == 0), "{pose} includes a baked status label");
+            decoded.push(pixels.to_vec());
+        }
+        assert!(decoded[0] != decoded[1] && decoded[1] != decoded[2] && decoded[0] != decoded[2]);
+    }
 
     #[test]
     fn about_uses_the_lilac_a_mark_instead_of_the_brush_icon() {
@@ -2105,15 +2198,21 @@ mod tests {
     #[test]
     fn update_check_progress_and_result_reach_the_window() {
         let checking: ViewState = serde_json::from_str(
-            r#"{"updateCheck":{"checking":true,"message":null}}"#,
+            r#"{"updateCheck":{"checking":true,"result":null}}"#,
         ).unwrap();
         assert!(checking.update_check.checking);
-        assert!(checking.update_check.message.is_none());
-        let finished: ViewState = serde_json::from_str(
-            r#"{"updateCheck":{"checking":false,"message":"No new update is available."}}"#,
-        ).unwrap();
-        assert!(!finished.update_check.checking);
-        assert_eq!(finished.update_check.message.as_deref(), Some("No new update is available."));
+        assert!(checking.update_check.result.is_none());
+        for (status, label) in [
+            ("available", "Update available"),
+            ("current", "No update available"),
+            ("failed", "Update check failed"),
+        ] {
+            let finished: ViewState = serde_json::from_value(serde_json::json!({
+                "updateCheck": {"checking": false, "result": status}
+            })).unwrap();
+            assert!(!finished.update_check.checking);
+            assert_eq!(finished.update_check.result.unwrap().label(), label);
+        }
     }
 
     #[test]

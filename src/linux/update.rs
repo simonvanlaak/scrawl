@@ -6,7 +6,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -92,6 +92,62 @@ pub fn check_cli() -> Result<&'static str> {
     } else {
         "up to date"
     })
+}
+
+/// Start the installed AppImage after this process exits, not the old running inode.
+pub fn relaunch_staged() -> Result<()> {
+    let image = target()?.context("Updates require an owned AppImage under your home directory")?;
+    ensure!(status()?["pendingRestart"] == true, "no installed update is waiting for a restart");
+    let name = image.file_name().context("AppImage has no name")?.to_string_lossy();
+    let backup = image.with_file_name(format!(".{name}.previous"));
+    ensure!(backup.is_file(), "previous AppImage is unavailable for recovery");
+    ensure!(fs::metadata(&backup)?.permissions().mode() & 0o111 != 0, "previous AppImage is not executable");
+    // A successful shell spawn proves nothing about the image it will execute later.
+    // Check the new image before leaving the running app, and keep the old one as a
+    // recovery path if the image disappears or fails to start after this process exits.
+    preflight_image(&image, Duration::from_secs(5))?;
+    relaunch_command(&image, &backup, std::process::id())
+        .spawn()
+        .context("cannot start updated AppImage after exit")?;
+    Ok(())
+}
+
+fn preflight_image(image: &Path, timeout: Duration) -> Result<()> {
+    let mut child = Command::new(image).arg("--help")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null()).spawn()
+        .context("updated AppImage could not start")?;
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            ensure!(status.success(), "updated AppImage failed its startup check");
+            return Ok(());
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("updated AppImage startup check timed out");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn relaunch_command(image: &Path, backup: &Path, pid: u32) -> Command {
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg("pid=$1; image=$2; backup=$3; i=0; while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -0 \"$pid\" 2>/dev/null && exit 1; \"$image\" app & child=$!; sleep 3; if kill -0 \"$child\" 2>/dev/null; then exit 0; fi; wait \"$child\"; result=$?; if [ \"$result\" -ne 0 ] && [ -x \"$backup\" ]; then exec \"$backup\" app; fi; exit \"$result\"")
+        .arg("apparent-update-relaunch")
+        .arg(pid.to_string())
+        .arg(image)
+        .arg(backup)
+        .env_remove("APPIMAGE")
+        .env_remove("APPDIR")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
 }
 
 // Main previews are published from main as GitHub releases.
@@ -468,6 +524,56 @@ mod tests {
         assert!(main_candidate(&foreign, "x86_64", &checksum).is_err());
         assert!(!newer(&candidate, Some(("main".into(), "a".repeat(40)))));
         assert!(newer(&candidate, Some(("stable".into(), "v0.3.13".into()))));
+    }
+
+    #[test]
+    fn hung_updated_image_fails_preflight_without_waiting_for_it() {
+        let dir = std::env::temp_dir().join(format!("apparent-preflight-{}", crate::make_bundle_id()));
+        fs::create_dir(&dir).unwrap();
+        let image = dir.join("hung.AppImage");
+        fs::write(&image, b"#!/bin/sh\nexec sleep 5\n").unwrap();
+        let mut permissions = fs::metadata(&image).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&image, permissions).unwrap();
+        let start = Instant::now();
+        assert!(preflight_image(&image, Duration::from_millis(100)).unwrap_err()
+            .to_string().contains("timed out"));
+        assert!(start.elapsed() < Duration::from_secs(2));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_post_exit_launch_recovers_the_previous_image() {
+        let dir = std::env::temp_dir().join(format!("apparent-relaunch-{}", crate::make_bundle_id()));
+        fs::create_dir(&dir).unwrap();
+        let image = dir.join("new.AppImage");
+        let backup = dir.join("previous.AppImage");
+        let marker = dir.join("recovered");
+        fs::write(&image, b"#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(&backup, b"#!/bin/sh\nprintf recovered > \"$TEST_RECOVERY_MARKER\"\n").unwrap();
+        for path in [&image, &backup] {
+            let mut permissions = fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(path, permissions).unwrap();
+        }
+        assert!(relaunch_command(&image, &backup, u32::MAX)
+            .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        assert_eq!(fs::read(&marker).unwrap(), b"recovered");
+        fs::remove_file(&image).unwrap();
+        fs::remove_file(&marker).unwrap();
+        assert!(relaunch_command(&image, &backup, u32::MAX)
+            .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        assert_eq!(fs::read(&marker).unwrap(), b"recovered");
+        fs::write(&image, b"#!/bin/sh\nsleep 5\nexit 1\n").unwrap();
+        let mut permissions = fs::metadata(&image).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&image, permissions).unwrap();
+        fs::remove_file(&marker).unwrap();
+        assert!(relaunch_command(&image, &backup, u32::MAX)
+            .env("TEST_RECOVERY_MARKER", &marker).status().unwrap().success());
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!marker.exists(), "a later app failure must not resurrect the old image");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

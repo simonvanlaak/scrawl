@@ -7,11 +7,9 @@ Press a shortcut (`⌥⇧S`) and Apparent starts recording the screen. Talk, cli
 ## Install
 
 No branded installers, Homebrew cask, or signed update have been published yet. Build from source
-in this checkout; see [macOS packaging](docs/release.md), [Windows](docs/windows.md), or
-[Linux](docs/linux.md). The Mac build needs an Apple silicon Mac on macOS 15 or later (live
-transcription and Liquid Glass need macOS 26). Windows releases are paused; its source remains,
-but new Windows builds are not distributed or supported. Linux builds target Ubuntu 24.04+ on
-x86_64 or ARM64.
+in this checkout; see [macOS packaging](docs/release.md) or [Linux](docs/linux.md). Apparent supports
+macOS and Linux, not Windows. The Mac build needs an Apple silicon Mac on macOS 15 or later (live
+transcription and Liquid Glass need macOS 26). Linux builds target Ubuntu 24.04+ on x86_64 or ARM64.
 
 When a Linux AppImage is published, make it executable and launch it with:
 
@@ -447,9 +445,8 @@ and ignore the hint.
 Any other local model (whisper.cpp, MLX Whisper, faster-whisper, Parakeet, a Core ML model…) can
 transcribe through a small wrapper program. Apparent runs it on the recording's audio and reads a
 JSON transcript from its stdout; it knows nothing about the model, adds no network requests and
-doesn't sandbox the program. It runs on macOS only for now; on Windows recordings keep the local
-engine. In `~/.config/apparent/config.json` (Settings shows **Command** once it is set; editing it
-stays in the file):
+doesn't sandbox the program. It runs on macOS only. In `~/.config/apparent/config.json` (Settings
+shows **Command** once it is set; editing it stays in the file):
 
 ```json
 {
@@ -539,64 +536,6 @@ then `granted` or `cancelled` with a `reason` (`back`, `settings-closed`, `no-se
 X,Y,W,H --visible X,Y,W,H` prints where the card would dock (`below`, `inside`, `right`, `left` or
 `clamped`); `scripts/check-permission-panel-dock.sh` checks the cases.
 
-## Windows
-
-Windows releases are paused until we can test the native GUI. The Windows implementation and build
-instructions remain here for development, but no new Windows zip is published or supported. Older
-unsigned zips are historical artifacts, not a currently supported download.
-
-The Windows implementation targets Windows 10 (2004) and later as the same app: the same capsule,
-picker, overlay, review window, welcome tour and Settings, from the same GPUI code. Only the parts
-the operating system owns differ:
-
-| | macOS | Windows |
-|---|---|---|
-| Shortcut | `⌥⇧S`, `⌥⇧V` | `Alt+Shift+S`, `Alt+Shift+V` |
-| Menu | Menu bar item | Notification area icon (left or right click) |
-| Screen and window capture | ScreenCaptureKit | Windows.Graphics.Capture, H.264 through Media Foundation |
-| Clicks, keys, Shift ink | Mouse monitor, Accessibility key tap, modifier state | Low-level hooks and key state |
-| Ink overlay | Metal panel | Click-through GPUI window, left out of recordings |
-| Transcription | SpeechAnalyzer, or Hex | Parakeet on device (`transcribe.cpp`), Hex's model or Apparent's own copy |
-| Movie decoding | `apparent-helper` (AVFoundation) | Media Foundation, in process |
-| Paste | `⌘V` | `Ctrl+V` |
-| Settings and welcome tour | SwiftUI (`apparent-helper`) | GPUI windows in process, same panes and protocol |
-| Recording capsule | Native AppKit + Metal pill (or GPUI) | GPUI capsule |
-| Launch at login | `SMAppService` | The user's `Run` key (Settings › Apps › Startup) |
-| Captures | `~/Library/Application Support/apparent/captures` | `%LOCALAPPDATA%\apparent\captures` |
-| Log | `~/Library/Logs/Apparent/apparent.log` | `%LOCALAPPDATA%\Apparent\Logs\apparent.log` |
-
-- **Permissions:** none, apart from the microphone switch in Settings › Privacy & security, which
-  the welcome tour and Apparent's Settings › Permissions check. Screen capture, input hooks and
-  pasting need no grant on Windows.
-- **Shortcuts:** both are recorded in Settings › General like on macOS, as `Ctrl`, `Alt`, `Win` and
-  `Shift` combinations. Apparent turns down `Ctrl` with one key (apps use those), `Win` with a key
-  (Windows uses those), and `Alt+Tab`, `Alt+F4` and `Alt+Space`.
-- **Transcription:** Parakeet runs on device with measured word timings, so spoken cues ("look
-  here") cut keyframes as on macOS. If [Hex](https://github.com/anomalyco/hex) has installed a
-  model (`%APPDATA%\voice-control\models`), Apparent uses it. Otherwise the first launch downloads
-  Hex's Parakeet Unified English (730 MB, checked against its SHA-256) into
-  `%LOCALAPPDATA%\Apparent\models` in the background; Settings › Recording shows the progress, and
-  captures made before it finishes get their transcript once it lands.
-- **Command-line tool:** **Install** in Settings › Agents writes a `apparent.cmd` shim into
-  `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on every user's PATH, so agents and terminals
-  can run `apparent`.
-- **agentContext:** what clicks and marks land on comes from UI Automation, as it does from the
-  Accessibility tree on macOS.
-- **Not on Windows:** the cabled iPhone (it needs AVFoundation's screen capture devices), video
-  export, Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL
-  (`/sdk.js` registrations still route).
-- **Releases:** paused. `.github/workflows/release-windows.yml` retains the packaging recipe but
-  its job is disabled. Do not dispatch it or attach a Windows zip until native GUI testing resumes.
-
-Build with the MSVC toolchain, CMake and the Windows SDK (Visual Studio Build Tools with the C++
-workload). Release builds also need GPUI's shader compiler: set `GPUI_FXC_PATH` to the SDK's
-`fxc.exe` (for example `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe`).
-
-```powershell
-cargo build --release
-.\target\release\apparent.exe app
-```
-
 ## Linux
 
 Apparent runs on Linux desktops (GNOME and KDE Plasma, on Wayland or X11) as the same app, from
@@ -631,8 +570,7 @@ taskpolicy -c utility cargo test -j 3 --offline -- --test-threads=2
 ./scripts/install-app.sh
 ```
 
-On Windows, `cargo test`; then run `apparent.exe app` and record with `Alt+Shift+S`. On Linux,
-`cargo test`; then run `apparent app` in a desktop session and record with `Alt+Shift+S`.
+On Linux, run `cargo test`; then run `apparent app` in a desktop session and record with `Alt+Shift+S`.
 `APPARENT_SHOW_OWN_WINDOWS=1` keeps Apparent's own windows (capsule, overlay, picker) in screenshots,
 which normally leave them out.
 

@@ -1,6 +1,11 @@
-# Windows
+# Windows (unsupported historical implementation)
 
-Read this before changing `src/capture/windows.rs`, `src/ui/windows.rs`, `src/win/`, `src/onboarding_window.rs`, `src/settings_window.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`.
+Apparent no longer supports Windows. This page records the retained implementation for historical
+reference only; it is not a build, test or release guide for current work. Do not dispatch the
+Windows release workflow or publish Windows assets. Current development targets macOS and Linux.
+
+Retained code lives in `src/capture/windows.rs`, `src/ui/windows.rs`, `src/win/`,
+`src/onboarding_window.rs` and `src/settings_window.rs`. Do not infer current support from it.
 
 ## One app, one UI
 
@@ -29,9 +34,9 @@ Shortcuts are `RegisterHotKey` plus low-level hooks and a key-state poller (inje
 
 The cabled iPhone, video export, Sparkle (**Check for Updates…** opens the releases page) and reading the browser tab URL (the `sdk.js` page bridge still works).
 
-## Building and testing
+## Retained build notes (historical)
 
-Windows releases are paused until native GUI testing resumes. Keep the implementation and packaging recipe; do not dispatch the disabled workflow or publish new zips. Earlier unsigned zips are historical artifacts, not supported downloads. The workflow below is a retained recipe, not a release path. A headless build and model test are not a native GUI test.
+Windows releases have ended. The implementation and packaging recipe remain as historical records; do not dispatch the disabled workflow or publish new zips. Earlier unsigned zips are not supported downloads. A headless build and model test are not a native GUI test.
 
 If re-enabled, the retained `.github/workflows/release-windows.yml` job would run a `--release` build and `apparent --help`, copy the Visual C++ runtime DLLs beside it (transcribe.cpp's CMake build uses the DLL runtime, so `crt-static` doesn't link), download and run the real model (`cargo test speech -- --ignored`), repeat that run under Intel SDE as a Lunar Lake CPU (no AVX-512), and produce `Apparent-<version>-windows-x64.zip` (unsigned `apparent.exe`, transcribe.cpp's DLLs, those runtime DLLs, README, LICENSE) for the tag's GitHub release.
 

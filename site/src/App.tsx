@@ -24,7 +24,7 @@ export function App() {
             <h1>Make what you mean <em>apparent.</em></h1>
             <p>Work should be enjoyable. When a design needs changing, show your agent what you mean.</p>
             <a className="btn-primary" href={RELEASES}>Get the app <span aria-hidden="true">↗</span></a>
-            <p className="release-note">Preview downloads on GitHub are still Scrawl-branded. Windows releases are paused; older Windows builds are unsupported.</p>
+            <p className="release-note">Preview downloads on GitHub are still Scrawl-branded. Apparent does not support Windows.</p>
           </div>
         </section>
         <section className="demo-section" id="demo" aria-label="Product demo">

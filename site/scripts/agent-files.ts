@@ -101,7 +101,7 @@ ${version ? `- [Download for Mac](${SITE}/releases/Apparent-latest-arm64.dmg): v
 
 ## CLI
 
-The \`apparent\` command is the binary inside Apparent.app (on Windows, \`apparent.exe\`) and runs on the computer where Apparent is installed. Most commands take a bundle path or \`latest\`.
+The \`apparent\` command runs on the computer where Apparent is installed (macOS or Linux). Most commands take a bundle path or \`latest\`.
 
 ${commands(skill).join("\n")}
 
@@ -160,7 +160,7 @@ export function jsonLd(): string {
     name: "Apparent",
     description: "Show an agent a problem instead of describing it. Apparent records your screen, voice, clicks and drawings and packs them into a bundle an AI coding agent can read.",
     url: `${SITE}/`,
-    operatingSystem: macos ? `macOS ${macos}, Windows 10, Windows 11, Linux` : "macOS, Windows, Linux",
+    operatingSystem: macos ? `macOS ${macos}, Linux` : "macOS, Linux",
     applicationCategory: "DeveloperApplication",
     ...(version ? { softwareVersion: version } : {}),
     image: `${SITE}/og.png`,

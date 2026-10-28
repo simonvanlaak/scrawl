@@ -1,7 +1,7 @@
 import { useId, useState } from "react"
 import { Copy } from "./Copy"
 import { usePlatform, type Platform } from "./platform"
-import { BREW, LINUX_DOWNLOAD, MAC_DMG, RELEASE, WINDOWS_DOWNLOAD } from "./release"
+import { BREW, LINUX_DOWNLOAD, MAC_DMG, RELEASE } from "./release"
 
 const SITE = "https://app.tryapparent.com/"
 const REQUIRES = `Apple silicon · macOS ${RELEASE.macos} or later`
@@ -55,7 +55,7 @@ function SendLink() {
       className="btn-primary"
       onClick={async () => {
         if (canShare) {
-          await navigator.share({ title: "Apparent", text: "Apparent for Mac, Windows and Linux", url: SITE }).catch(() => {})
+          await navigator.share({ title: "Apparent", text: "Apparent for Mac and Linux", url: SITE }).catch(() => {})
           return
         }
         await navigator.clipboard?.writeText(SITE)
@@ -81,14 +81,7 @@ function Primary({ platform }: { platform: Platform }) {
     case "mac-intel":
       return <Unavailable icon={<Apple />} label="Download for Mac" />
     case "windows":
-      return WINDOWS_DOWNLOAD ? (
-        <a className="btn-primary" href={WINDOWS_DOWNLOAD}>
-          <Windows />
-          Download for Windows
-        </a>
-      ) : (
-        <Unavailable icon={<Windows />} label="Windows: paused" />
-      )
+      return <Unavailable icon={<Windows />} label="Windows: unsupported" />
     case "linux":
       return LINUX_DOWNLOAD ? (
         <a className="btn-primary" href={LINUX_DOWNLOAD}>Download for Linux</a>
@@ -108,13 +101,11 @@ function meta(platform: Platform): string {
     case "mac-intel":
       return `Needs a Mac with Apple silicon and macOS ${RELEASE.macos} or later.`
     case "windows":
-      return WINDOWS_DOWNLOAD
-        ? `Preview ${RELEASE.version} · Windows 10 and 11, x64 · Not signed yet: if Windows warns, click More info, then Run anyway.`
-        : "Windows releases are paused. The Windows implementation remains in the source code."
+      return "Apparent no longer supports Windows. It runs on Mac and Linux."
     case "linux":
       return LINUX_DOWNLOAD ? `Preview ${RELEASE.version} · x86_64 AppImage · Ubuntu 24.04+ · X11 or GNOME/KDE Wayland` : "Linux is on the way."
     case "mobile":
-      return WINDOWS_DOWNLOAD ? "Apparent runs on your Mac or PC." : "Apparent runs on your Mac."
+      return "Apparent runs on Mac and Linux."
   }
 }
 
@@ -151,19 +142,6 @@ export function Platforms({ brew }: { brew: boolean }) {
             <Copy text={BREW} />
           </div>
         )}
-      </li>
-      <li>
-        <div className="platform-row">
-          <span className="platform-name">Windows</span>
-          <span className="platform-detail">{WINDOWS_DOWNLOAD ? "x64, preview, unsigned" : "Releases paused"}</span>
-          {WINDOWS_DOWNLOAD ? (
-            <a className="platform-action" href={WINDOWS_DOWNLOAD}>
-              Download
-            </a>
-          ) : (
-            <span className="soon">Paused</span>
-          )}
-        </div>
       </li>
       <li>
         <div className="platform-row">
@@ -212,7 +190,6 @@ export function Download({ brew = false }: { brew?: boolean }) {
 export function useDownloadHref(): string {
   const platform = usePlatform()
   if (platform.kind === "mac" && MAC_DMG) return MAC_DMG
-  if (platform.kind === "windows" && WINDOWS_DOWNLOAD) return WINDOWS_DOWNLOAD
   if (platform.kind === "linux" && LINUX_DOWNLOAD) return LINUX_DOWNLOAD
   return "#install"
 }

@@ -88,7 +88,7 @@ On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off i
 
 ## Experiment `clipboardImage` (`src/handoff.rs`, `src/win/clipboard.rs`)
 
-Off by default; Windows only. A finished capture (and `apparent copy`) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.
+Historical Windows-only experiment (unsupported). A finished capture (and `apparent copy`) normally copies `summary.md`'s text alone, so pressing Ctrl+V yourself drops the contact sheet; only the Paste chip and the paste shortcut paste the image first. With it on, `copy_bundle_to_clipboard` puts `contact-sheet.png` (`PNG` and `CF_DIBV5`) and the text on the clipboard together, so one Ctrl+V attaches the image and inserts the text in a browser or Electron composer (checked in the Claude desktop app) and pastes just the text in a terminal. If the contact sheet can't be read, the text is copied alone.
 
 ## Experiment `draftHandoff` (`src/handoff.rs`, `src/linux/clipboard.rs`)
 

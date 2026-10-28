@@ -20,6 +20,7 @@ pub mod input;
 pub mod ipc;
 pub mod login;
 pub mod media;
+pub mod microphone;
 pub mod overlay;
 pub mod portal;
 pub mod privacy;

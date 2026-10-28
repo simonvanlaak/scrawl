@@ -140,6 +140,14 @@ pub struct AudioRecorder {
     pause: Option<crate::pause_transcribe::Pause>,
 }
 
+// The variant's stream is kept alive until the capture worker exits.
+#[allow(dead_code)]
+enum InputStream {
+    Cpal(cpal::Stream),
+    #[cfg(target_os = "linux")]
+    Pulse(crate::linux::microphone::Stream),
+}
+
 impl AudioRecorder {
     /// A read-only view of recorded samples. A repeated count means no new input arrived.
     #[cfg(target_os = "linux")]
@@ -204,22 +212,23 @@ impl AudioRecorder {
         self.word_probe.as_ref().map(|probe| probe.state())
     }
 
-    /// The chosen microphone (`mic`), else the macOS default. A chosen device that is missing or
+    /// The chosen microphone (`mic`), else the system default. A chosen device that is missing or
     /// won't open never stops the recording.
     fn open_stream(
         samples: Arc<Mutex<Vec<f32>>>,
         error: Arc<Mutex<Option<String>>>,
         health: Arc<Mutex<InputHealth>>,
-    ) -> Result<cpal::Stream> {
+    ) -> Result<InputStream> {
         let choice = crate::mic::choice();
-        if let Some(choice) = &choice {
-            if let Some(device) = crate::mic::device(&choice.id) {
-                let input = crate::mic::Input {
-                    id: choice.id.clone(),
-                    name: device_name(&device).unwrap_or_else(|| choice.name.clone()),
-                };
-                crate::mic::note_pick(&crate::mic::Pick::Chosen(&input));
-                match Self::open_device(&device, samples.clone(), error.clone(), health.clone()) {
+        let inputs = crate::mic::inputs();
+        let pick = crate::mic::Pick::new(choice.as_ref(), &inputs);
+        if choice.is_some() {
+            crate::mic::note_pick(&pick);
+        }
+        if let crate::mic::Pick::Chosen(input) = pick {
+            #[cfg(target_os = "linux")]
+            if let Some(source) = crate::linux::microphone::source(&input.id) {
+                match Self::open_pulse(source, samples.clone(), health.clone()) {
                     Ok(stream) => {
                         crate::capture::apparent_log(format!("Microphone: {}", input.name));
                         return Ok(stream);
@@ -229,20 +238,35 @@ impl AudioRecorder {
                         input.name
                     )),
                 }
-            } else {
-                let default = cpal::default_host()
-                    .default_input_device()
-                    .and_then(|device| {
-                        Some(crate::mic::Input {
-                            id: device.id().ok()?.id().to_owned(),
-                            name: device_name(&device)?,
-                        })
-                    });
-                let inputs = crate::mic::Inputs {
-                    default: default.as_ref().map(|d| d.id.clone()),
-                    devices: default.into_iter().collect(),
-                };
-                crate::mic::note_pick(&crate::mic::Pick::new(Some(choice), &inputs));
+            }
+            if let Some(device) = crate::mic::device(&input.id) {
+                match Self::open_device(&device, samples.clone(), error.clone(), health.clone()) {
+                    Ok(stream) => {
+                        crate::capture::apparent_log(format!("Microphone: {}", input.name));
+                        return Ok(InputStream::Cpal(stream));
+                    }
+                    Err(e) => crate::capture::apparent_log(format!(
+                        "Microphone: could not open {} ({e:#}); using the default",
+                        input.name
+                    )),
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(default) = crate::linux::microphone::inputs()
+            .and_then(|inputs| inputs.default_input().cloned())
+        {
+            let source = crate::linux::microphone::source(&default.id)
+                .expect("Pulse enumeration always returns Pulse source ids");
+            match Self::open_pulse(source, samples.clone(), health.clone()) {
+                Ok(stream) => {
+                    crate::capture::apparent_log(format!("Microphone: {} (default)", default.name));
+                    return Ok(stream);
+                }
+                Err(e) => crate::capture::apparent_log(format!(
+                    "Microphone: could not open Pulse default {} ({e:#}); trying the system input",
+                    default.name
+                )),
             }
         }
         let device = cpal::default_host()
@@ -253,7 +277,25 @@ impl AudioRecorder {
             "Microphone: {} (default)",
             device_name(&device).unwrap_or_default()
         ));
-        Ok(stream)
+        Ok(InputStream::Cpal(stream))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn open_pulse(
+        source: &str,
+        samples: Arc<Mutex<Vec<f32>>>,
+        health: Arc<Mutex<InputHealth>>,
+    ) -> Result<InputStream> {
+        let stream = crate::linux::microphone::Stream::start(source, move |data| {
+            if let Ok(mut output) = samples.lock() {
+                output.extend_from_slice(data);
+            }
+            let peak = data.iter().map(|value| value.abs()).fold(0.0_f32, f32::max);
+            if let Ok(mut health) = health.lock() {
+                health.sample(Instant::now(), peak);
+            }
+        })?;
+        Ok(InputStream::Pulse(stream))
     }
 
     fn open_device(
@@ -556,6 +598,37 @@ pub fn encode_wav_16k(samples_16k: &[f32]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cpal_choice_becomes_missing_when_pulse_inventory_takes_over() {
+        use crate::mic::{Choice, Input, Inputs, Pick};
+
+        let saved = Choice {
+            id: "cpal-mic".into(),
+            name: "Original microphone".into(),
+        };
+        let cpal = Inputs {
+            default: Some("cpal-mic".into()),
+            devices: vec![Input {
+                id: "cpal-mic".into(),
+                name: saved.name.clone(),
+            }],
+        };
+        assert!(matches!(Pick::new(Some(&saved), &cpal), Pick::Chosen(_)));
+
+        let pulse = Inputs {
+            default: Some("pulse:system".into()),
+            devices: vec![Input {
+                id: "pulse:system".into(),
+                name: "System input".into(),
+            }],
+        };
+        let pick = Pick::new(Some(&saved), &pulse);
+        assert!(matches!(pick, Pick::Missing { .. }));
+        assert_eq!(pick.device().unwrap().id, "pulse:system");
+        assert_eq!(pick.note().unwrap(), "Original microphone isn't connected. Using System input.");
+    }
 
     #[test]
     fn input_level_responds_to_real_samples_not_silence_or_an_old_peak() {

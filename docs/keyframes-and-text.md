@@ -76,7 +76,7 @@ same bundle: chunk boundaries can change recognition even when finish is faster.
 
 ## Finish timing trace (`src/main.rs`)
 
-Every successfully built bundle has `finish-trace.json` beside `scrawl.json`, with `stopMs`, `audioMs`, `candidatesMs`, `transcribeMs`, `selectMs`, `decodeMs`, `autocropMs`, `sheetMs`, `writeMs`, `totalMs`, and `preparedVisuals`. Missing stages are null. The trace holds durations and a boolean only, not transcript or screen content; it is not copied into `summary.md` or clipboard. Transcription and visual preparation can overlap, so stage durations do not add up to `totalMs`. Failed builds do not get a trace; use the local `scrawl.log` for errors. The existing `finish timings:` log line includes the bundle ID. Bundle retention also removes its trace when it removes the bundle.
+Every successfully built bundle has `finish-trace.json` beside `apparent.json`, with `stopMs`, `audioMs`, `candidatesMs`, `transcribeMs`, `selectMs`, `decodeMs`, `autocropMs`, `sheetMs`, `writeMs`, `totalMs`, and `preparedVisuals`. Missing stages are null. The trace holds durations and a boolean only, not transcript or screen content; it is not copied into `summary.md` or clipboard. Transcription and visual preparation can overlap, so stage durations do not add up to `totalMs`. Failed builds do not get a trace; use the local `apparent.log` for errors. The existing `finish timings:` log line includes the bundle ID. Bundle retention also removes its trace when it removes the bundle.
 
 ## Click-based visual handoff (`src/handoff.rs`, `src/sketch.rs`)
 

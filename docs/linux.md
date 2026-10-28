@@ -99,22 +99,52 @@ Neither X11 nor GNOME's or KDE's screencasts let an app leave its windows out, s
 - **Launch at login:** `~/.config/autostart/scrawl.desktop`; an explicit `launchAtLogin: true` in config refreshes a stale `Exec=` path when the AppImage moves, but respects a desktop-disabled entry. **Trash:** the freedesktop trash. **Captures:** `~/.local/share/scrawl/captures`; **log:** `~/.local/share/scrawl/Logs/scrawl.log`.
 - **Command-line tool:** Settings › Agents links `~/.local/bin/scrawl` to the AppImage (`$APPIMAGE`).
 
+### Updates and the running version
+
+Settings › About shows the current version, a **Check for Updates…** button, and a Linux channel
+picker. `stable` is the default; `main` follows the verified feed from main builds. The same
+settings can be managed without opening the GUI:
+
+```
+scrawl update status
+scrawl update channel main
+scrawl update channel stable
+scrawl update check
+```
+
+`status` prints JSON. It reads the selected channel from `updateChannel` in
+`~/.config/scrawl/config.json` (or `$SCRAWL_CONFIG`), and reports `running.version` plus its
+`revision` if the build has one. At app launch, Scrawl writes `running` with its version, PID,
+and Linux process start ticks to that config. **Do not infer a live version from the JSON file
+alone after a crash**: `scrawl update status` checks that PID and start time; `running: null`
+means no matching process is alive. `installed` describes the downloaded AppImage marker,
+which may be newer than the still-running process; `pendingRestart` indicates that difference.
+`check` returns an error outside an owned AppImage rather than silently claiming success.
+The update is installed for the *next* launch, not the current process. A corrupt config is
+left untouched rather than replaced when changing the channel or recording a launch.
+
 ## Not on Linux
 
-The cabled iPhone, video export, `agentContext` lookups (`ax_other.rs`), Sparkle updates (**Check for Updates…** opens the releases page) and the dev-site tab URL (`/sdk.js` registrations still route).
+The cabled iPhone, video export, `agentContext` lookups (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route).
 
 ## Packaging
 
 `scripts/linux/appimage.sh [binary]` builds `target/appimage/Scrawl-<arch>.AppImage` with linuxdeploy and its GStreamer plugin, so GStreamer, `pipewiresrc`, `ximagesrc` and the H.264 encoders come with it. The binary baseline is **Ubuntu 24.04+**. Install `libfuse2t64` to run the AppImage, or run `./Scrawl-<arch>.AppImage --appimage-extract-and-run app` without FUSE.
 The build installs `gstreamer1.0-libav` and `scripts/linux/check-appimage-decoder.sh` creates a tiny H.264 MP4 and asks the packaged executable to decode a full-resolution frame. This checks the packaged runtime rather than the runner's host plugins.
 
-`.github/workflows/release-linux.yml` builds x86_64 and aarch64 on Ubuntu 24.04 runners. Pull requests and manual dispatches produce artifacts and run packaged `--help` checks; `v*` tags upload versioned AppImages to the matching GitHub release. The site links directly to those versioned assets. Build/deploy the site only after the appcast version is updated and both release assets exist. Flatpak is out of scope.
+`.github/workflows/release-linux.yml` builds x86_64 and aarch64 on Ubuntu 24.04 runners only when manually dispatched to publish a release. A dispatch on `main` with `tag=v<version>` checks out that tag and uploads versioned AppImages to its GitHub release; a dispatch on `main` with `publish_main=true` and no tag publishes a Main preview. Pushing a tag or branch and opening a PR no longer starts the workflow. The site links directly to the versioned assets. Build/deploy the site only after the appcast version is updated and both release assets exist. Flatpak is out of scope.
 
 CPU portability (#82): `transcribe-cpp` uses `dynamic-backends`, which forces `GGML_NATIVE=OFF`. On x86_64 it builds separate `libggml-cpu-<tier>.so` modules (including separate Alder Lake and Zen 4 tiers); on aarch64 it builds a portable CPU module. `.cargo/config.toml` sets the Rust Linux baselines to `x86-64` and `generic`, respectively. `build.rs` stages the runtime and module directories next to binaries/tests with `$ORIGIN` RPATH. AppImage packaging explicitly includes the modules that dependency scanning cannot discover, all beside `libtranscribe` in `usr/lib`; `init_backends_default` resolves that library with `dladdr` and selects a CPU tier there once per process.
 
-Both Linux workflows run `scripts/linux/check-cpu-tiers.py` before stripping symbols. It checks the core libraries and all x86 tiers for EVEX/AVX-512, VEX AVX-VNNI and AMX against their declared features, including baseline-only backend scoring. Release CI checks the actual CMake cache has native compilation off, then runs Parakeet on two seconds of audio with only the extracted AppImage's libraries available. The x86 job repeats it under Intel SDE `-icl`: AVX512-VNNI present, AVX-VNNI absent, as on the Ryzen 8700G in #82. It also generates a demo bundle with the shipped executable under SDE, covering Rust post-processing without a desktop or model installation.
+The Linux release workflow runs `scripts/linux/check-cpu-tiers.py` before stripping symbols. It checks the core libraries and all x86 tiers for EVEX/AVX-512, VEX AVX-VNNI and AMX against their declared features, including baseline-only backend scoring. The release job checks the actual CMake cache has native compilation off, then runs Parakeet on two seconds of audio with only the extracted AppImage's libraries available. The x86 job repeats it under Intel SDE `-icl`: AVX512-VNNI present, AVX-VNNI absent, as on the Ryzen 8700G in #82. It also generates a demo bundle with the shipped executable under SDE, covering Rust post-processing without a desktop or model installation.
 
-Linux previews are published manually from the checked AppImage artifacts as `linux-preview-N`, with `--prerelease --latest=false` and a combined `SHA256SUMS`. These tags do not trigger the `v*` release jobs, and neither the site nor the Sparkle appcast selects them.
+Linux previews can be published manually from checked AppImage artifacts as `linux-preview-N`, with `--prerelease --latest=false` and a combined `SHA256SUMS`. No tags trigger release workflows automatically, and neither the site nor the Sparkle appcast selects these previews.
+
+### AppImage update channels
+
+Settings › About › Channel selects Stable releases (default) or Latest main. Only an AppImage owned by the user and stored under their home directory auto-updates; a debug build, symlink or system-owned install stays untouched. At launch and hourly, Scrawl checks its selected feed. It downloads the matching architecture's AppImage, checks its SHA-256 against the release's checksum (Stable) or the main feed (Main), atomically swaps the executable, and keeps the previous image beside it. The running process stays on the old image; the new one starts at the next launch. Settings and the tray's Check for Updates… trigger the same check. Errors are logged without replacing the installed image.
+
+Stable reads the newest non-prerelease GitHub release on `simonvanlaak/scrawl`, which must include the Linux AppImage and its `.sha256` asset. **There is no such stable Linux release yet**, so Stable currently has nothing to install. Main reads `linux-main-feed/main-updates.json` on that repository. To publish a Main preview, manually dispatch the Linux release workflow on `main` with `publish_main=true` and an empty `tag`. It builds both architectures, runs the full Rust suite and packaged CPU smoke checks, uploads an immutable prerelease, then advances the feed only if that commit is still main. No preview is published before those checks pass. The feed is not populated until this workflow successfully runs on main. Main therefore tracks the latest *published* preview, not every commit. A user choosing Main accepts unreviewed code; channel changes install the chosen channel even if its version is lower.
 
 ## Building and testing
 

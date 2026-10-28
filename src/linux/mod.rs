@@ -25,6 +25,7 @@ pub mod portal;
 pub mod privacy;
 pub mod shell;
 pub mod shortcuts;
+pub mod update;
 pub mod x11;
 
 use std::ffi::OsString;

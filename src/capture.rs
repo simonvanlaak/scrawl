@@ -133,12 +133,7 @@ pub enum LiveOverlayEvent {
     Onboarding(crate::onboarding::Event),
     /// The Settings window: an action, fresh permission states, or the helper exiting.
     Settings(crate::settings::Event),
-    /// A ApparentKit recording was ingested from an iPhone and compiled into a `.apparent` bundle.
-    IngestedBundle {
-        dir: PathBuf,
-        bundle: Box<crate::model::ApparentBundle>,
-        status: Option<String>,
-    },
+
 }
 
 // Carbon HIToolbox modifier bits. The shortcut is stored with them on every platform.

@@ -780,6 +780,16 @@
       "docs": ["README.md#agents"]
     },
     {
+      "id": "cli-timed-video-only",
+      "group": "cli",
+      "name": "Timed screen recording telemetry contract",
+      "says": "Timed CLI screen capture saves a movie and optional audio but does not collect clicks or Shift ink; new bundles mark this limitation in the manifest and summary. The app shortcut collects interactions when permission allows.",
+      "status": "main",
+      "added": "2026-10-28",
+      "platforms": ["mac", "linux"],
+      "docs": ["docs/capture.md", "docs/linux.md"]
+    },
+    {
       "id": "skill",
       "group": "cli",
       "name": "Agent skill",

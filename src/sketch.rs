@@ -814,6 +814,9 @@ pub(crate) fn summary_markdown_with_visual_policy(
     {
         out.push_str(&format!("Note: {}\n", note.trim()));
     }
+    if bundle.interaction_telemetry == Some(crate::model::InteractionTelemetry::VideoOnly) {
+        out.push_str("Interaction context: timed CLI video only; clicks and Shift ink were not collected. A visible click in the video will not appear in events, marks or click keyframes. Use the app's recording shortcut for interaction context.\n");
+    }
     if let Some(warning) = &bundle.image_quality_warning {
         out.push_str(&format!("Image quality: {warning}\n"));
     }
@@ -2103,6 +2106,7 @@ mod tests {
                 t: 4000,
                 shortcut: "⌘K".into(),
             }],
+            interaction_telemetry: None,
             keyframes: vec![Keyframe {
                 index: 1,
                 t: 5100,

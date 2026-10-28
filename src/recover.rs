@@ -49,6 +49,8 @@ pub struct Unfinished {
     pub strokes: Vec<Stroke>,
     #[serde(default)]
     pub events: Vec<InteractionEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_telemetry: Option<crate::model::InteractionTelemetry>,
     #[serde(default)]
     pub note: Option<String>,
     #[serde(default)]
@@ -151,6 +153,7 @@ pub fn orphan_recipe(video: &crate::helper::Probe, audio_ms: Option<u64>) -> Unf
         video_offset_ms: offset,
         strokes: Vec::new(),
         events: Vec::new(),
+        interaction_telemetry: None,
         note: None,
         windows: Vec::new(),
         cursor: Vec::new(),

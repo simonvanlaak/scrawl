@@ -2828,6 +2828,7 @@ impl ApparentCoordinator {
                         recorded_audio,
                         None,
                         activity,
+                        None,
                     )
                     .map(|(dir, bundle, summary)| {
                         let (bundle, summary) = whiteboard::finish_handoff(

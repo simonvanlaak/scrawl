@@ -315,7 +315,9 @@ pub(super) fn place_hud_pill(point: [f64; 2]) {
     let (Some(id), Some(rect)) = (own_window(&PILL_WINDOW), pill_rect_at(point)) else {
         return;
     };
-    std::thread::spawn(move || x11::place(id, rect));
+    // Moving through detached threads lets an older placement run after a newer one when
+    // the pointer crosses displays quickly. Keep the capsule's move in event order.
+    x11::place(id, rect);
 }
 
 /// The pill's window. Linux has no native shell for it: GPUI draws the capsule, its shadow and

@@ -86,6 +86,16 @@
       "docs": ["docs/capture.md"]
     },
     {
+      "id": "linux-hyprland-multi-display",
+      "group": "start",
+      "name": "Output-bound Region on Hyprland",
+      "says": "A multi-output Hyprland capture checks that the sharing portal selected the chosen output, and a Region is cropped within its stream.",
+      "status": "main",
+      "platforms": ["linux"],
+      "note": "A second-output Region was captured on a two-output Omarchy VM at 1x. Pointer-follow behavior in both directions, other Wayland portal backends and mirrored layouts are not verified.",
+      "docs": ["docs/linux.md", "docs/capture.md"]
+    },
+    {
       "id": "recent-area",
       "group": "start",
       "name": "What to record and Recent Area",

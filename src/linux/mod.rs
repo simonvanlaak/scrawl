@@ -38,6 +38,12 @@ pub use x11::{
     primary_monitor, top_level_windows, window_info,
 };
 
+/// RandR's name atom identifies an output while this X server is running. A list index does
+/// not: hotplug or changing the primary output can reorder monitors during a portal dialog.
+pub fn monitor_id(monitor: &Monitor) -> u32 {
+    monitor.handle as u32
+}
+
 static WAYLAND_DISPLAY: OnceLock<Option<OsString>> = OnceLock::new();
 
 /// Called first thing in `main`, before any thread starts: remembers the Wayland display (for

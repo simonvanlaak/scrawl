@@ -922,25 +922,20 @@ fn apply_pill_layer_effect(
         shell.setShadowRadius(14.0);
         shell.setShadowOffset(NSSize::new(0.0, -5.0));
         unsafe {
-            let bg_ns = NSColor::colorWithSRGBRed_green_blue_alpha(
-                20.0 / 255.0,
-                20.0 / 255.0,
-                22.0 / 255.0,
-                0.96,
-            );
+            let theme = crate::native::pill::system_theme();
+            let ns_color = |rgb: u32, alpha: f64| {
+                NSColor::colorWithSRGBRed_green_blue_alpha(
+                    f64::from((rgb >> 16) & 255) / 255.0,
+                    f64::from((rgb >> 8) & 255) / 255.0,
+                    f64::from(rgb & 255) / 255.0,
+                    alpha,
+                )
+            };
+            let bg_ns = ns_color(theme.surface(), 1.0);
             let bg_cg: *const OpaqueCGColor = msg_send![&*bg_ns, CGColor];
             let _: () = msg_send![&**shell, setBackgroundColor: bg_cg];
 
-            let border_ns = if is_completed {
-                NSColor::colorWithSRGBRed_green_blue_alpha(
-                    105.0 / 255.0,
-                    216.0 / 255.0,
-                    159.0 / 255.0,
-                    0.34,
-                )
-            } else {
-                NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 1.0, 1.0, 0.12)
-            };
+            let border_ns = ns_color(theme.line(), if is_completed { 0.30 } else { 0.24 });
             let border_cg: *const OpaqueCGColor = msg_send![&*border_ns, CGColor];
             let _: () = msg_send![&**shell, setBorderColor: border_cg];
         }

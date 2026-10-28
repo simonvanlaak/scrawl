@@ -1,10 +1,111 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 const SAMPLE_RATE: u32 = 16_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputWarning {
+    Unavailable,
+    Stopped,
+    VeryQuiet,
+}
+
+impl InputWarning {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unavailable => "Mic unavailable",
+            Self::Stopped => "Mic stopped",
+            Self::VeryQuiet => "Mic very quiet",
+        }
+    }
+
+    pub fn announcement(self) -> &'static str {
+        match self {
+            Self::Unavailable => "Microphone unavailable; screen recording continues",
+            Self::Stopped => "Microphone input stopped; screen recording continues",
+            Self::VeryQuiet => "Microphone input is very quiet; screen recording continues",
+        }
+    }
+}
+
+/// Actual captured samples drive this warning; the pill's animation is not a meter.
+struct InputHealth {
+    started: Instant,
+    last_sample: Option<Instant>,
+    last_audible: Instant,
+    warning: Option<InputWarning>,
+    recovering_since: Option<Instant>,
+    open_failed: bool,
+}
+
+impl InputHealth {
+    fn new(now: Instant) -> Self {
+        Self {
+            started: now,
+            last_sample: None,
+            last_audible: now,
+            warning: None,
+            recovering_since: None,
+            open_failed: false,
+        }
+    }
+
+    fn sample(&mut self, now: Instant, peak: f32) {
+        self.last_sample = Some(now);
+        if peak > 0.005 {
+            self.last_audible = now;
+        }
+        match self.warning {
+            Some(InputWarning::Stopped) => { self.recovering_since.get_or_insert(now); }
+            Some(InputWarning::VeryQuiet) if peak > 0.005 => {
+                self.recovering_since.get_or_insert(now);
+            }
+            Some(InputWarning::VeryQuiet) => self.recovering_since = None,
+            _ => {}
+        }
+    }
+
+    fn open_failed(&mut self) {
+        self.open_failed = true;
+        self.warning = Some(InputWarning::Unavailable);
+    }
+
+    fn stream_failed(&mut self) {
+        self.last_sample = None;
+        self.recovering_since = None;
+        self.warning = Some(InputWarning::Stopped);
+    }
+
+    fn status(&mut self, now: Instant) -> Option<InputWarning> {
+        if self.open_failed {
+            return Some(InputWarning::Unavailable);
+        }
+        let stalled = self.last_sample.map_or(
+            now.duration_since(self.started) >= Duration::from_secs(4),
+            |last| now.duration_since(last) >= Duration::from_secs(3),
+        );
+        if stalled {
+            self.warning = Some(InputWarning::Stopped);
+            self.recovering_since = None;
+        } else if self.warning.is_some()
+            && self.recovering_since.is_some_and(|since| now.duration_since(since) >= Duration::from_secs(1))
+        {
+            self.warning = None;
+            self.recovering_since = None;
+        }
+        if self.warning.is_none()
+            && self.last_sample.is_some()
+            && now.duration_since(self.last_audible) >= Duration::from_secs(20)
+        {
+            self.warning = Some(InputWarning::VeryQuiet);
+        }
+        self.warning
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RecordedAudio {
@@ -22,6 +123,7 @@ pub struct AudioRecorder {
     stop_sender: Option<std::sync::mpsc::Sender<()>>,
     samples: Arc<Mutex<Vec<f32>>>,
     error: Arc<Mutex<Option<String>>>,
+    health: Arc<Mutex<InputHealth>>,
     live: Option<crate::live_transcribe::Live>,
     #[cfg(target_os = "linux")]
     pause: Option<crate::pause_transcribe::Pause>,
@@ -32,14 +134,17 @@ impl AudioRecorder {
         let started = std::time::Instant::now();
         let samples = Arc::new(Mutex::new(Vec::new()));
         let error = Arc::new(Mutex::new(None));
+        let health = Arc::new(Mutex::new(InputHealth::new(started)));
         let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
         let worker_samples = Arc::clone(&samples);
         let worker_error = Arc::clone(&error);
+        let worker_health = Arc::clone(&health);
         let worker = std::thread::Builder::new()
             .name("scrawl-audio".into())
             .spawn(move || {
                 let stream =
-                    Self::open_stream(worker_samples, worker_error).inspect_err(|error| {
+                    Self::open_stream(worker_samples, worker_error, Arc::clone(&worker_health)).inspect_err(|error| {
+                        if let Ok(mut health) = worker_health.lock() { health.open_failed(); }
                         crate::capture::scrawl_log(format!("Microphone startup failed: {error:#}"));
                     })?;
                 crate::ui::start_metric("audio_ready_ms", started);
@@ -68,6 +173,7 @@ impl AudioRecorder {
             stop_sender: Some(stop_sender),
             samples,
             error,
+            health,
             live,
             #[cfg(target_os = "linux")]
             pause,
@@ -79,6 +185,7 @@ impl AudioRecorder {
     fn open_stream(
         samples: Arc<Mutex<Vec<f32>>>,
         error: Arc<Mutex<Option<String>>>,
+        health: Arc<Mutex<InputHealth>>,
     ) -> Result<cpal::Stream> {
         let choice = crate::mic::choice();
         if let Some(choice) = &choice {
@@ -88,7 +195,7 @@ impl AudioRecorder {
                     name: device_name(&device).unwrap_or_else(|| choice.name.clone()),
                 };
                 crate::mic::note_pick(&crate::mic::Pick::Chosen(&input));
-                match Self::open_device(&device, samples.clone(), error.clone()) {
+                match Self::open_device(&device, samples.clone(), error.clone(), health.clone()) {
                     Ok(stream) => {
                         crate::capture::scrawl_log(format!("Microphone: {}", input.name));
                         return Ok(stream);
@@ -117,7 +224,7 @@ impl AudioRecorder {
         let device = cpal::default_host()
             .default_input_device()
             .context("No microphone is available")?;
-        let stream = Self::open_device(&device, samples, error)?;
+        let stream = Self::open_device(&device, samples, error, health)?;
         crate::capture::scrawl_log(format!(
             "Microphone: {} (default)",
             device_name(&device).unwrap_or_default()
@@ -129,6 +236,7 @@ impl AudioRecorder {
         device: &cpal::Device,
         samples: Arc<Mutex<Vec<f32>>>,
         error: Arc<Mutex<Option<String>>>,
+        health: Arc<Mutex<InputHealth>>,
     ) -> Result<cpal::Stream> {
         let supported = device.default_input_config()?;
         let config = supported.config();
@@ -144,7 +252,7 @@ impl AudioRecorder {
         );
         macro_rules! stream {
             ($ty:ty) => {
-                input_stream::<$ty>(&device, config, samples.clone(), error.clone())?
+                input_stream::<$ty>(&device, config, samples.clone(), error.clone(), health.clone())?
             };
         }
         let stream = match supported.sample_format() {
@@ -164,6 +272,10 @@ impl AudioRecorder {
         };
         stream.play().context("Could not start microphone")?;
         Ok(stream)
+    }
+
+    pub fn warning(&self) -> Option<InputWarning> {
+        self.health.lock().ok()?.status(Instant::now())
     }
 
     fn join_worker(&mut self) -> Result<()> {
@@ -227,6 +339,7 @@ fn input_stream<T>(
     config: cpal::StreamConfig,
     samples: Arc<Mutex<Vec<f32>>>,
     error: Arc<Mutex<Option<String>>>,
+    health: Arc<Mutex<InputHealth>>,
 ) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample,
@@ -236,12 +349,15 @@ where
     let rate = config.sample_rate;
     let mut phase = 0_u32;
     let mut sum = 0.0_f64;
+    let callback_health = Arc::clone(&health);
     Ok(device.build_input_stream::<T, _, _>(
         config,
         move |data, _| {
             let Ok(mut output) = samples.lock() else {
                 return;
             };
+            let before = output.len();
+            let mut peak = 0.0_f32;
             for frame in data.chunks_exact(channels) {
                 let mono = frame
                     .iter()
@@ -258,10 +374,17 @@ where
                     phase += weight;
                     remaining -= weight;
                     if phase == rate {
-                        output.push((sum / rate as f64) as f32);
+                        let value = (sum / rate as f64) as f32;
+                        peak = peak.max(value.abs());
+                        output.push(value);
                         phase = 0;
                         sum = 0.0;
                     }
+                }
+            }
+            if output.len() > before {
+                if let Ok(mut health) = callback_health.lock() {
+                    health.sample(Instant::now(), peak);
                 }
             }
         },
@@ -272,6 +395,9 @@ where
             }
             if let Ok(mut error) = error.lock() {
                 *error = Some(err.to_string());
+            }
+            if let Ok(mut health) = health.lock() {
+                health.stream_failed();
             }
         },
         None,
@@ -409,6 +535,54 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn input_health_distinguishes_open_failure_stall_and_sustained_silence() {
+        let start = std::time::Instant::now();
+        let mut h = InputHealth::new(start);
+        assert_eq!(h.status(start + Duration::from_secs(2)), None);
+        assert_eq!(h.status(start + Duration::from_secs(5)), Some(InputWarning::Stopped));
+        h.open_failed();
+        assert_eq!(h.status(start + Duration::from_secs(6)), Some(InputWarning::Unavailable));
+
+        let mut h = InputHealth::new(start);
+        h.sample(start + Duration::from_secs(1), 0.0);
+        assert_eq!(h.status(start + Duration::from_secs(3)), None);
+        h.sample(start + Duration::from_secs(4), 0.0);
+        assert_eq!(h.status(start + Duration::from_secs(6)), None);
+        h.sample(start + Duration::from_secs(21), 0.0);
+        assert_eq!(h.status(start + Duration::from_secs(21)), Some(InputWarning::VeryQuiet));
+    }
+
+    #[test]
+    fn input_health_recovers_without_flicker_or_false_pause_alarm() {
+        let start = std::time::Instant::now();
+        let mut h = InputHealth::new(start);
+        for second in 1..=10 {
+            h.sample(start + Duration::from_secs(second), 0.2);
+            assert_eq!(h.status(start + Duration::from_secs(second)), None);
+        }
+        assert_eq!(h.status(start + Duration::from_secs(12)), None);
+        assert_eq!(h.status(start + Duration::from_secs(14)), Some(InputWarning::Stopped));
+        h.sample(start + Duration::from_secs(15), 0.1);
+        assert_eq!(h.status(start + Duration::from_secs(15)), Some(InputWarning::Stopped));
+        h.sample(start + Duration::from_secs(16), 0.1);
+        assert_eq!(h.status(start + Duration::from_secs(16)), None);
+        h.sample(start + Duration::from_secs(17), 0.0);
+        assert_eq!(h.status(start + Duration::from_secs(19)), None);
+        h.stream_failed();
+        assert_eq!(h.status(start + Duration::from_secs(19)), Some(InputWarning::Stopped));
+
+        let mut h = InputHealth::new(start);
+        h.sample(start + Duration::from_secs(21), 0.0);
+        assert_eq!(h.status(start + Duration::from_secs(21)), Some(InputWarning::VeryQuiet));
+        h.sample(start + Duration::from_secs(22), 0.1);
+        h.sample(start + Duration::from_millis(22_500), 0.0);
+        h.sample(start + Duration::from_secs(23), 0.1);
+        assert_eq!(h.status(start + Duration::from_secs(23)), Some(InputWarning::VeryQuiet));
+        h.sample(start + Duration::from_secs(24), 0.1);
+        assert_eq!(h.status(start + Duration::from_secs(24)), None);
+    }
+
+    #[test]
     fn stop_joins_worker_before_reading_its_last_samples() {
         let samples = Arc::new(Mutex::new(Vec::new()));
         let output = Arc::clone(&samples);
@@ -427,6 +601,7 @@ mod tests {
             stop_sender: Some(stop_sender),
             samples,
             error: Arc::new(Mutex::new(None)),
+            health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
             #[cfg(target_os = "linux")]
             pause: None,
@@ -449,6 +624,7 @@ mod tests {
             stop_sender: None,
             samples: Arc::new(Mutex::new(samples)),
             error: Arc::new(Mutex::new(Some("Device disconnected".into()))),
+            health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
             #[cfg(target_os = "linux")]
             pause: None,
@@ -464,6 +640,7 @@ mod tests {
             stop_sender: None,
             samples: Arc::new(Mutex::new(Vec::new())),
             error: Arc::new(Mutex::new(None)),
+            health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
             #[cfg(target_os = "linux")]
             pause: None,

@@ -14,6 +14,7 @@
 //!   across `Recording (chips) -> Selecting`) travel on a `0.24 s` zero-bounce spring with up to
 //!   `4 pt` blur in transit that clears before landing.
 
+use crate::audio::InputWarning;
 use crate::ui::SelectionMode;
 
 // ─── Geometry (pt in the fixed 640 × 84 panel) ──────────────────────────────────────────────
@@ -334,10 +335,12 @@ pub enum ElemId {
     /// The Completed island's sessions one click away (smart routing).
     Route0 = 15,
     Route1 = 16,
+    MicWarning = 17,
+    DividerWarning = 18,
 }
 
 impl ElemId {
-    pub const COUNT: usize = 17;
+    pub const COUNT: usize = 19;
     pub const ROUTES: [ElemId; 2] = [Self::Route0, Self::Route1];
     pub const ALL: [ElemId; Self::COUNT] = [
         Self::Lead,
@@ -357,6 +360,8 @@ impl ElemId {
         Self::Inspect,
         Self::Route0,
         Self::Route1,
+        Self::MicWarning,
+        Self::DividerWarning,
     ];
 
     pub const fn trace_key(self) -> &'static str {
@@ -378,6 +383,8 @@ impl ElemId {
             Self::Inspect => "inspect",
             Self::Route0 => "route:0",
             Self::Route1 => "route:1",
+            Self::MicWarning => "mic.warning",
+            Self::DividerWarning => "divider.mic",
         }
     }
 
@@ -403,14 +410,15 @@ impl ElemId {
     pub const fn is_interactive(self) -> bool {
         !matches!(
             self,
-            Self::DividerLead | Self::DividerClose | Self::Processing
+            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing
         )
     }
 
     pub const fn accessibility_label(self) -> &'static str {
         match self {
             Self::Lead => "Recording timer",
-            Self::DividerLead | Self::DividerClose => "",
+            Self::DividerLead | Self::DividerClose | Self::DividerWarning => "",
+            Self::MicWarning => "Microphone input warning",
             Self::ChipArea => "Area",
             Self::ChipWindow => "Window",
             Self::ChipScreen => "Screen",
@@ -502,6 +510,7 @@ pub struct Metrics {
     pub inspect: f32,
     pub clock_000: f32,
     pub clock_0000: f32,
+    pub mic_warning: [f32; 3],
 }
 
 impl Default for Metrics {
@@ -519,11 +528,20 @@ impl Default for Metrics {
             inspect: 47.0,
             clock_000: 29.0,
             clock_0000: 37.0,
+            mic_warning: [92.0, 73.0, 85.0],
         }
     }
 }
 
 impl Metrics {
+    fn mic_warning_width(&self, warning: InputWarning) -> f32 {
+        self.mic_warning[match warning {
+            InputWarning::Unavailable => 0,
+            InputWarning::Stopped => 1,
+            InputWarning::VeryQuiet => 2,
+        }]
+    }
+
     pub fn mode_label(&self, mode: SelectionMode) -> f32 {
         match mode {
             SelectionMode::Area => self.area,
@@ -611,6 +629,16 @@ pub fn layout_of(
     labels: LabelWidths,
     m: &Metrics,
 ) -> (Layout, Vec<LayoutItem>) {
+    layout_of_warning(pres, clock, labels, m, None)
+}
+
+fn layout_of_warning(
+    pres: &Pres,
+    clock: &str,
+    labels: LabelWidths,
+    m: &Metrics,
+    warning: Option<InputWarning>,
+) -> (Layout, Vec<LayoutItem>) {
     let y0 = TOP + ISLAND_INSET;
     let mut raw: Vec<(ElemId, f32, f32, f32, bool)> = Vec::with_capacity(8);
     // (id, width, round, active_level, enabled)
@@ -645,6 +673,11 @@ pub fn layout_of(
             let lead_w = CHIP_H + clock_w + LEAD_TRAIL;
             raw.push((ElemId::Lead, lead_w, CHIP_CORE_ROUND, 0.0, true));
             raw.push((ElemId::DividerLead, DIVIDER_W, 0.0, 0.0, false));
+            if let Some(warning) = warning {
+                raw.push((ElemId::MicWarning, Metrics::chip_width(m.mic_warning_width(warning)),
+                    CHIP_CORE_ROUND, 0.0, false));
+                raw.push((ElemId::DividerWarning, DIVIDER_W, 0.0, 0.0, false));
+            }
             if *chips {
                 for &seg in SelectionMode::available(*has_iphone) {
                     raw.push((
@@ -810,6 +843,7 @@ pub struct FrameState {
     pub shape: Silhouette,
     pub ghost: Option<Silhouette>,
     pub is_completed: bool,
+    pub mic_warning: Option<InputWarning>,
     pub content_blur: f32,
     pub content_alpha: f32,
     pub elems: Vec<FrameElem>,
@@ -840,6 +874,7 @@ pub struct PillModel {
     pub clock: String,
     pub labels: LabelWidths,
     pub metrics: Metrics,
+    pub mic_warning: Option<InputWarning>,
 }
 
 impl PillModel {
@@ -870,6 +905,16 @@ impl PillModel {
             clock: "0:00".to_owned(),
             labels: LabelWidths::default(),
             metrics,
+            mic_warning: None,
+        }
+    }
+
+    pub fn set_mic_warning(&mut self, warning: Option<InputWarning>) {
+        if self.mic_warning != warning {
+            self.mic_warning = warning;
+            if matches!(self.pres, Pres::Recording { .. }) {
+                self.apply_geometry();
+            }
         }
     }
 
@@ -882,8 +927,8 @@ impl PillModel {
         let was_visible = !matches!(self.pres, Pres::Hidden);
         let now_hidden = matches!(next, Pres::Hidden);
         let (prev_lay, prev_items) =
-            layout_of(&self.geo_pres, &self.clock, self.labels, &self.metrics);
-        let (next_lay, next_items) = layout_of(&next, &self.clock, self.labels, &self.metrics);
+            layout_of_warning(&self.geo_pres, &self.clock, self.labels, &self.metrics, self.mic_warning);
+        let (next_lay, next_items) = layout_of_warning(&next, &self.clock, self.labels, &self.metrics, self.mic_warning);
 
         // Update element metadata for the new presentation immediately (e.g. highlight or enabled state).
         if !now_hidden {
@@ -933,7 +978,7 @@ impl PillModel {
             && (self.shell_alpha.x < 0.02 || matches!(self.geo_pres, Pres::Hidden) && self.shell_alpha.x < 0.08);
         self.entering_from_hidden = from_hidden;
         self.geo_pres = next.clone();
-        let (lay, items) = layout_of(&next, &self.clock, self.labels, &self.metrics);
+        let (lay, items) = layout_of_warning(&next, &self.clock, self.labels, &self.metrics, self.mic_warning);
 
         if from_hidden && !self.reduced {
             // Entry in place (no lozenge growth): snap width/height to the entering state's layout
@@ -1121,7 +1166,7 @@ impl PillModel {
         if matches!(self.pres, Pres::Hidden) {
             return false;
         }
-        let (lay, _) = layout_of(&self.pres, &self.clock, self.labels, &self.metrics);
+        let (lay, _) = layout_of_warning(&self.pres, &self.clock, self.labels, &self.metrics, self.mic_warning);
         let slop = 6.0;
         x >= lay.l - slop && x <= lay.r + slop && y >= lay.t - slop && y <= lay.b + slop
     }
@@ -1131,7 +1176,7 @@ impl PillModel {
         if matches!(self.pres, Pres::Hidden) {
             return None;
         }
-        let (_, items) = layout_of(&self.pres, &self.clock, self.labels, &self.metrics);
+        let (_, items) = layout_of_warning(&self.pres, &self.clock, self.labels, &self.metrics, self.mic_warning);
         for item in &items {
             if !item.id.is_interactive() || !item.enabled {
                 continue;
@@ -1293,8 +1338,8 @@ impl PillModel {
         };
         let settled_geo = self.geo_pres == self.pres;
         let grown = self.grown_enough();
-        let (_, geo_items) = layout_of(&self.geo_pres, &self.clock, self.labels, &self.metrics);
-        let (_, active_items) = layout_of(&self.pres, &self.clock, self.labels, &self.metrics);
+        let (_, geo_items) = layout_of_warning(&self.geo_pres, &self.clock, self.labels, &self.metrics, self.mic_warning);
+        let (_, active_items) = layout_of_warning(&self.pres, &self.clock, self.labels, &self.metrics, self.mic_warning);
 
         let inn = if reduced {
             SpringCfg::new(REDUCED_FADE_S, 0.0)
@@ -1579,6 +1624,7 @@ impl PillModel {
             shape,
             ghost,
             is_completed: matches!(self.geo_pres, Pres::Completed { .. }),
+            mic_warning: self.mic_warning,
             content_blur: max_blur,
             content_alpha: max_alpha,
             elems,
@@ -2102,6 +2148,33 @@ mod tests {
         );
         let last = items.last().unwrap().rect;
         assert!((layout.r - (last[0] + last[2]) - ISLAND_INSET).abs() < 0.5);
+    }
+
+    #[test]
+    fn mic_warning_stays_inline_without_replacing_recording_or_finish() {
+        for warning in [InputWarning::Unavailable, InputWarning::Stopped, InputWarning::VeryQuiet] {
+            for chips in [false, true] {
+                let pres = Pres::Recording { chips, has_iphone: true };
+                let (layout, items) = layout_of_warning(
+                    &pres, "0:00", LabelWidths::default(), &Metrics::default(), Some(warning),
+                );
+                let ids: Vec<_> = items.iter().map(|item| item.id).collect();
+                assert_eq!(ids[0], ElemId::Lead);
+                assert!(ids.contains(&ElemId::MicWarning));
+                assert!(ids.contains(&ElemId::DividerWarning));
+                assert!(ids.iter().position(|id| *id == ElemId::MicWarning).unwrap()
+                    < ids.iter().position(|id| *id == if chips { ElemId::Close } else { ElemId::Finish }).unwrap());
+                assert!(chips || ids.contains(&ElemId::Finish));
+                assert!(layout.width() < PANEL_W, "warning cut off recording controls");
+            }
+        }
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+        model.set_mic_warning(Some(InputWarning::Stopped));
+        assert!(model.frame().mic_warning.is_some());
+        model.set_pres(Pres::Processing);
+        model.set_mic_warning(None);
+        assert!(model.frame().mic_warning.is_none());
     }
 
     #[test]

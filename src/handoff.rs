@@ -304,10 +304,9 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     if crate::linux::hyprland::running() && crate::linux::wayland_session() {
-        let focused = crate::linux::hyprland::focused_window()?;
-        if manual_paste_backend(true, &focused.class) == ManualPasteBackend::TargetedT3 {
-            // Reuse the window/clipboard guards from the unsent draft trial rather than
-            // offering an image before the unavailable RemoteDesktop portal refuses Ctrl+V.
+        if !crate::capture::is_frontmost_terminal() {
+            // On Hyprland the targeted shortcut works without the RemoteDesktop portal.
+            // Use it for any focused GUI composer, not only one named application.
             return crate::linux::auto_paste::paste_bundle(bundle_dir);
         }
     }
@@ -342,22 +341,6 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     std::thread::sleep(std::time::Duration::from_millis(20));
     paste_synthetic_checked()?;
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-#[derive(Debug, PartialEq, Eq)]
-enum ManualPasteBackend {
-    Portal,
-    TargetedT3,
-}
-
-#[cfg(target_os = "linux")]
-fn manual_paste_backend(hyprland_wayland: bool, class: &str) -> ManualPasteBackend {
-    if hyprland_wayland && class == "com.t3tools.T3Code" {
-        ManualPasteBackend::TargetedT3
-    } else {
-        ManualPasteBackend::Portal
-    }
 }
 
 /// Automatic delivery never activates another app, clicks a target, or submits the draft.
@@ -1989,23 +1972,6 @@ fn existing_keyframes(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn hyprland_t3_manual_paste_avoids_the_absent_remote_desktop_portal() {
-        assert_eq!(
-            manual_paste_backend(true, "com.t3tools.T3Code"),
-            ManualPasteBackend::TargetedT3
-        );
-        assert_eq!(
-            manual_paste_backend(false, "com.t3tools.T3Code"),
-            ManualPasteBackend::Portal
-        );
-        assert_eq!(
-            manual_paste_backend(true, "firefox"),
-            ManualPasteBackend::Portal
-        );
-    }
 
     #[cfg(target_os = "linux")]
     #[test]

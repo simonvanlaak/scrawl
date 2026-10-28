@@ -42,6 +42,7 @@ for library in "$(dirname "$binary")"/libggml-cpu*.so; do
 done
 
 cd "$out"
+install -Dm755 "$root/scripts/scrawl-restore-clipboard.py" "$appdir/usr/bin/scrawl-restore-clipboard.py"
 LDAI_OUTPUT="Scrawl-$arch.AppImage" linuxdeploy \
   --appdir "$appdir" \
   --executable "$binary" \

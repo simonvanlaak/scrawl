@@ -84,9 +84,11 @@ const SEG_ICON_GAP: f32 = 5.0;
 // The live warning and optional input meter need room without clipping Finish.
 const PILL_WINDOW_W: f32 = 640.0;
 #[cfg(target_os = "linux")]
-const AUDIO_EQUALIZER: &str = "audioEqualizer";
-#[cfg(target_os = "linux")]
 const EQUALIZER_W: f32 = 28.0;
+#[cfg(target_os = "linux")]
+fn recording_equalizer_enabled() -> bool {
+    true
+}
 const PILL_WINDOW_H: f32 = 84.0;
 
 mod lab;
@@ -440,7 +442,7 @@ fn island_content_width(
                     + 2.0 * CHIP_PX + divider + 2.0 * CHIP_GAP
             });
             #[cfg(target_os = "linux")]
-            let meter_w = if crate::handoff::experiment(AUDIO_EQUALIZER) {
+            let meter_w = if recording_equalizer_enabled() {
                 EQUALIZER_W + CHIP_GAP
             } else { 0.0 };
             #[cfg(not(target_os = "linux"))]
@@ -3322,7 +3324,7 @@ impl Render for HudPillWindow {
             None
         };
         #[cfg(target_os = "linux")]
-        let equalizer_enabled = crate::handoff::experiment(AUDIO_EQUALIZER);
+        let equalizer_enabled = recording_equalizer_enabled();
         #[cfg(target_os = "linux")]
         if matches!(phase, IslandPhase::Recording) && equalizer_enabled {
             let input = coord.active_recording.as_ref().and_then(|recording| match &recording.source {
@@ -6039,6 +6041,12 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recording_equalizer_is_available_without_an_experiment() {
+        assert!(recording_equalizer_enabled());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

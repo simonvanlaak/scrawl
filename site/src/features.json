@@ -903,7 +903,7 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
+      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. On Windows, Check for Updates… opens the releases page. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
     },
     {

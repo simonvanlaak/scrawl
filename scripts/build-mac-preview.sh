@@ -5,10 +5,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${SCRAWL_PREVIEW_VERSION:?set SCRAWL_PREVIEW_VERSION (e.g. 0.123.1)}"
 BUILD_NUMBER="${SCRAWL_PREVIEW_BUILD_NUMBER:?set SCRAWL_PREVIEW_BUILD_NUMBER (e.g. 123.1)}"
+PUBLIC_KEY="${SCRAWL_PREVIEW_PUBLIC_KEY:?set the preview Sparkle EdDSA public key}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid preview version" >&2; exit 1; }
 [[ "$BUILD_NUMBER" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "Invalid preview build number" >&2; exit 1; }
+python3 - "$PUBLIC_KEY" <<'PY'
+import base64, sys
+try:
+    key = base64.b64decode(sys.argv[1], validate=True)
+    if len(key) != 32:
+        raise ValueError('wrong public key length')
+except ValueError:
+    sys.exit('Preview Sparkle public key must be 32 base64-encoded bytes')
+PY
 
 cd "$ROOT"
+SPARKLE_DIR="$(scripts/setup-sparkle.sh)"
 SCRAWL_PREVIEW_BUILD=1 SCRAWL_HELPER_BUNDLE_ID=dev.simonvanlaak.scrawl.preview.helper \
   cargo build --release --locked -j 3
 
@@ -16,13 +27,15 @@ dist="$ROOT/dist"
 app="$dist/Scrawl Preview.app"
 staging="$dist/preview-staging"
 name="Scrawl-Preview-${VERSION}-arm64.dmg"
+zip="Scrawl-Preview-${VERSION}-arm64.zip"
 rm -rf "$app" "$staging"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$staging"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks" "$staging"
 cp target/release/scrawl target/release/scrawl-helper "$app/Contents/MacOS/"
 chmod +x "$app/Contents/MacOS/scrawl" "$app/Contents/MacOS/scrawl-helper"
 if [[ -f assets/Scrawl.icns ]]; then
   cp assets/Scrawl.icns "$app/Contents/Resources/Scrawl.icns"
 fi
+ditto "$SPARKLE_DIR/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,12 +59,23 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSCameraUsageDescription</key><string>Scrawl mirrors and records a cabled iPhone's screen.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Scrawl transcribes your narration on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key><string>Scrawl reads the address of the browser tab you captured, to send a capture of a dev site to its project's session.</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUFeedURL</key><string>https://raw.githubusercontent.com/tryapparent/apparent/preview-mac-feed/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>${PUBLIC_KEY}</string>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
 </dict>
 </plist>
 PLIST
 
 plutil -lint "$app/Contents/Info.plist"
-# There is deliberately no Sparkle framework or production update feed in this app.
+sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+codesign --force --sign - "$sparkle/XPCServices/Installer.xpc"
+codesign --force --sign - --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+codesign --force --sign - "$sparkle/Autoupdate"
+codesign --force --sign - "$sparkle/Updater.app"
+codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - --identifier dev.simonvanlaak.scrawl.preview.helper "$app/Contents/MacOS/scrawl-helper"
 codesign --force --sign - --identifier dev.simonvanlaak.scrawl.preview "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
@@ -62,4 +86,5 @@ rm -f "$dist/$name" "$dist/$name.sha256"
 hdiutil create -quiet -fs HFS+ -format UDZO -volname "Scrawl Preview" -srcfolder "$staging" "$dist/$name"
 hdiutil verify "$dist/$name"
 (cd "$dist" && shasum -a 256 "$name" > "$name.sha256")
-printf 'Built %s\n' "$dist/$name"
+ditto -c -k --sequesterRsrc --keepParent "$app" "$dist/$zip"
+printf 'Built %s and %s\n' "$dist/$name" "$dist/$zip"

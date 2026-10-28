@@ -729,10 +729,18 @@ pub struct View {
     pub captures_dir: CapturesDirView,
     pub permissions: Vec<PermissionView>,
     pub updates: bool,
+    pub update_check: UpdateCheck,
     pub update_channel: &'static str,
     pub main_updates: bool,
     pub command_line: CommandLineView,
     pub skill_command: &'static str,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheck {
+    pub checking: bool,
+    pub message: Option<String>,
 }
 
 /// The "Command-line tool" row.
@@ -1095,6 +1103,7 @@ pub enum Action {
     Reopen,
     ShowCaptures,
     CheckForUpdates,
+    DismissUpdateCheck,
     /// "Show Welcome Tour" on About.
     Tour,
     /// Link `scrawl` into a folder on PATH, or remove that link.
@@ -1147,6 +1156,7 @@ pub struct Panel {
     captures_size: Option<u64>,
     /// The connected microphones, once listed (`mic::Watch` keeps them fresh).
     inputs: Option<crate::mic::Inputs>,
+    update_check: UpdateCheck,
 }
 
 impl Panel {
@@ -1165,6 +1175,18 @@ impl Panel {
 
     pub fn set_inputs(&mut self, inputs: crate::mic::Inputs) {
         self.inputs = Some(inputs);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn finish_update_check(&mut self, result: Result<&'static str, String>) {
+        self.update_check.checking = false;
+        self.update_check.message = Some(match result {
+            Ok("installed; restart Scrawl to use it") | Ok("already installed; restart Scrawl to use it") =>
+                "Update installed. Restart Scrawl to use it.".into(),
+            Ok("up to date") => "No new update is available on this channel.".into(),
+            Ok(other) => other.into(),
+            Err(error) => format!("Could not check for updates: {error}"),
+        });
     }
 
     pub fn on(&mut self, action: Action, host: &mut dyn Host) -> Effect {
@@ -1224,7 +1246,19 @@ impl Panel {
                 }
             }
             Action::ShowCaptures => Effect::ShowCaptures,
-            Action::CheckForUpdates => Effect::CheckForUpdates,
+            Action::CheckForUpdates => {
+                if cfg!(target_os = "linux") && self.update_check.checking {
+                    return Effect::None;
+                }
+                if cfg!(target_os = "linux") {
+                    self.update_check = UpdateCheck { checking: true, message: None };
+                }
+                Effect::CheckForUpdates
+            }
+            Action::DismissUpdateCheck => {
+                self.update_check.message = None;
+                Effect::None
+            }
             Action::Tour => Effect::Tour,
             Action::InstallCli => {
                 let result = crate::command_line::install(&host.command_line());
@@ -1528,6 +1562,7 @@ impl Panel {
                 })
                 .collect(),
             updates: updates_available(),
+            update_check: self.update_check.clone(),
             update_channel: if config.update_channel.as_deref() == Some("main") {
                 "main"
             } else {
@@ -1564,11 +1599,10 @@ fn updates_available() -> bool {
     true
 }
 
+#[cfg(not(target_os = "linux"))]
 fn check_for_updates() {
     #[cfg(target_os = "macos")]
     crate::sparkle::check_for_updates();
-    #[cfg(target_os = "linux")]
-    std::thread::spawn(crate::linux::update::check_now);
     #[cfg(target_os = "windows")]
     let _ = crate::handoff::open_path(Path::new(RELEASES_URL));
 }
@@ -1623,6 +1657,8 @@ pub enum Event {
     Grants(Grants),
     CapturesSize(u64),
     Microphones(crate::mic::Inputs),
+    #[cfg(target_os = "linux")]
+    UpdateChecked(Result<&'static str, String>),
     /// Something outside the window may have changed (Hex, the login item): redraw.
     Tick,
     Exited,
@@ -1773,6 +1809,11 @@ impl Session {
                 self.panel.set_inputs(inputs);
                 Effect::None
             }
+            #[cfg(target_os = "linux")]
+            Event::UpdateChecked(result) => {
+                self.panel.finish_update_check(result);
+                Effect::None
+            }
             Event::Tick => Effect::None,
             Event::Exited => {
                 self.panel.on(Action::Close, host);
@@ -1804,6 +1845,15 @@ impl Session {
                 Effect::None
             }
             Effect::CheckForUpdates => {
+                #[cfg(target_os = "linux")]
+                {
+                    let events = std::sync::Arc::clone(&self.events);
+                    std::thread::spawn(move || {
+                        let result = crate::linux::update::check_cli().map_err(|error| format!("{error:#}"));
+                        events(Event::UpdateChecked(result));
+                    });
+                }
+                #[cfg(not(target_os = "linux"))]
                 check_for_updates();
                 Effect::None
             }
@@ -1991,6 +2041,30 @@ mod tests {
                 also: Vec::new(),
             },
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn manual_update_check_shows_progress_immediately() {
+        let dir = TempDir::new("update-progress");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
+        let view = serde_json::to_value(panel.view(&host)).unwrap();
+        assert_eq!(view["updateCheck"]["checking"], true, "a click must have visible in-progress state");
+        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None, "do not start two checks");
+        panel.finish_update_check(Ok("up to date"));
+        let view = serde_json::to_value(panel.view(&host)).unwrap();
+        assert_eq!(view["updateCheck"]["checking"], false);
+        assert_eq!(view["updateCheck"]["message"], "No new update is available on this channel.");
+        panel.on(Action::DismissUpdateCheck, &mut host);
+        assert!(panel.view(&host).update_check.message.is_none());
+        panel.on(Action::CheckForUpdates, &mut host);
+        panel.finish_update_check(Ok("already installed; restart Scrawl to use it"));
+        assert!(panel.view(&host).update_check.message.unwrap().contains("Restart"));
+        panel.on(Action::CheckForUpdates, &mut host);
+        panel.finish_update_check(Err("feed unavailable".into()));
+        assert!(panel.view(&host).update_check.message.unwrap().contains("feed unavailable"));
     }
 
     #[test]

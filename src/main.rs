@@ -30,6 +30,8 @@ mod keyframes;
 #[cfg(target_os = "macos")]
 mod laser_overlay;
 mod live_transcribe;
+mod live_word_probe;
+mod live_word_warning;
 #[cfg(target_os = "linux")]
 mod pause_transcribe;
 mod mic;

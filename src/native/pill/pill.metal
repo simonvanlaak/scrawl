@@ -176,7 +176,7 @@ struct PillUniforms {
     float2 canvas_size;    // (960, 256) in points
     float scale;           // Retina backing scale (2.0)
     uint elem_count;
-    uint is_completed;
+    uint completion_state; // 0 = other, 1 = saved, 2 = saved with no transcribed words
     uint has_ghost;
     float4 shape_rect;     // l, t, r, b in panel points
     float4 shape_meta;     // radius, alpha, blur, is_glass (1.0 = glass, 0.0 = black)
@@ -326,18 +326,20 @@ fragment float4 pill_composite_fragment(
 
     // 5. Analytic 1px specular hairline border on the capsule rim (fades out while the shell is blurred
     //    on Entry/Exit so a sharp 1px ring never sits around a blurred capsule).
-    //    In glass mode, only tint the border green when Completed (NSGlassEffectView draws its own
+    //    In glass mode, tint the border only when Completed (NSGlassEffectView draws its own
     //    specular glass rim otherwise).
-    if (is_glass < 0.5 || u.is_completed != 0u) {
+    if (is_glass < 0.5 || u.completion_state != 0u) {
         float border_sharp = clamp(1.0 - u.shape_meta.z * 0.22, 0.0, 1.0);
         float border_cov = clamp(1.0 + 0.5 / u.scale + sdf, 0.0, 1.0)
                          * clamp(0.5 / u.scale - sdf, 0.0, 1.0)
                          * border_sharp;
         if (border_cov > 0.001) {
-            float3 border_rgb = (u.is_completed != 0u)
-                ? float3(105.0 / 255.0, 216.0 / 255.0, 159.0 / 255.0)
-                : float3(1.0, 1.0, 1.0);
-            float border_max_a = (u.is_completed != 0u) ? 0.42 : 0.12;
+            float3 border_rgb = u.completion_state == 2u
+                ? float3(245.0 / 255.0, 181.0 / 255.0, 68.0 / 255.0)
+                : u.completion_state == 1u
+                    ? float3(105.0 / 255.0, 216.0 / 255.0, 159.0 / 255.0)
+                    : float3(1.0, 1.0, 1.0);
+            float border_max_a = (u.completion_state != 0u) ? 0.42 : 0.12;
             float ba = border_cov * border_max_a * shape_alpha;
             out = blend_over(out, float4(border_rgb * ba, ba));
         }

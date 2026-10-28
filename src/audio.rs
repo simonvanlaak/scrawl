@@ -135,6 +135,7 @@ pub struct AudioRecorder {
     error: Arc<Mutex<Option<String>>>,
     health: Arc<Mutex<InputHealth>>,
     live: Option<crate::live_transcribe::Live>,
+    word_probe: Option<crate::live_word_probe::Probe>,
     #[cfg(target_os = "linux")]
     pause: Option<crate::pause_transcribe::Pause>,
 }
@@ -178,6 +179,8 @@ impl AudioRecorder {
                 })
                 .ok()
             });
+        let word_probe = crate::handoff::experiment("liveWordWarning")
+            .then(|| crate::live_word_probe::Probe::start(Arc::clone(&samples)));
         #[cfg(target_os = "linux")]
         let pause = crate::pause_transcribe::wanted()
             .then(|| crate::pause_transcribe::Pause::start(Arc::clone(&samples)))
@@ -191,9 +194,14 @@ impl AudioRecorder {
             error,
             health,
             live,
+            word_probe,
             #[cfg(target_os = "linux")]
             pause,
         })
+    }
+
+    pub fn live_word_state(&self) -> Option<crate::live_word_warning::State> {
+        self.word_probe.as_ref().map(|probe| probe.state())
     }
 
     /// The chosen microphone (`mic`), else the macOS default. A chosen device that is missing or
@@ -629,6 +637,7 @@ mod tests {
             error: Arc::new(Mutex::new(None)),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
+            word_probe: None,
             #[cfg(target_os = "linux")]
             pause: None,
         }
@@ -652,6 +661,7 @@ mod tests {
             error: Arc::new(Mutex::new(Some("Device disconnected".into()))),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
+            word_probe: None,
             #[cfg(target_os = "linux")]
             pause: None,
         };
@@ -668,6 +678,7 @@ mod tests {
             error: Arc::new(Mutex::new(None)),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
+            word_probe: None,
             #[cfg(target_os = "linux")]
             pause: None,
         };

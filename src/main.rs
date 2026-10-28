@@ -665,6 +665,33 @@ pub struct StageTimings {
     pub transcribe_ms: Option<u64>,
 }
 
+/// Local-only finish diagnostics. Parallel stages overlap; do not sum their durations.
+/// This contains no transcript, screen, filenames or window metadata.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FinishTrace {
+    version: u32,
+    stop_ms: Option<u64>,
+    audio_ms: Option<u64>,
+    candidates_ms: Option<u64>,
+    transcribe_ms: Option<u64>,
+    select_ms: u64,
+    decode_ms: u64,
+    autocrop_ms: u64,
+    sheet_ms: u64,
+    write_ms: u64,
+    total_ms: u64,
+    prepared_visuals: bool,
+}
+
+fn save_finish_trace(bundle_dir: &Path, trace: &FinishTrace) -> Result<()> {
+    std::fs::write(
+        bundle_dir.join("finish-trace.json"),
+        serde_json::to_vec_pretty(trace)?,
+    )?;
+    Ok(())
+}
+
 /// Pre-rendered keyframe visuals and encoded PNGs computed while transcription is running.
 pub struct PreparedVisuals {
     pub keyframes: Vec<model::Keyframe>,
@@ -1371,7 +1398,24 @@ pub fn build_bundle_from_parts(
         format!("write {write_ms}ms"),
         format!("total {total_ms}ms"),
     ]);
-    capture::scrawl_log(format!("finish timings: {}", parts.join(" · ")));
+    capture::scrawl_log(format!("finish timings: {} · {}", bundle.id, parts.join(" · ")));
+    let trace = FinishTrace {
+        version: 1,
+        stop_ms: extras.timings.stop_ms,
+        audio_ms: extras.timings.audio_ms,
+        candidates_ms: extras.timings.candidates_ms,
+        transcribe_ms: extras.timings.transcribe_ms,
+        select_ms,
+        decode_ms,
+        autocrop_ms,
+        sheet_ms,
+        write_ms,
+        total_ms,
+        prepared_visuals: matches_prepared,
+    };
+    if let Err(error) = save_finish_trace(bundle_dir, &trace) {
+        capture::scrawl_log(format!("Could not save finish trace: {error:#}"));
+    }
     if bench && !matches_prepared {
         for (name, elapsed) in [
             ("selection_ms", selected_at - started),
@@ -2456,6 +2500,47 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_bundle_saves_finish_trace_without_configuration() {
+        let dir = std::env::temp_dir().join(format!("{}.scrawl", make_bundle_id()));
+        let (built, _, _) = generate_demo_bundle(Some(dir.clone())).unwrap();
+        assert_eq!(built, dir);
+        let trace: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("finish-trace.json")).unwrap()).unwrap();
+        assert_eq!(trace["version"], 1);
+        assert!(trace["totalMs"].is_u64());
+        assert!(dir.join("scrawl.json").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn finish_trace_contains_only_timings() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        std::fs::create_dir_all(&dir).unwrap();
+        let trace = FinishTrace {
+            version: 1,
+            stop_ms: Some(8),
+            audio_ms: None,
+            candidates_ms: None,
+            transcribe_ms: Some(40),
+            select_ms: 2,
+            decode_ms: 3,
+            autocrop_ms: 4,
+            sheet_ms: 5,
+            write_ms: 6,
+            total_ms: 50,
+            prepared_visuals: false,
+        };
+        let path = dir.join("finish-trace.json");
+        save_finish_trace(&dir, &trace).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(json["transcribeMs"], 40);
+        assert_eq!(json["totalMs"], 50);
+        assert_eq!(json["preparedVisuals"], false);
+        assert_eq!(json.as_object().unwrap().len(), 12);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn artifact_failures_do_not_publish_a_manifest() {

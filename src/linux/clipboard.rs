@@ -119,12 +119,12 @@ pub fn restore_text_wayland(snapshot: TextSnapshot, offered: Option<(&str, &[u8]
 fn restore_helper() -> std::path::PathBuf {
     let adjacent = std::env::current_exe().ok().and_then(|exe| {
         exe.parent()
-            .map(|dir| dir.join("scrawl-restore-clipboard.py"))
+            .map(|dir| dir.join("apparent-restore-clipboard.py"))
     });
     if let Some(path) = adjacent.filter(|path| path.is_file()) {
         return path;
     }
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/scrawl-restore-clipboard.py")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/apparent-restore-clipboard.py")
 }
 
 fn copy_multi_wayland(entries: &[(String, Vec<u8>)]) -> Result<()> {
@@ -292,7 +292,7 @@ fn copy_wayland(mime: &str, bytes: &[u8]) -> Result<()> {
         )
         .stdin(Stdio::piped())
         // wl-copy forks a clipboard owner after acquiring the selection. It must not keep
-        // pipes to Scrawl open; waiting for captured stdout/stderr would never finish.
+        // pipes to Apparent open; waiting for captured stdout/stderr would never finish.
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn isolated_wayland_restores_exact_text_after_png_offer() {
-        if std::env::var_os("SCRAWL_TEST_WAYLAND_CLIPBOARD").is_none() {
+        if std::env::var_os("APPARENT_TEST_WAYLAND_CLIPBOARD").is_none() {
             return;
         }
         let original = b"synthetic original\n";
@@ -382,13 +382,13 @@ mod tests {
 
     #[test]
     fn isolated_wayland_preserves_rich_clipboard_after_two_offers() {
-        if std::env::var_os("SCRAWL_TEST_RICH_WAYLAND_CLIPBOARD").is_none() {
+        if std::env::var_os("APPARENT_TEST_RICH_WAYLAND_CLIPBOARD").is_none() {
             return;
         }
         let original = snapshot_text_wayland().unwrap();
         let html = b"<strong>synthetic</strong>";
         let plain = b"synthetic";
-        let marker = b"scrawl-rich-restore-test-marker";
+        let marker = b"apparent-rich-restore-test-marker";
         let image = b"synthetic-image";
         let mut offered: (&str, &[u8]) = ("text/html", html);
         let probe = (|| -> Result<()> {

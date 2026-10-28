@@ -1,11 +1,11 @@
 // Every request comes through here first (run_worker_first in wrangler.jsonc):
-// other hosts and plain HTTP redirect to https://scrawl.kitlangton.com, and
+// other hosts and plain HTTP redirect to https://app.tryapparent.com, and
 // hashed build assets get a long cache. Release files and the appcast are
 // returned exactly as uploaded, on any host, so shipped apps keep updating.
 // `wrangler dev --var ANY_HOST:1` turns the redirect off for local testing.
 type Env = { ASSETS: { fetch(request: Request): Promise<Response> }; ANY_HOST?: string }
 
-const HOST = "scrawl.kitlangton.com"
+const HOST = "app.tryapparent.com"
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

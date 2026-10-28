@@ -1,9 +1,9 @@
 {
- "capture": "scrawl-1792523688788-170ef-2.scrawl",
+ "capture": "apparent-1792523688788-170ef-2.apparent",
  "savedDecision": "keep",
  "bundle": {
   "version": 1,
-  "id": "scrawl-1792523688788-170ef-2",
+  "id": "apparent-1792523688788-170ef-2",
   "createdAtMs": 1792523729944,
   "durationMs": 40788,
   "target": {
@@ -391,9 +391,9 @@
    },
    {
     "id": "ses_edb816b31ffe4B3nexhh9rqAJp",
-    "title": "SCRAWL",
-    "directory": "/Users/kit/code/open-source/scrawl",
-    "repo": "/Users/kit/code/open-source/scrawl",
+    "title": "APPARENT",
+    "directory": "/Users/kit/code/open-source/apparent",
+    "repo": "/Users/kit/code/open-source/apparent",
     "updatedMs": 1792522399527,
     "viewedMs": 1792516152471
    },
@@ -479,9 +479,9 @@
    },
    {
     "id": "ses_ead37e06cffeRfPkN2vrbdNWDs",
-    "title": "SCRAWL RECORDER",
-    "directory": "/Users/kit/code/open-source/scrawl",
-    "repo": "/Users/kit/code/open-source/scrawl",
+    "title": "APPARENT RECORDER",
+    "directory": "/Users/kit/code/open-source/apparent",
+    "repo": "/Users/kit/code/open-source/apparent",
     "updatedMs": 1792391837251,
     "viewedMs": 1792391837366
    },

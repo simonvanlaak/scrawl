@@ -9,7 +9,7 @@
   /// to the app below.
   final class OverlayWindow: UIWindow {
     private var regions: [OverlayRegion: CGRect] = [:]
-    private unowned let scrawl: Scrawl
+    private unowned let apparent: Apparent
     private var drawingTouch: UITouch?
     private var presentationLink: CADisplayLink?
     private var presentationTrace: StartupTrace?
@@ -20,17 +20,17 @@
     /// stroke's live tip.
     let ink = InkView()
 
-    init(windowScene: UIWindowScene, scrawl: Scrawl) {
-      self.scrawl = scrawl
+    init(windowScene: UIWindowScene, apparent: Apparent) {
+      self.apparent = apparent
       super.init(windowScene: windowScene)
       windowLevel = .alert + 10
       backgroundColor = .clear
-      let host = UIHostingController(rootView: OverlayView(scrawl: scrawl) { [weak self] region, frame in
+      let host = UIHostingController(rootView: OverlayView(apparent: apparent) { [weak self] region, frame in
         guard let self else { return }
         regions[region] = frame.isEmpty ? nil : frame
         if region == .strip, !frame.isEmpty, let start = preparationStart {
           preparationStart = nil
-          scrawl.startupObserver?(.init(stage: "prewarmLayout", milliseconds: (CACurrentMediaTime() - start) * 1000, onMainThread: true))
+          apparent.startupObserver?(.init(stage: "prewarmLayout", milliseconds: (CACurrentMediaTime() - start) * 1000, onMainThread: true))
         }
       })
       host.view.backgroundColor = .clear
@@ -38,8 +38,8 @@
       ink.frame = bounds
       // Index 0: under the root view whenever UIKit adds it.
       insertSubview(ink, at: 0)
-      ink.onStroke = { [unowned scrawl] samples in scrawl.record(stroke: samples) }
-      ink.onFade = { [unowned scrawl] strokes, uptime in scrawl.recordFade(of: strokes, at: uptime) }
+      ink.onStroke = { [unowned apparent] samples in apparent.record(stroke: samples) }
+      ink.onFade = { [unowned apparent] strokes, uptime in apparent.recordFade(of: strokes, at: uptime) }
       isHidden = true
     }
 
@@ -106,7 +106,7 @@
       if regions.values.contains(where: { $0.insetBy(dx: -8, dy: -8).contains(point) }) {
         return super.hitTest(point, with: event)
       }
-      if scrawl.isRecording || scrawl.isStarting, scrawl.isDrawing {
+      if apparent.isRecording || apparent.isStarting, apparent.isDrawing {
         return self
       }
       return nil
@@ -114,7 +114,7 @@
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
       // One finger draws at a time; others are ignored until it lifts.
-      guard scrawl.isRecording || scrawl.isStarting, scrawl.isDrawing, drawingTouch == nil, let touch = touches.first else {
+      guard apparent.isRecording || apparent.isStarting, apparent.isDrawing, drawingTouch == nil, let touch = touches.first else {
         if drawingTouch == nil { super.touchesBegan(touches, with: event) }
         return
       }
@@ -156,44 +156,44 @@
   }
 
   private struct OverlayView: View {
-    let scrawl: Scrawl
+    let apparent: Apparent
     let reportFrame: @MainActor (OverlayRegion, CGRect) -> Void
 
     var body: some View {
       // The ink is `OverlayWindow.ink`, under this view.
-      StripPlacement(mode: stripMode, actions: actions, notice: scrawl.isRecording ? scrawl.notice : nil)
-        .environment(\.scrawlStartupTrace, scrawl.startupTrace)
+      StripPlacement(mode: stripMode, actions: actions, notice: apparent.isRecording ? apparent.notice : nil)
+        .environment(\.apparentStartupTrace, apparent.startupTrace)
     }
 
-    private var stripMode: ScrawlStrip.Mode? {
-      if scrawl.isRecording || scrawl.isStarting, let startedAt = scrawl.startedAt {
-        return .recording(startedAt: startedAt, isDrawing: scrawl.isDrawing)
+    private var stripMode: ApparentStrip.Mode? {
+      if apparent.isRecording || apparent.isStarting, let startedAt = apparent.startedAt {
+        return .recording(startedAt: startedAt, isDrawing: apparent.isDrawing)
       }
-      if let preparedAt = scrawl.preparedAt {
+      if let preparedAt = apparent.preparedAt {
         return .recording(startedAt: preparedAt, isDrawing: false)
       }
-      if scrawl.isDiscardPending {
+      if apparent.isDiscardPending {
         return .discarded
       }
-      switch scrawl.uploadStatus {
+      switch apparent.uploadStatus {
       case .idle: return nil
-      case .sending: return .sending(.init(progress: scrawl.sendProgress, stalled: scrawl.isSendStalled))
+      case .sending: return .sending(.init(progress: apparent.sendProgress, stalled: apparent.isSendStalled))
       case let .sent(target): return .sent(target)
       case .queued: return .queued
-      case .failed: return .failed(scrawl.deliveryFailure)
+      case .failed: return .failed(apparent.deliveryFailure)
       }
     }
 
-    private var actions: ScrawlStrip.Actions {
-      ScrawlStrip.Actions(
-        toggleDrawing: { scrawl.toggleDrawing() },
-        discard: { scrawl.discard() },
+    private var actions: ApparentStrip.Actions {
+      ApparentStrip.Actions(
+        toggleDrawing: { apparent.toggleDrawing() },
+        discard: { apparent.discard() },
         send: {
           UIImpactFeedbackGenerator(style: .light).impactOccurred()
-          scrawl.stop()
+          apparent.stop()
         },
-        undoDiscard: { scrawl.undoDiscard() },
-        share: { scrawl.shareFailedRecording() },
+        undoDiscard: { apparent.undoDiscard() },
+        share: { apparent.shareFailedRecording() },
         reportFrame: reportFrame
       )
     }

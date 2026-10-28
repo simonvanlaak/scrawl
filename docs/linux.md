@@ -4,7 +4,7 @@ Read this before changing `src/capture/linux.rs`, `src/ui/linux.rs`, `src/linux/
 
 ## X11 everywhere, Wayland around it
 
-GPUI is built with its `x11` feature only, and `linux::prepare_process` (the first thing `main` does) hides `WAYLAND_DISPLAY` from it, so on Wayland every Scrawl window is an XWayland window (`SCRAWL_NATIVE_WAYLAND=1` opts out, for experiments). That keeps one window model on both: Scrawl's floating windows (pill, picker, ink overlay) are override-redirect X windows it places itself in global pixels (`linux::x11::float`, `place`), with an empty input shape to let clicks through (`set_click_through`). `float` waits for the window manager to finish mapping and then unmanaging the window before it takes it over; otherwise GNOME on Wayland keeps drawing it at its old frame's offset.
+GPUI is built with its `x11` feature only, and `linux::prepare_process` (the first thing `main` does) hides `WAYLAND_DISPLAY` from it, so on Wayland every Apparent window is an XWayland window (`APPARENT_NATIVE_WAYLAND=1` opts out, for experiments). That keeps one window model on both: Apparent's floating windows (pill, picker, ink overlay) are override-redirect X windows it places itself in global pixels (`linux::x11::float`, `place`), with an empty input shape to let clicks through (`set_click_through`). `float` waits for the window manager to finish mapping and then unmanaging the window before it takes it over; otherwise GNOME on Wayland keeps drawing it at its old frame's offset.
 
 GPUI 0.2.2's X11 window panics on `HasWindowHandle`, so `x11::window_id` finds a GPUI window's X id itself (the newest `_NET_WM_PID` window it hasn't seen, cached per `WindowId`).
 
@@ -16,8 +16,8 @@ Verified in an Ubuntu 24.04 arm64 VM with GNOME 46 (Wayland and X11) and Plasma 
 
 | | X11 | GNOME on Wayland | KDE Plasma on Wayland |
 |---|---|---|---|
-| Shortcuts | `XGrabKey` | GNOME custom keybindings running `scrawl shortcut record\|paste` (GNOME 48+: the GlobalShortcuts portal) | Plasma 5: native KGlobalAccel; Plasma 6: GlobalShortcuts portal, with KGlobalAccel fallback |
-| Recording a display or area | `ximagesrc` | `org.gnome.Mutter.ScreenCast.RecordArea`, no dialog | ScreenCast portal, asks once (restore token in `~/.local/share/scrawl/portal.json`) |
+| Shortcuts | `XGrabKey` | GNOME custom keybindings running `apparent shortcut record\|paste` (GNOME 48+: the GlobalShortcuts portal) | Plasma 5: native KGlobalAccel; Plasma 6: GlobalShortcuts portal, with KGlobalAccel fallback |
+| Recording a display or area | `ximagesrc` | `org.gnome.Mutter.ScreenCast.RecordArea`, no dialog | ScreenCast portal, asks once (restore token in `~/.local/share/apparent/portal.json`) |
 | Recording a window | `ximagesrc xid=` | X11 apps by id; native Wayland windows are not listed | X11 apps by id; native Wayland windows are not listed |
 | Clicks, keys, ⇧ ink | the X server (pointer and key state, polled) | the input devices (`/dev/input`, needs the `input` group) | same |
 | Pointer position | the X server | XWayland while it's over X11 windows; an absolute pointing device (tablet, touchscreen, VM or remote desktop) from the input devices; the overlay takes the pointer while ⇧ is held | same |
@@ -26,29 +26,29 @@ Verified in an Ubuntu 24.04 arm64 VM with GNOME 46 (Wayland and X11) and Plasma 
 
 ### Clicks and ink on Wayland
 
-Wayland tells no app where the pointer is over another app's window. Scrawl reads buttons and keys from the input devices. In onboarding or Settings › Permissions, **Copy command** copies `sudo usermod -aG input "$USER"`. Run it in a terminal, then log out and back in. Scrawl checks whether it can open actual keyboard/mouse devices, rather than trusting group membership; it retries devices when access changes. This is the **Input devices** row (the Accessibility row on macOS).
+Wayland tells no app where the pointer is over another app's window. Apparent reads buttons and keys from the input devices. In onboarding or Settings › Permissions, **Copy command** copies `sudo usermod -aG input "$USER"`. Run it in a terminal, then log out and back in. Apparent checks whether it can open actual keyboard/mouse devices, rather than trusting group membership; it retries devices when access changes. This is the **Input devices** row (the Accessibility row on macOS).
 
-While ⇧ is held, the ink overlay takes the pointer (`linux::overlay::take_pointer`), so XWayland reports where it is and the ink follows it; a click while ⇧ is held lands on the overlay, not the app. On KDE Wayland, Scrawl hides the recording overlay between strokes because KWin 5 otherwise blocks clicks into native apps even with an empty X input shape. Ink remains in the bundle, but disappears from the desktop when ⇧ is released.
+While ⇧ is held, the ink overlay takes the pointer (`linux::overlay::take_pointer`), so XWayland reports where it is and the ink follows it; a click while ⇧ is held lands on the overlay, not the app. On KDE Wayland, Apparent hides the recording overlay between strokes because KWin 5 otherwise blocks clicks into native apps even with an empty X input shape. Ink remains in the bundle, but disappears from the desktop when ⇧ is released.
 
 A click's position is right over X11 apps and with an absolute pointing device. With a mouse or touchpad over a Wayland app, XWayland still has the pointer where it last saw it, so the click's position is stale: the keyframe is cut at the right moment, but its ripple can be in the wrong place. A GNOME Shell extension that reports the pointer would close this gap (see the PR's open questions).
 
-Without the `input` group, a capture on Wayland has no clicks, keys or ⇧ ink outside Scrawl's own windows, and records only the screen and voice.
+Without the `input` group, a capture on Wayland has no clicks, keys or ⇧ ink outside Apparent's own windows, and records only the screen and voice.
 
 ### Picker and portal limits
 
 Screen and Area work on the tested desktops. The Window picker lists X11/XWayland windows only; use Screen or Area for native Wayland apps. A portal window source exists internally, but the UI does not currently offer it. A press of the record shortcut records the display under the pointer once its keys come up, however long they're held; the tray menu's **Choose What to Record…** opens the picker, which stays open until you choose a target or press Esc. The Mac-only iPhone mode is hidden. Screen sharing can ask again if a desktop does not honor the saved restore token. Finishing while the dialog is open cancels the pending session; a failed or empty capture reports an error rather than producing demo imagery, and `latest` skips its unfinished directory.
 
-Plasma 5 can report successful GlobalShortcuts binding with an empty result. Scrawl validates both returned bindings and uses KGlobalAccel directly on Plasma 5, so the shortcut does not also type into the focused app.
+Plasma 5 can report successful GlobalShortcuts binding with an empty result. Apparent validates both returned bindings and uses KGlobalAccel directly on Plasma 5, so the shortcut does not also type into the focused app.
 
 ### Hyprland
 
-Tried on Omarchy 4 (Hyprland 0.56, Lua config), Wayland. `linux::hyprland` binds the shortcuts at runtime with `hyprctl eval hl.bind(…)` (a hyprlang config takes `keyword bindd` instead, untested), each running `scrawl shortcut record|paste`. Hyprland consumes the chord, so it doesn't also reach the app in front, and nothing needs the `input` group. The binds are described `Scrawl: record` and `Scrawl: paste`. A chord some other bind holds is left alone and reported as taken; a bind with Scrawl's description (a permanent one in the user's config, which a config reload doesn't drop) is left in place:
+Tried on Omarchy 4 (Hyprland 0.56, Lua config), Wayland. `linux::hyprland` binds the shortcuts at runtime with `hyprctl eval hl.bind(…)` (a hyprlang config takes `keyword bindd` instead, untested), each running `apparent shortcut record|paste`. Hyprland consumes the chord, so it doesn't also reach the app in front, and nothing needs the `input` group. The binds are described `Apparent: record` and `Apparent: paste`. A chord some other bind holds is left alone and reported as taken; a bind with Apparent's description (a permanent one in the user's config, which a config reload doesn't drop) is left in place:
 
 ```lua
-hl.bind("ALT + SHIFT + S", hl.dsp.exec_cmd("scrawl shortcut record"), { description = "Scrawl: record" })
+hl.bind("ALT + SHIFT + S", hl.dsp.exec_cmd("apparent shortcut record"), { description = "Apparent: record" })
 ```
 
-A config reload drops runtime binds, so Scrawl binds them again on the event socket's `configreloaded`. The GlobalShortcuts portal can't stand in: `xdg-desktop-portal` refuses an app without an app id, and `xdg-desktop-portal-hyprland` only fires shortcuts the user bound by hand with `bind = …, global, <app id>:<name>`.
+A config reload drops runtime binds, so Apparent binds them again on the event socket's `configreloaded`. The GlobalShortcuts portal can't stand in: `xdg-desktop-portal` refuses an app without an app id, and `xdg-desktop-portal-hyprland` only fires shortcuts the user bound by hand with `bind = …, global, <app id>:<name>`.
 
 Clicks on the pill and the picker need four things, found in Hyprland's source (`ViewHitTester.cpp`, `XSurface.cpp`) and Omarchy's `windows.lua`, because the symptom is always the same: the click lands on the app below.
 
@@ -82,23 +82,23 @@ transcription can understand the voice.
 The recording cue and Finish remain separate; microphone and intelligibility warnings
 retain their own status text rather than borrowing the bars.
 
-`autoPasteDraft` is an off-by-default Hyprland Wayland trial for any app that accepts image and text pastes. Leave the keyboard caret in the intended unsent composer until processing finishes. Scrawl uses the window focused **then**, never switches windows, and stops if focus changes between the image and text pastes. The clipboard ends with the text summary, so ordinary Ctrl+V can retry the text even if automatic paste is refused. Ctrl+V alone cannot reliably attach both image and text across apps; use the paper tile's Paste control or attach `contact-sheet.png` manually if the image is missing. The paper stays visible for review. Scrawl cannot tell whether the app accepted either paste: inspect the unsent draft before sending. Ctrl+V and Super+V shortcuts are unchanged. See `docs/keyframes-and-text.md`.
+`autoPasteDraft` is an off-by-default Hyprland Wayland trial for any app that accepts image and text pastes. Leave the keyboard caret in the intended unsent composer until processing finishes. Apparent uses the window focused **then**, never switches windows, and stops if focus changes between the image and text pastes. The clipboard ends with the text summary, so ordinary Ctrl+V can retry the text even if automatic paste is refused. Ctrl+V alone cannot reliably attach both image and text across apps; use the paper tile's Paste control or attach `contact-sheet.png` manually if the image is missing. The paper stays visible for review. Apparent cannot tell whether the app accepted either paste: inspect the unsent draft before sending. Ctrl+V and Super+V shortcuts are unchanged. See `docs/keyframes-and-text.md`.
 
 Not done: a click's position still comes from XWayland (see above; `j/cursorpos` would answer it), and a Region capture of the second monitor failed in testing with a PipeWire `not-negotiated` error while Display on it and Region on the first monitor worked.
 
-## Scrawl's own windows are in the recording
+## Apparent's own windows are in the recording
 
 Neither X11 nor GNOME's or KDE's screencasts let an app leave its windows out, so the pill and the ink are in `recording.mp4` and the keyframes. The ink is drawn again at the same place on the keyframes, so it doesn't double. The candidate frames used to pick keyframes paint over the pill (`linux::media::own_window_masks`), so its ticking clock never counts as activity.
 
 ## Movies, transcription, the rest
 
-- **Movies:** GStreamer (`linux::media`): the source above, `videorate` to 30 fps, the first encoder installed of `x264enc`, `openh264enc` and VA-API's, `mp4mux`. Candidate frames come off a `tee` through an `appsink`; `Recorder::finish` drains it, but a stalled candidate branch must not make Scrawl delete an MP4 whose file sink has already reported EOS. An unfinished encoder or mux still fails after the eight-second deadline. Compositors send frames only when the screen changes, so the last frame is reused until a new one comes. Without an encoder Scrawl records no movie and keeps sharper candidates instead.
-- **H.264 decoder:** Scrawl checks its own GStreamer registry at launch and in Settings › Recording. If no usable H.264 decoder factory exists, it warns with the host distribution's installation command (Arch/Omarchy: `sudo pacman -S gst-libav`; Debian/Ubuntu: `sudo apt install gstreamer1.0-libav`; Fedora: `sudo dnf install gstreamer1-plugin-libav`). Scrawl never runs the command. A capture whose MP4 decode fails keeps candidate frames and writes an `Image quality:` explanation in `summary.md`; the Linux GUI also notifies. A decoder factory does not guarantee that a particular stream can be decoded, so the packaging check actually decodes a small H.264 MP4 inside the AppImage.
-- **Transcription:** Parakeet through `transcribe.cpp` (`speech.rs`, shared with Windows). As on Windows, Scrawl downloads the model once at launch through `speech_model::ensure` (731 MB with `curl` or `wget`, pinned Hugging Face revision, checked against its SHA-256, into `~/.local/share/scrawl/models`) unless Hex already has one; Settings › Recording shows its progress. A capture made before it lands says so in `summary.md` and is marked `.transcript-pending`, and is transcribed again in place when the download finishes.
-- **Tray:** a StatusNotifierItem (`ksni`); left click starts a recording, the menu is the macOS menu bar menu. GNOME shows it with the AppIndicator extension (on by default on Ubuntu). Without a tray, Scrawl says so in a notification, and launching it again opens Settings (`linux::ipc`, a socket at `$XDG_RUNTIME_DIR/scrawl.sock`).
+- **Movies:** GStreamer (`linux::media`): the source above, `videorate` to 30 fps, the first encoder installed of `x264enc`, `openh264enc` and VA-API's, `mp4mux`. Candidate frames come off a `tee` through an `appsink`; `Recorder::finish` drains it, but a stalled candidate branch must not make Apparent delete an MP4 whose file sink has already reported EOS. An unfinished encoder or mux still fails after the eight-second deadline. Compositors send frames only when the screen changes, so the last frame is reused until a new one comes. Without an encoder Apparent records no movie and keeps sharper candidates instead.
+- **H.264 decoder:** Apparent checks its own GStreamer registry at launch and in Settings › Recording. If no usable H.264 decoder factory exists, it warns with the host distribution's installation command (Arch/Omarchy: `sudo pacman -S gst-libav`; Debian/Ubuntu: `sudo apt install gstreamer1.0-libav`; Fedora: `sudo dnf install gstreamer1-plugin-libav`). Apparent never runs the command. A capture whose MP4 decode fails keeps candidate frames and writes an `Image quality:` explanation in `summary.md`; the Linux GUI also notifies. A decoder factory does not guarantee that a particular stream can be decoded, so the packaging check actually decodes a small H.264 MP4 inside the AppImage.
+- **Transcription:** Parakeet through `transcribe.cpp` (`speech.rs`, shared with Windows). As on Windows, Apparent downloads the model once at launch through `speech_model::ensure` (731 MB with `curl` or `wget`, pinned Hugging Face revision, checked against its SHA-256, into `~/.local/share/apparent/models`) unless Hex already has one; Settings › Recording shows its progress. A capture made before it lands says so in `summary.md` and is marked `.transcript-pending`, and is transcribed again in place when the download finishes.
+- **Tray:** a StatusNotifierItem (`ksni`); left click starts a recording, the menu is the macOS menu bar menu. GNOME shows it with the AppIndicator extension (on by default on Ubuntu). Without a tray, Apparent says so in a notification, and launching it again opens Settings (`linux::ipc`, a socket at `$XDG_RUNTIME_DIR/apparent.sock`).
 - **Clipboard:** text and PNG through the X clipboard (`linux::clipboard`) on X11 and GNOME; KDE Wayland uses `wl-copy` (bundled in the AppImage) because KWin does not reliably bridge background XWayland selections to native apps.
-- **Launch at login:** `~/.config/autostart/scrawl.desktop`; an explicit `launchAtLogin: true` in config refreshes a stale `Exec=` path when the AppImage moves, but respects a desktop-disabled entry. **Trash:** the freedesktop trash. **Captures:** `~/.local/share/scrawl/captures`; **log:** `~/.local/share/scrawl/Logs/scrawl.log`.
-- **Command-line tool:** Settings › Agents links `~/.local/bin/scrawl` to the AppImage (`$APPIMAGE`).
+- **Launch at login:** `~/.config/autostart/apparent.desktop`; an explicit `launchAtLogin: true` in config refreshes a stale `Exec=` path when the AppImage moves, but respects a desktop-disabled entry. **Trash:** the freedesktop trash. **Captures:** `~/.local/share/apparent/captures`; **log:** `~/.local/share/apparent/Logs/apparent.log`.
+- **Command-line tool:** Settings › Agents links `~/.local/bin/apparent` to the AppImage (`$APPIMAGE`).
 
 ### Updates and the running version
 
@@ -107,17 +107,17 @@ picker. `stable` is the default; `main` follows the verified feed from main buil
 settings can be managed without opening the GUI:
 
 ```
-scrawl update status
-scrawl update channel main
-scrawl update channel stable
-scrawl update check
+apparent update status
+apparent update channel main
+apparent update channel stable
+apparent update check
 ```
 
 `status` prints JSON. It reads the selected channel from `updateChannel` in
-`~/.config/scrawl/config.json` (or `$SCRAWL_CONFIG`), and reports `running.version` plus its
-`revision` if the build has one. At app launch, Scrawl writes `running` with its version, PID,
+`~/.config/apparent/config.json` (or `$APPARENT_CONFIG`), and reports `running.version` plus its
+`revision` if the build has one. At app launch, Apparent writes `running` with its version, PID,
 and Linux process start ticks to that config. **Do not infer a live version from the JSON file
-alone after a crash**: `scrawl update status` checks that PID and start time; `running: null`
+alone after a crash**: `apparent update status` checks that PID and start time; `running: null`
 means no matching process is alive. `installed` describes the downloaded AppImage marker,
 which may be newer than the still-running process; `pendingRestart` indicates that difference.
 `check` returns an error outside an owned AppImage rather than silently claiming success.
@@ -130,10 +130,10 @@ The cabled iPhone, video export, `agentContext` lookups (`ax_other.rs`), Sparkle
 
 ## Packaging
 
-`scripts/linux/appimage.sh [binary]` builds `target/appimage/Scrawl-<arch>.AppImage` with linuxdeploy and its GStreamer plugin, so GStreamer, `pipewiresrc`, `ximagesrc` and the H.264 encoders come with it. The binary baseline is **Ubuntu 24.04+**. Install `libfuse2t64` to run the AppImage, or run `./Scrawl-<arch>.AppImage --appimage-extract-and-run app` without FUSE.
+`scripts/linux/appimage.sh [binary]` builds `target/appimage/Apparent-<arch>.AppImage` with linuxdeploy and its GStreamer plugin, so GStreamer, `pipewiresrc`, `ximagesrc` and the H.264 encoders come with it. The binary baseline is **Ubuntu 24.04+**. Install `libfuse2t64` to run the AppImage, or run `./Apparent-<arch>.AppImage --appimage-extract-and-run app` without FUSE.
 The build installs `gstreamer1.0-libav` and `scripts/linux/check-appimage-decoder.sh` creates a tiny H.264 MP4 and asks the packaged executable to decode a full-resolution frame. This checks the packaged runtime rather than the runner's host plugins.
 
-`.github/workflows/release-linux.yml` builds x86_64 and aarch64 on Ubuntu 24.04 runners only when manually dispatched to publish a release. A dispatch on `main` with `tag=v<version>` checks out that tag and uploads versioned AppImages to its GitHub release; a dispatch on `main` with `publish_main=true` and no tag publishes a Main preview. Pushing a tag or branch and opening a PR no longer starts the workflow. The site links directly to the versioned assets. Build/deploy the site only after the appcast version is updated and both release assets exist. Flatpak is out of scope.
+`.github/workflows/release-linux.yml` builds x86_64 and aarch64 on Ubuntu 24.04 runners nightly for a Main preview, or when manually dispatched to publish a release. A dispatch on `main` with `tag=v<version>` checks out that tag and uploads versioned AppImages to its GitHub release; a dispatch on `main` with `publish_main=true` and no tag publishes a Main preview. Pushing a tag or branch and opening a PR no longer starts the workflow. The site links directly to the versioned assets. Build/deploy the site only after the appcast version is updated and both release assets exist. Flatpak is out of scope.
 
 CPU portability (#82): `transcribe-cpp` uses `dynamic-backends`, which forces `GGML_NATIVE=OFF`. On x86_64 it builds separate `libggml-cpu-<tier>.so` modules (including separate Alder Lake and Zen 4 tiers); on aarch64 it builds a portable CPU module. `.cargo/config.toml` sets the Rust Linux baselines to `x86-64` and `generic`, respectively. `build.rs` stages the runtime and module directories next to binaries/tests with `$ORIGIN` RPATH. AppImage packaging explicitly includes the modules that dependency scanning cannot discover, all beside `libtranscribe` in `usr/lib`; `init_backends_default` resolves that library with `dladdr` and selects a CPU tier there once per process.
 
@@ -143,10 +143,10 @@ Linux previews can be published manually from checked AppImage artifacts as `lin
 
 ### AppImage update channels
 
-Settings › About › Channel selects Stable releases (default) or Latest main. Only an AppImage owned by the user and stored under their home directory auto-updates; a debug build, symlink or system-owned install stays untouched. At launch and hourly, Scrawl checks its selected feed. It downloads the matching architecture's AppImage, checks its SHA-256 against the release's checksum (Stable) or the main feed (Main), atomically swaps the executable, and keeps the previous image beside it. The running process stays on the old image; the new one starts at the next launch. Settings and the tray's Check for Updates… trigger the same check. Errors are logged without replacing the installed image.
+Settings › About › Channel selects Stable releases (default) or Latest main. Only an AppImage owned by the user and stored under their home directory auto-updates; a debug build, symlink or system-owned install stays untouched. At launch and hourly, Apparent checks its selected release channel. It downloads the matching architecture's AppImage, checks its SHA-256 against that release's checksum, atomically swaps the executable, and keeps the previous image beside it. The running process stays on the old image; the new one starts at the next launch. Settings and the tray's Check for Updates… trigger the same check. Errors are logged without replacing the installed image.
 In Settings, a manual check immediately changes the button to “Checking…” and disables repeat clicks. When it finishes, a dismissible result reports an installed update, no new update, or the reason the check failed. The tray and automatic checks remain silent except for the existing installed-update notification and log.
 
-Stable reads the newest non-prerelease GitHub release on `simonvanlaak/scrawl`, which must include the Linux AppImage and its `.sha256` asset. **There is no such stable Linux release yet**, so Stable currently has nothing to install. Main reads `linux-main-feed/main-updates.json` on that repository. To publish a Main preview, manually dispatch the Linux release workflow on `main` with `publish_main=true` and an empty `tag`. It builds both architectures, runs the full Rust suite and packaged CPU smoke checks, uploads an immutable prerelease, then advances the feed only if that commit is still main. No preview is published before those checks pass. The feed is not populated until this workflow successfully runs on main. Main therefore tracks the latest *published* preview, not every commit. A user choosing Main accepts unreviewed code; channel changes install the chosen channel even if its version is lower.
+Stable reads the newest non-prerelease GitHub release on `tryapparent/apparent`, which must include the Linux AppImage and its `.sha256` asset. **There is no such stable Linux release yet**, so Stable currently has nothing to install. Main reads the latest published `linux-main-<sha>` prerelease from that repository's Releases API; it no longer depends on the old feed branch. The Linux release workflow runs nightly on `main` at 03:17 UTC, skipping a commit that already has a preview. It builds both architectures, runs the full Rust suite and packaged CPU smoke checks, then publishes an immutable prerelease only if that commit is still main. To publish one manually, dispatch the workflow on `main` with `publish_main=true` and an empty `tag`. Main therefore tracks the latest *published* preview, not every commit. If a nightly build fails, the previous preview stays available. A user choosing Main accepts unreviewed code; channel changes install the chosen channel even if its version is lower.
 
 ## Building and testing
 
@@ -155,7 +155,7 @@ Build dependencies (Ubuntu/Debian; CI installs the same):
 ```sh
 ./scripts/linux/dependencies.sh
 cargo build -j 2 --offline
-./target/debug/scrawl app
+./target/debug/apparent app
 ```
 
 GPUI needs Vulkan (`mesa-vulkan-drivers`; llvmpipe works in a VM). Tests: `cargo test`. A desktop test runs in a Tart Ubuntu VM on the Mac mini (`macvm`, see `~/code/home/tools/macvm`): GNOME on Wayland by default, X11 with `WaylandEnable=false` in `/etc/gdm3/custom.conf`. Never test on Kit's desktop session.

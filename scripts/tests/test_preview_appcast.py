@@ -14,7 +14,7 @@ class PreviewAppcastTest(unittest.TestCase):
     def run_feed(self, directory, build, previous="", signature=None, url=None, length=None):
         directory = Path(directory)
         (directory / "previous.xml").write_text(previous)
-        archive = directory / f"Scrawl-Preview-0.{build}-arm64.zip"
+        archive = directory / f"Apparent-Preview-0.{build}-arm64.zip"
         archive.write_bytes(b"signed preview archive")
         signature = signature or base64.b64encode(b"s" * 64).decode()
         url = url or f"https://github.com/tryapparent/apparent/releases/download/preview-mac-{build.replace('.', '-')}/{archive.name}"

@@ -4,7 +4,7 @@
   import UIKit
 
   /// Turns off iOS's three-finger text-editing gestures (undo, redo, cut, copy, paste, and the
-  /// Undo · Cut · Copy · Redo bar) in the app's windows, so ScrawlKit's three-finger long press
+  /// Undo · Cut · Copy · Redo bar) in the app's windows, so ApparentKit's three-finger long press
   /// doesn't also open that bar while a text field is focused.
   ///
   /// UIKit's `UIUndoGestureInteraction` lets those gestures begin only if no responder from the
@@ -13,11 +13,11 @@
   /// one `.none` disables all five three-finger recognizers). A text field's chain always reaches
   /// its `UIWindow`, so `UIWindow` answering `.none` is enough. `UIWindow` doesn't implement the
   /// property itself, so a method is added to it (no swizzling); app subclasses that override it
-  /// keep their own answer, and ScrawlKit's `OverlayWindow` is left alone.
+  /// keep their own answer, and ApparentKit's `OverlayWindow` is left alone.
   ///
   /// The trade-off: while active, three-finger undo, redo, cut, copy, and paste don't work in the
   /// app. It's only active on paired devices, with a three-finger trigger installed, while
-  /// `Scrawl.shared.suppressesSystemEditingGestures` is true. Nothing is added to `UIWindow`
+  /// `Apparent.shared.suppressesSystemEditingGestures` is true. Nothing is added to `UIWindow`
   /// until it first becomes active; afterwards the added method defers to `UIResponder`'s.
   enum SystemEditingGestures {
     private static let isSuppressing = OSAllocatedUnfairLock(initialState: false)

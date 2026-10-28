@@ -65,7 +65,7 @@ fn stage_transcribe_shared_objects() {
     }
 }
 
-/// transcribe.cpp's DLLs (`dynamic-backends`: `transcribe.dll`, `ggml*.dll`) beside `scrawl.exe`
+/// transcribe.cpp's DLLs (`dynamic-backends`: `transcribe.dll`, `ggml*.dll`) beside `apparent.exe`
 /// and the test binaries, which load them at start. Its own build script copies them there too,
 /// but only when it runs, and a build restored from CI's cache skips it.
 #[cfg(windows)]
@@ -75,7 +75,7 @@ fn stage_transcribe_dlls() {
         return;
     };
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    // OUT_DIR is <target>/<profile>/build/scrawl-<hash>/out.
+    // OUT_DIR is <target>/<profile>/build/apparent-<hash>/out.
     let Some(profile) = out_dir.ancestors().nth(3) else {
         return;
     };
@@ -102,7 +102,7 @@ fn stage_transcribe_dlls() {
 fn embed_windows_resources() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let icon = manifest_dir.join("assets/Scrawl.ico");
+    let icon = manifest_dir.join("assets/Apparent.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     let numeric = version
@@ -126,12 +126,12 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "Scrawl"
-      VALUE "ProductName", "Scrawl"
+      VALUE "FileDescription", "Apparent"
+      VALUE "ProductName", "Apparent"
       VALUE "FileVersion", "{version}"
       VALUE "ProductVersion", "{version}"
-      VALUE "OriginalFilename", "scrawl.exe"
-      VALUE "InternalName", "scrawl"
+      VALUE "OriginalFilename", "apparent.exe"
+      VALUE "InternalName", "apparent"
     END
   END
   BLOCK "VarFileInfo"
@@ -142,7 +142,7 @@ END
 "#,
         icon = icon.display().to_string().replace('\\', "/")
     );
-    let resource = output_dir.join("scrawl.rc");
+    let resource = output_dir.join("apparent.rc");
     std::fs::write(&resource, script).expect("write the Windows resource script");
     embed_resource::compile(&resource, embed_resource::NONE)
         .manifest_optional()
@@ -185,8 +185,8 @@ fn compile_metal_shader(src_rel: &str, name: &str) {
     assert!(metallib.success(), "Metal library creation failed for {src_rel}");
 }
 
-/// Builds `scrawl-helper` (Swift: SpeechAnalyzer, iPhone capture, movie decoding) beside the
-/// `scrawl` binary, where `helper::path` and `scripts/install-app.sh` look for it.
+/// Builds `apparent-helper` (Swift: SpeechAnalyzer, iPhone capture, movie decoding) beside the
+/// `apparent` binary, where `helper::path` and `scripts/install-app.sh` look for it.
 fn compile_helper() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let helper_dir = manifest_dir.join("helper");
@@ -202,14 +202,14 @@ fn compile_helper() {
     }
     let plist = helper_dir.join("Info.plist");
     println!("cargo:rerun-if-changed={}", plist.display());
-    println!("cargo:rerun-if-env-changed=SCRAWL_HELPER_BUNDLE_ID");
-    println!("cargo:rerun-if-env-changed=SCRAWL_PREVIEW_BUILD");
-    // OUT_DIR is target/<profile>/build/scrawl-<hash>/out.
+    println!("cargo:rerun-if-env-changed=APPARENT_HELPER_BUNDLE_ID");
+    println!("cargo:rerun-if-env-changed=APPARENT_PREVIEW_BUILD");
+    // OUT_DIR is target/<profile>/build/apparent-<hash>/out.
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let plist = if let Ok(bundle_id) = std::env::var("SCRAWL_HELPER_BUNDLE_ID") {
-        assert_eq!(bundle_id, "dev.simonvanlaak.scrawl.preview.helper");
+    let plist = if let Ok(bundle_id) = std::env::var("APPARENT_HELPER_BUNDLE_ID") {
+        assert_eq!(bundle_id, "dev.simonvanlaak.apparent.preview.helper");
         let source = std::fs::read_to_string(&plist).expect("read helper plist");
-        let original = "<string>dev.kitlangton.scrawl.helper</string>";
+        let original = "<string>dev.kitlangton.apparent.helper</string>";
         assert!(source.contains(original), "helper bundle ID changed");
         let preview_plist = out_dir.join("preview-helper-Info.plist");
         std::fs::write(
@@ -231,7 +231,7 @@ fn compile_helper() {
         Err(_) => "arm64",
     }
     .to_owned();
-    let built = out_dir.join("scrawl-helper");
+    let built = out_dir.join("apparent-helper");
     let status = Command::new("xcrun")
         .args(["swiftc", "-O", "-swift-version", "5", "-target"])
         .arg(format!("{arch}-apple-macos15.0"))
@@ -249,12 +249,12 @@ fn compile_helper() {
         ])
         .arg(&plist)
         .status()
-        .expect("xcrun swiftc is required to build scrawl-helper");
+        .expect("xcrun swiftc is required to build apparent-helper");
     assert!(
         status.success(),
-        "scrawl-helper failed to compile (needs the macOS 26 SDK; the result runs on macOS 15)"
+        "apparent-helper failed to compile (needs the macOS 26 SDK; the result runs on macOS 15)"
     );
-    let dest = profile_dir.join("scrawl-helper");
+    let dest = profile_dir.join("apparent-helper");
     let _ = std::fs::remove_file(&dest);
-    std::fs::copy(&built, dest).expect("Could not place scrawl-helper");
+    std::fs::copy(&built, dest).expect("Could not place apparent-helper");
 }

@@ -1,5 +1,5 @@
-//! iPhone sources: a live cabled capture mirrored through `scrawl-helper`, and recordings made
-//! in-app with ScrawlKit. Both become ordinary `.scrawl` bundles whose keyframes are decoded
+//! iPhone sources: a live cabled capture mirrored through `apparent-helper`, and recordings made
+//! in-app with ApparentKit. Both become ordinary `.apparent` bundles whose keyframes are decoded
 //! from the phone's own video, never from a screenshot of the mirror window.
 
 use std::collections::BTreeMap;
@@ -13,11 +13,11 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
-use crate::capture::{LiveOverlayEvent, SharedCaptureTelemetry, scrawl_log};
+use crate::capture::{LiveOverlayEvent, SharedCaptureTelemetry, apparent_log};
 use crate::delivery::{Delivery, Outcome};
 use crate::helper::{self, FrameTimes, PhoneDevice};
 use crate::model::{
-    CaptureMode, ContextChange, DeviceInfo, InteractionEvent, RgbaFrame, ScrawlBundle, ScreenSpan,
+    CaptureMode, ContextChange, DeviceInfo, InteractionEvent, RgbaFrame, ApparentBundle, ScreenSpan,
     Stroke, TargetFrame, TargetInfo,
 };
 
@@ -58,7 +58,7 @@ pub struct PhoneSession {
 pub struct PhoneRecording {
     pub movie: PathBuf,
     pub device: PhoneDevice,
-    /// How long after Scrawl's session clock started the movie's first frame arrived.
+    /// How long after Apparent's session clock started the movie's first frame arrived.
     pub offset_ms: u64,
     /// M presses in the mirror, on the movie's clock.
     pub flags: Vec<u64>,
@@ -155,12 +155,12 @@ impl PhoneSession {
         let stdout = child.stdout.take().context("No mirror output")?;
         if let Some(stderr) = child.stderr.take() {
             let _ = std::thread::Builder::new()
-                .name("scrawl-phone-stderr".into())
+                .name("apparent-phone-stderr".into())
                 .spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         let trimmed = line.trim();
                         if !trimmed.is_empty() {
-                            scrawl_log(trimmed.to_owned());
+                            apparent_log(trimmed.to_owned());
                         }
                     }
                 });
@@ -170,7 +170,7 @@ impl PhoneSession {
         let reader_state = Arc::clone(&state);
         let reader_cancelled = Arc::clone(&cancelled);
         let reader = std::thread::Builder::new()
-            .name("scrawl-phone".into())
+            .name("apparent-phone".into())
             .spawn(move || {
                 for line in BufReader::new(stdout).lines() {
                     let Ok(line) = line else { break };
@@ -230,10 +230,10 @@ impl PhoneSession {
                             state.ended = true;
                         }
                         MirrorEvent::Warning { message } => {
-                            scrawl_log(format!("iPhone mirror: {message}"));
+                            apparent_log(format!("iPhone mirror: {message}"));
                         }
                         MirrorEvent::Error { message } => {
-                            scrawl_log(format!("iPhone mirror: {message}"));
+                            apparent_log(format!("iPhone mirror: {message}"));
                             state.error = Some(message);
                             state.ended = true;
                         }
@@ -243,7 +243,7 @@ impl PhoneSession {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .ended = true;
-                // The helper ended; if Scrawl didn't ask (phone unplugged, no phone, denied),
+                // The helper ended; if Apparent didn't ask (phone unplugged, no phone, denied),
                 // let the app finish or cancel the capture.
                 if !reader_cancelled.load(std::sync::atomic::Ordering::Acquire)
                     && let Some(telemetry) = &telemetry
@@ -418,7 +418,7 @@ pub struct MovieCapture {
     pub strokes: Vec<Stroke>,
     pub flags: Vec<u64>,
     pub note: Option<String>,
-    /// What the app said about itself (ScrawlKit context and screens).
+    /// What the app said about itself (ApparentKit context and screens).
     pub context: BTreeMap<String, String>,
     pub context_changes: Vec<ContextChange>,
     pub screens: Vec<ScreenSpan>,
@@ -457,7 +457,7 @@ pub fn phone_target(
 pub fn build_movie_bundle(
     bundle_dir: &Path,
     mut capture: MovieCapture,
-) -> Result<(PathBuf, ScrawlBundle, String)> {
+) -> Result<(PathBuf, ApparentBundle, String)> {
     let started_at = Instant::now();
     let wav = bundle_dir.join("audio.wav");
     let mut mark_times: Vec<u64> = crate::sketch::marks_of(&capture.strokes)
@@ -569,7 +569,7 @@ pub fn build_movie_bundle(
     if probe.audio_tracks > 0
         && let Some(error) = audio_err
     {
-        scrawl_log(format!("Phone audio export failed: {error:#}"));
+        apparent_log(format!("Phone audio export failed: {error:#}"));
     }
     if probe.width > 0 && probe.height > 0 {
         capture.device.width = probe.width;
@@ -615,14 +615,14 @@ pub fn build_movie_bundle(
     )
 }
 
-/// Finishes a live capture: re-bases Scrawl's pointer and pen input onto the movie's clock.
+/// Finishes a live capture: re-bases Apparent's pointer and pen input onto the movie's clock.
 pub fn finalize_live_capture(
     bundle_dir: &Path,
     recording: PhoneRecording,
     mut events: Vec<InteractionEvent>,
     mut strokes: Vec<Stroke>,
     note: Option<String>,
-) -> Result<(PathBuf, ScrawlBundle, String)> {
+) -> Result<(PathBuf, ApparentBundle, String)> {
     events.retain_mut(|event| event.rebase(recording.offset_ms));
     strokes.retain_mut(|stroke| stroke.rebase(recording.offset_ms));
     let device = &recording.device;
@@ -656,9 +656,9 @@ pub fn finalize_live_capture(
     Ok(built)
 }
 
-// MARK: ScrawlKit import
+// MARK: ApparentKit import
 
-/// The `.json` ScrawlKit writes beside each in-app recording (seconds from the start, points in
+/// The `.json` ApparentKit writes beside each in-app recording (seconds from the start, points in
 /// screen coordinates).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -914,7 +914,7 @@ fn sibling(path: &Path, want_movie: bool) -> Option<PathBuf> {
         })
 }
 
-/// Resolves what `scrawl import` was given into a movie and its timeline: a movie (timeline
+/// Resolves what `apparent import` was given into a movie and its timeline: a movie (timeline
 /// beside it), a timeline (movie beside it), or nothing (the newest pair in ~/Downloads, where
 /// AirDrop puts them).
 pub fn resolve_import(
@@ -933,7 +933,7 @@ pub fn resolve_import(
                 .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
                 .with_context(|| {
                     format!(
-                        "No ScrawlKit recording (movie + .json) in {}",
+                        "No ApparentKit recording (movie + .json) in {}",
                         downloads.display()
                     )
                 })?
@@ -948,17 +948,17 @@ pub fn resolve_import(
     Ok((movie, timeline))
 }
 
-/// `scrawl import`: a ScrawlKit recording becomes a bundle. Touches become taps and swipes
+/// `apparent import`: a ApparentKit recording becomes a bundle. Touches become taps and swipes
 /// (ripples and trails on keyframes), markers become flags, app events land in the summary.
 pub fn import(
     movie: &Path,
     timeline_path: Option<&Path>,
     bundle_dir: &Path,
     note: Option<String>,
-) -> Result<(PathBuf, ScrawlBundle, String)> {
+) -> Result<(PathBuf, ApparentBundle, String)> {
     let timeline: Timeline = match timeline_path {
         Some(path) => serde_json::from_slice(&std::fs::read(path)?)
-            .with_context(|| format!("Invalid ScrawlKit timeline {}", path.display()))?,
+            .with_context(|| format!("Invalid ApparentKit timeline {}", path.display()))?,
         None => Timeline::default(),
     };
     std::fs::create_dir_all(bundle_dir)?;
@@ -1016,7 +1016,7 @@ pub fn import(
     let nonempty = |s: &Option<String>| s.clone().filter(|s| !s.is_empty());
     let device = DeviceInfo {
         name: name.clone(),
-        capture: "scrawlkit".into(),
+        capture: "apparentkit".into(),
         system: timeline.system.clone(),
         width: probe.width,
         height: probe.height,
@@ -1052,7 +1052,7 @@ pub fn import(
 
 pub const DEFAULT_INGEST_PORT: u16 = 47777;
 
-pub type IngestCallback = Arc<dyn Fn(PathBuf, ScrawlBundle, Option<String>) + Send + Sync>;
+pub type IngestCallback = Arc<dyn Fn(PathBuf, ApparentBundle, Option<String>) + Send + Sync>;
 
 #[derive(Clone, Default)]
 pub struct IngestConfig {
@@ -1075,7 +1075,7 @@ impl IngestConfig {
 #[derive(Clone, Copy)]
 struct IngestHooks {
     /// Movie, timeline, bundle directory → the built bundle.
-    build: fn(&Path, &Path, &Path) -> Result<(PathBuf, Option<ScrawlBundle>)>,
+    build: fn(&Path, &Path, &Path) -> Result<(PathBuf, Option<ApparentBundle>)>,
 }
 
 impl Default for IngestHooks {
@@ -1090,8 +1090,8 @@ impl Default for IngestHooks {
 }
 
 /// How long an upload waits for its bundle to be built and sent before the Mac answers
-/// "processing". The phone can ask for less with `X-Scrawl-Wait` (seconds); without it the Mac
-/// stays under the 30 s idle timeout of ScrawlKit builds from before the header.
+/// "processing". The phone can ask for less with `X-Apparent-Wait` (seconds); without it the Mac
+/// stays under the 30 s idle timeout of ApparentKit builds from before the header.
 const REPLY_WAIT_MAX: Duration = Duration::from_secs(45);
 const REPLY_WAIT_DEFAULT: Duration = Duration::from_secs(25);
 /// Over USB the phone gives up 30 s after it stopped, and the copy takes some of that.
@@ -1127,7 +1127,7 @@ fn bearer_token(header: &str) -> Option<&str> {
     })
 }
 
-/// Discovers this Mac's candidate Scrawl ingest base URLs on `port`: Tailscale IPv4 first,
+/// Discovers this Mac's candidate Apparent ingest base URLs on `port`: Tailscale IPv4 first,
 /// followed by `en0` / `en1` LAN IPs.
 pub fn discover_default_ingest_urls(port: u16) -> Vec<String> {
     let mut urls = Vec::new();
@@ -1187,7 +1187,7 @@ fn normalize_http_base_url(raw: &str) -> Result<String> {
     Ok(trimmed.to_owned())
 }
 
-/// Formats `<scheme>://scrawl?url=<urlencoded base>[&url=<second>]&token=<token>[&session=ses_…]`.
+/// Formats `<scheme>://apparent?url=<urlencoded base>[&url=<second>]&token=<token>[&session=ses_…]`.
 pub fn format_setup_link(
     scheme: &str,
     urls: &[String],
@@ -1228,16 +1228,16 @@ pub fn format_setup_link(
     if let Some(session) = session.map(str::trim).filter(|s| !s.is_empty()) {
         query.push(format!("session={}", crate::handoff::query_escape(session)));
     }
-    Ok(format!("{scheme}://scrawl?{}", query.join("&")))
+    Ok(format!("{scheme}://apparent?{}", query.join("&")))
 }
 
-/// Starts Scrawl's background ScrawlKit ingest inside the GUI app: a loopback HTTP server
+/// Starts Apparent's background ApparentKit ingest inside the GUI app: a loopback HTTP server
 /// on port 47777 (all IPv4 interfaces only when remote phone ingest is enabled), and a
 /// cabled-iPhone `devicectl` watcher for when the network can't reach the Mac. Each recording
-/// becomes a `.scrawl` bundle and lands on the clipboard.
+/// becomes a `.apparent` bundle and lands on the clipboard.
 pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
     if let Err(err) = crate::handoff::ensure_ingest_token() {
-        scrawl_log(format!("ingest token setup failed: {err:#}"));
+        apparent_log(format!("ingest token setup failed: {err:#}"));
     }
     let config = IngestConfig {
         copy_clipboard: true,
@@ -1252,16 +1252,16 @@ pub fn start_ingest_server(ui_sender: flume::Sender<LiveOverlayEvent>) {
     };
     let http_cfg = config.clone();
     let _ = std::thread::Builder::new()
-        .name("scrawl-ingest-http".into())
+        .name("apparent-ingest-http".into())
         .spawn(move || {
             if let Err(err) = serve_http(DEFAULT_INGEST_PORT, http_cfg, true) {
-                scrawl_log(format!("ingest server: {err:#}"));
+                apparent_log(format!("ingest server: {err:#}"));
             }
         });
     spawn_usb_poller(config);
 }
 
-/// Runs the headless ScrawlKit ingest server (`scrawl serve`): same HTTP auth, dedupe, bundle
+/// Runs the headless ApparentKit ingest server (`apparent serve`): same HTTP auth, dedupe, bundle
 /// building as the GUI app, without touching the clipboard or HUD.
 pub fn run_ingest_server(port: u16, usb: bool) -> Result<()> {
     let _ = crate::handoff::ensure_ingest_token()?;
@@ -1416,7 +1416,7 @@ fn bind_ingest_listener(port: u16, remote: bool) -> Result<std::net::TcpListener
     let listener = std::net::TcpListener::bind(&addr)
         .with_context(|| format!("could not bind ingest to {addr}"))?;
     listener.set_nonblocking(true)?;
-    scrawl_log(format!("ingest server listening on {addr}"));
+    apparent_log(format!("ingest server listening on {addr}"));
     Ok(listener)
 }
 
@@ -1497,7 +1497,7 @@ fn accept_ingest_connection(
 }
 
 /// Keep local dev-page routing on loopback when remote phone ingest is off.
-/// `scrawl serve` explicitly opts into a remote listener independently of Settings.
+/// `apparent serve` explicitly opts into a remote listener independently of Settings.
 fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
     let remote_enabled = || {
         !managed
@@ -1517,7 +1517,7 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
         if listener.is_none() {
             return Err(err);
         }
-        scrawl_log(format!("ingest server: {err:#}; using loopback"));
+        apparent_log(format!("ingest server: {err:#}; using loopback"));
     }
     crate::web::set_serving();
     let connections = crate::ingest_http::Connections::default();
@@ -1538,7 +1538,7 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
         if let Err(err) = refresh_ingest_listener_with(
             port, &mut listener, &mut bound, wanted, &mut last_wanted, bind_ingest_listener,
         ) {
-            scrawl_log(format!("ingest server: {err:#}; retry after setting changes"));
+            apparent_log(format!("ingest server: {err:#}; retry after setting changes"));
         }
         let Some(current) = listener.as_ref() else {
             std::thread::sleep(Duration::from_millis(100));
@@ -1553,7 +1553,7 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
                 continue;
             }
             Err(err) => {
-                scrawl_log(format!("ingest accept: {err}"));
+                apparent_log(format!("ingest accept: {err}"));
                 continue;
             }
         };
@@ -1572,12 +1572,12 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
         let cfg = config.clone();
         let clients = Arc::clone(&clients);
         let _ = std::thread::Builder::new()
-            .name("scrawl-ingest-client".into())
+            .name("apparent-ingest-client".into())
             .spawn(move || {
                 let _permit = permit;
                 let epoch = remote_client.as_ref().map(|(_, epoch)| *epoch);
                 if let Err(err) = handle_ingest_connection(stream, &cfg, managed, &clients, epoch, setting_epoch) {
-                    scrawl_log(format!("ingest http: {err:#}"));
+                    apparent_log(format!("ingest http: {err:#}"));
                 }
                 drop(remote_client);
             });
@@ -1586,7 +1586,7 @@ fn serve_http(port: u16, config: IngestConfig, managed: bool) -> Result<()> {
 
 fn spawn_usb_poller(config: IngestConfig) {
     let _ = std::thread::Builder::new()
-        .name("scrawl-ingest-usb".into())
+        .name("apparent-ingest-usb".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_millis(1500));
@@ -1599,7 +1599,7 @@ fn spawn_usb_poller(config: IngestConfig) {
                     continue;
                 }
                 if let Err(err) = poll_usb_app_containers(&apps, &config) {
-                    scrawl_log(format!("ingest usb: {err:#}"));
+                    apparent_log(format!("ingest usb: {err:#}"));
                 }
             }
         });
@@ -1678,7 +1678,7 @@ fn ingest_recording(
     };
     if !fresh {
         let _ = std::fs::remove_dir_all(&staging);
-        scrawl_log(format!(
+        apparent_log(format!(
             "ingest: {key} arrived again; waiting for the first copy"
         ));
         return (wait_for_ingest(&key, wait), title);
@@ -1687,7 +1687,7 @@ fn ingest_recording(
     let spawned = {
         let (key, config) = (key.clone(), config.clone());
         std::thread::Builder::new()
-            .name("scrawl-ingest-build".into())
+            .name("apparent-ingest-build".into())
             .spawn(move || {
                 let built = build_ingested(
                     &movie,
@@ -1700,7 +1700,7 @@ fn ingest_recording(
                         ingested().insert(key, IngestState::Done(delivery.clone()));
                     }
                     Err(err) => {
-                        scrawl_log(format!("ingest: {key} failed to build ({err:#})"));
+                        apparent_log(format!("ingest: {key} failed to build ({err:#})"));
                         ingested().remove(&key);
                     }
                 }
@@ -1720,7 +1720,7 @@ fn ingest_recording(
         Ok(Ok(delivery)) => Outcome::Done(delivery),
         Ok(Err(err)) => Outcome::Failed(err),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            scrawl_log(format!(
+            apparent_log(format!(
                 "ingest: {key} still building after {} s; answering \"processing\"",
                 wait.as_secs()
             ));
@@ -1742,7 +1742,7 @@ fn build_ingested(
 ) -> Result<Delivery> {
     let bundle_dir = config
         .captures_dir()
-        .join(format!("{}.scrawl", crate::make_bundle_id()));
+        .join(format!("{}.apparent", crate::make_bundle_id()));
     let (dir, bundle) = (config.hooks.build)(movie, timeline_path, &bundle_dir)?;
     if config.copy_clipboard {
         let _ = crate::handoff::copy_bundle_to_clipboard(&dir);
@@ -1753,7 +1753,7 @@ fn build_ingested(
     } else {
         "Saved bundle"
     });
-    scrawl_log(format!("ingest: {} ({status})", dir.display()));
+    apparent_log(format!("ingest: {} ({status})", dir.display()));
     if let (Some(on_bundle), Some(bundle)) = (&config.on_bundle, bundle) {
         on_bundle(dir, bundle, Some(status));
     }
@@ -1869,7 +1869,7 @@ fn handle_ingest_connection_with_policy(
     ensure!(4 + json_len < payload.len(), "Invalid framed payload");
     let json_bytes = &payload[4..4 + json_len];
     let timeline: Timeline = serde_json::from_slice(json_bytes).unwrap_or_default();
-    let staging = std::env::temp_dir().join(format!("scrawl-ingest-{}", crate::make_bundle_id()));
+    let staging = std::env::temp_dir().join(format!("apparent-ingest-{}", crate::make_bundle_id()));
     let timeline_path = staging.join("timeline.json");
     let movie_path = staging.join("recording.mp4");
     // Creating the staging directory admits this upload. Its file writes and
@@ -1890,7 +1890,7 @@ fn handle_ingest_connection_with_policy(
         reply_wait(&header),
     );
     let body = crate::delivery::reply_json(&outcome, &title);
-    scrawl_log(format!("ingest http: replied {body}"));
+    apparent_log(format!("ingest http: replied {body}"));
     let status = if matches!(outcome, Outcome::Failed(_)) {
         "500 Internal Server Error"
     } else {
@@ -1901,7 +1901,7 @@ fn handle_ingest_connection_with_policy(
     Ok(())
 }
 
-/// How long the phone will wait for the answer: `X-Scrawl-Wait` seconds, at most
+/// How long the phone will wait for the answer: `X-Apparent-Wait` seconds, at most
 /// `REPLY_WAIT_MAX`.
 fn reply_wait(header: &str) -> Duration {
     header
@@ -1910,7 +1910,7 @@ fn reply_wait(header: &str) -> Duration {
         .find_map(|line| {
             let (k, v) = line.split_once(':')?;
             k.trim()
-                .eq_ignore_ascii_case("x-scrawl-wait")
+                .eq_ignore_ascii_case("x-apparent-wait")
                 .then(|| v.trim().parse::<u64>().ok())
                 .flatten()
         })
@@ -1969,10 +1969,10 @@ fn usb_failed(key: &str) -> Duration {
     wait
 }
 
-/// Takes in recordings the phone marked `.ready` but has no `.sent` for (in `Documents/Scrawl` or
+/// Takes in recordings the phone marked `.ready` but has no `.sent` for (in `Documents/Apparent` or
 /// the legacy `Documents/Tether` directory). Once the bundle is built and sent (or 15 s pass),
 /// writes back `.delivery` (the same JSON an HTTP upload gets) and then `.sent` (the session's
-/// name, all that ScrawlKit builds before `.delivery` read).
+/// name, all that ApparentKit builds before `.delivery` read).
 fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()> {
     if apps.is_empty() {
         return Ok(());
@@ -1999,7 +1999,7 @@ fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()>
     };
 
     for bundle_id in apps {
-        for subdir in ["Documents/Scrawl", "Documents/Tether"] {
+        for subdir in ["Documents/Apparent", "Documents/Tether"] {
             let files = Command::new("xcrun")
                 .args([
                     "devicectl",
@@ -2033,7 +2033,7 @@ fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()>
                     continue;
                 }
                 let staging =
-                    std::env::temp_dir().join(format!("scrawl-usb-{}", crate::make_bundle_id()));
+                    std::env::temp_dir().join(format!("apparent-usb-{}", crate::make_bundle_id()));
                 std::fs::create_dir_all(&staging)?;
                 let local_json = staging.join(format!("{stem}.json"));
                 let local_mp4 = staging.join(format!("{stem}.mp4"));
@@ -2073,7 +2073,7 @@ fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()>
                 if let Outcome::Failed(err) = &outcome {
                     // No `.sent`: the phone keeps `.ready`, and this is tried again later.
                     let wait = usb_failed(&retry_key);
-                    scrawl_log(format!(
+                    apparent_log(format!(
                         "ingest usb {stem}: {err}; trying again in {} s",
                         wait.as_secs()
                     ));
@@ -2083,10 +2083,10 @@ fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()>
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .remove(&retry_key);
-                // `.delivery` (the HTTP reply) goes first: ScrawlKit reads it once `.sent`
+                // `.delivery` (the HTTP reply) goes first: ApparentKit reads it once `.sent`
                 // appears. Builds from before it only read `.sent`, the session's name.
                 let replies =
-                    std::env::temp_dir().join(format!("scrawl-usb-{}", crate::make_bundle_id()));
+                    std::env::temp_dir().join(format!("apparent-usb-{}", crate::make_bundle_id()));
                 std::fs::create_dir_all(&replies)?;
                 let delivery = replies.join(format!("{stem}.delivery"));
                 let sent = replies.join(format!("{stem}.sent"));
@@ -2109,7 +2109,7 @@ fn poll_usb_app_containers(apps: &[String], config: &IngestConfig) -> Result<()>
                     &sent.to_string_lossy(),
                     &remote("sent"),
                 );
-                scrawl_log(format!("ingest usb {stem}: replied {outcome:?}"));
+                apparent_log(format!("ingest usb {stem}: replied {outcome:?}"));
                 let _ = std::fs::remove_dir_all(&replies);
             }
         }
@@ -2186,7 +2186,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_parses_scrawlkit_output() {
+    fn timeline_parses_apparentkit_output() {
         let json = r#"{"app":"dev.kitlangton.UpDown","version":"42","device":"iPhone","system":"27.0",
             "screen":{"width":440,"height":956,"scale":3},"recordedAt":"2026-10-13T16:40:00Z",
             "duration":12.5,"markers":[3.2],"events":[{"t":4.1,"label":"Done tapped"}],
@@ -2566,7 +2566,7 @@ mod tests {
         let clients = RemoteClients::default();
         let mut listener = Some(bind_ingest_listener(0, true).unwrap());
         let port = listener.as_ref().unwrap().local_addr().unwrap().port();
-        // Connected in the kernel, but not yet accepted by Scrawl.
+        // Connected in the kernel, but not yet accepted by Apparent.
         let mut queued = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let mut still_queued = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         let mut bound = Some(true);
@@ -2652,7 +2652,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             link,
-            "updown://scrawl?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=deadbeef0123&session=ses_abc123"
+            "updown://apparent?url=http%3A%2F%2F100.64.0.12%3A47777&url=http%3A%2F%2F192.168.1.20%3A47777&token=deadbeef0123&session=ses_abc123"
         );
 
         assert!(format_setup_link("updown", &[], "tok", None).is_err());
@@ -2733,7 +2733,7 @@ mod tests {
         movie: &Path,
         _timeline: &Path,
         bundle_dir: &Path,
-    ) -> Result<(PathBuf, Option<ScrawlBundle>)> {
+    ) -> Result<(PathBuf, Option<ApparentBundle>)> {
         let bytes = std::fs::read(movie)?;
         if bytes == b"slow" {
             std::thread::sleep(Duration::from_millis(800));
@@ -2770,7 +2770,7 @@ mod tests {
         let mut payload = (json.len() as u32).to_be_bytes().to_vec();
         payload.extend_from_slice(json.as_bytes());
         payload.extend_from_slice(movie);
-        let wait = wait.map_or(String::new(), |s| format!("X-Scrawl-Wait: {s}\r\n"));
+        let wait = wait.map_or(String::new(), |s| format!("X-Apparent-Wait: {s}\r\n"));
         let mut request = format!(
             "POST /ingest HTTP/1.1\r\nAuthorization: Bearer {SECRET}\r\n{wait}Content-Length: {}\r\n\r\n",
             payload.len()
@@ -2791,7 +2791,7 @@ mod tests {
 
     fn temp_captures() -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("scrawl-ingest-test-{}", crate::make_bundle_id()));
+            std::env::temp_dir().join(format!("apparent-ingest-test-{}", crate::make_bundle_id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -2877,11 +2877,11 @@ mod tests {
     fn reply_wait_reads_the_phones_header_and_caps_it() {
         assert_eq!(reply_wait("POST /ingest HTTP/1.1\r\n"), REPLY_WAIT_DEFAULT);
         assert_eq!(
-            reply_wait("POST /ingest HTTP/1.1\r\nx-scrawl-wait: 10\r\n"),
+            reply_wait("POST /ingest HTTP/1.1\r\nx-apparent-wait: 10\r\n"),
             Duration::from_secs(10)
         );
         assert_eq!(
-            reply_wait("POST /ingest HTTP/1.1\r\nX-Scrawl-Wait: 600\r\n"),
+            reply_wait("POST /ingest HTTP/1.1\r\nX-Apparent-Wait: 600\r\n"),
             REPLY_WAIT_MAX
         );
     }

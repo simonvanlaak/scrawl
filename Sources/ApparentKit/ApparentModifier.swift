@@ -2,39 +2,39 @@
   import SwiftUI
   import UIKit
 
-  public enum ScrawlTrigger: Equatable, Sendable {
+  public enum ApparentTrigger: Equatable, Sendable {
     /// Hold three fingers on the screen for half a second to start or stop. On paired devices this
     /// also turns off iOS's three-finger text-editing gestures in the app (see
-    /// `Scrawl.suppressesSystemEditingGestures`), which would otherwise open the Undo · Cut · Copy
+    /// `Apparent.suppressesSystemEditingGestures`), which would otherwise open the Undo · Cut · Copy
     /// bar when a text field is focused.
     case threeFingerLongPress
-    /// No gesture: call `Scrawl.shared.start()` and `stop()` yourself.
+    /// No gesture: call `Apparent.shared.start()` and `stop()` yourself.
     case none
   }
 
   public extension View {
-    /// Adds Scrawl to this window: once configured on the device, touches are watched (for the
+    /// Adds Apparent to this window: once configured on the device, touches are watched (for the
     /// timeline) and the trigger starts and stops recordings. Unconfigured devices
     /// stay completely inert (no gesture recognizers, overlay window, or network calls).
     ///
-    /// This modifier also registers `.onOpenURL` so `<scheme>://scrawl?url=...&token=...` and
-    /// `<scheme>://scrawl?reset=1` setup links (plus the legacy `tether` host) work automatically.
+    /// This modifier also registers `.onOpenURL` so `<scheme>://apparent?url=...&token=...` and
+    /// `<scheme>://apparent?reset=1` setup links (plus the legacy `tether` host) work automatically.
     /// In SwiftUI, `.onOpenURL` accumulates handlers via a preference and invokes every registered
     /// closure for each incoming URL rather than consuming the event at the first modifier, so a
     /// host app's own `.onOpenURL` continues to receive its links. Host apps that also want to
-    /// short-circuit their own URL router on Scrawl links can check `if !Scrawl.handleSetupURL(url) { ... }`.
-    func scrawl(trigger: ScrawlTrigger = .threeFingerLongPress, isEnabled: Bool = true) -> some View {
-      background(ScrawlInstaller(trigger: trigger, isEnabled: isEnabled))
+    /// short-circuit their own URL router on Apparent links can check `if !Apparent.handleSetupURL(url) { ... }`.
+    func apparent(trigger: ApparentTrigger = .threeFingerLongPress, isEnabled: Bool = true) -> some View {
+      background(ApparentInstaller(trigger: trigger, isEnabled: isEnabled))
         .onOpenURL { url in
           if isEnabled {
-            _ = Scrawl.handleSetupURL(url)
+            _ = Apparent.handleSetupURL(url)
           }
         }
     }
   }
 
-  private struct ScrawlInstaller: UIViewRepresentable {
-    let trigger: ScrawlTrigger
+  private struct ApparentInstaller: UIViewRepresentable {
+    let trigger: ApparentTrigger
     let isEnabled: Bool
 
     func makeUIView(context _: Context) -> InstallerView {
@@ -48,14 +48,14 @@
 
   /// Attaches the touch observer and the trigger to its window only when enabled and configured.
   final class InstallerView: UIView {
-    private var trigger: ScrawlTrigger
+    private var trigger: ApparentTrigger
     private var isEnabled: Bool
     private weak var installedOn: UIWindow?
-    private var installedTrigger: ScrawlTrigger?
+    private var installedTrigger: ApparentTrigger?
     private var touchObserver: TouchObserver?
     private var triggerRecognizer: UILongPressGestureRecognizer?
 
-    init(trigger: ScrawlTrigger, isEnabled: Bool) {
+    init(trigger: ApparentTrigger, isEnabled: Bool) {
       self.trigger = trigger
       self.isEnabled = isEnabled
       super.init(frame: .zero)
@@ -63,7 +63,7 @@
       NotificationCenter.default.addObserver(
         self,
         selector: #selector(configurationDidChange),
-        name: Scrawl.configurationDidChangeNotification,
+        name: Apparent.configurationDidChangeNotification,
         object: nil
       )
     }
@@ -76,7 +76,7 @@
       syncInstall()
     }
 
-    func update(trigger: ScrawlTrigger, isEnabled: Bool) {
+    func update(trigger: ApparentTrigger, isEnabled: Bool) {
       self.trigger = trigger
       self.isEnabled = isEnabled
       syncInstall()
@@ -87,7 +87,7 @@
     }
 
     private func syncInstall() {
-      guard isEnabled, Scrawl.isConfigured, let window else {
+      guard isEnabled, Apparent.isConfigured, let window else {
         uninstall()
         return
       }
@@ -107,7 +107,7 @@
         press.cancelsTouchesInView = false
         window.addGestureRecognizer(press)
         triggerRecognizer = press
-        Scrawl.shared.threeFingerTriggers += 1
+        Apparent.shared.threeFingerTriggers += 1
       }
     }
 
@@ -121,7 +121,7 @@
         }
       }
       if triggerRecognizer != nil {
-        Scrawl.shared.threeFingerTriggers -= 1
+        Apparent.shared.threeFingerTriggers -= 1
       }
       touchObserver = nil
       triggerRecognizer = nil
@@ -130,8 +130,8 @@
     }
 
     @objc private func triggered(_ press: UILongPressGestureRecognizer) {
-      guard press.state == .began, Scrawl.isConfigured else { return }
-      Scrawl.shared.triggerRecognized()
+      guard press.state == .began, Apparent.isConfigured else { return }
+      Apparent.shared.triggerRecognized()
     }
   }
 
@@ -158,19 +158,19 @@
     override func reset() {
       super.reset()
       fingers.removeAll()
-      Scrawl.shared.touchesReset()
+      Apparent.shared.touchesReset()
     }
 
     private func forward(_ touches: Set<UITouch>, _ phase: UITouch.Phase, _: UIEvent) {
       guard let window = view as? UIWindow else { return }
       if phase == .began {
         fingers.formUnion(touches.map(ObjectIdentifier.init))
-        if fingers.count == 3, Scrawl.shared.threeFingerTriggers > 0 { Scrawl.shared.prepareToStart() }
+        if fingers.count == 3, Apparent.shared.threeFingerTriggers > 0 { Apparent.shared.prepareToStart() }
       } else if phase == .ended || phase == .cancelled {
         fingers.subtract(touches.map(ObjectIdentifier.init))
       }
       for touch in touches {
-        Scrawl.shared.record(touch: touch, in: window, phase: phase)
+        Apparent.shared.record(touch: touch, in: window, phase: phase)
       }
     }
 

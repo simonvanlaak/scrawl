@@ -2,7 +2,7 @@
 //! (`HEX_APPLICATION_SUPPORT_DIR` or `~/Library/Application Support/hex/local-api.json`, or
 //! `voice-control` before Hex moved it, holds the port and bearer token; `GET /health`, `GET /models`, `POST /transcriptions`).
 //!
-//! Hex returns text and a duration but no word times, and Scrawl needs them to hand each
+//! Hex returns text and a duration but no word times, and Apparent needs them to hand each
 //! keyframe its words. So the recording is cut into speech islands (`audio::speech_islands`),
 //! each island is transcribed on its own, and its words are spread across it by length. Those
 //! times are estimates (`TranscriptData::estimated`): they place words inside the right island
@@ -32,7 +32,7 @@ pub const PREFERRED_MODELS: [&str; 4] = [
     "whisper_large_v3_turbo",
 ];
 
-/// Keep the previous English default; Hex, not Scrawl, validates model/language support.
+/// Keep the previous English default; Hex, not Apparent, validates model/language support.
 pub const DEFAULT_LANGUAGE: &str = "en";
 
 /// Accept language-code syntax without maintaining another list of Hex's languages.
@@ -250,7 +250,7 @@ pub struct Model {
 }
 
 impl Model {
-    /// Ready to transcribe now. Scrawl never asks Hex to download or prepare a model.
+    /// Ready to transcribe now. Apparent never asks Hex to download or prepare a model.
     pub fn usable(&self) -> bool {
         self.installed && self.verified
     }
@@ -322,7 +322,7 @@ impl Client {
         )?;
         ensure!(
             response.status != 401,
-            "Hex rejected Scrawl's credentials (restart Hex?)"
+            "Hex rejected Apparent's credentials (restart Hex?)"
         );
         ensure!(
             response.status == 200,
@@ -426,7 +426,7 @@ pub fn refresh_in_background() {
         return;
     }
     let spawned = std::thread::Builder::new()
-        .name("scrawl-hex-status".into())
+        .name("apparent-hex-status".into())
         .spawn(|| {
             let status = status().ok();
             if let Ok(mut cache) = CACHE.lock() {
@@ -443,7 +443,7 @@ pub fn refresh_in_background() {
 /// single failed file read.
 pub fn watch() {
     let _ = std::thread::Builder::new()
-        .name("scrawl-hex-watch".into())
+        .name("apparent-hex-watch".into())
         .spawn(|| {
             loop {
                 let status = status().ok();
@@ -559,7 +559,7 @@ pub fn transcribe_clips(
         let text = match send(&wav) {
             Ok(text) => text,
             Err(Failure::Rejected { status, code }) => {
-                crate::capture::scrawl_log(format!(
+                crate::capture::apparent_log(format!(
                     "Hex rejected a clip ({status} {code}); skipping it"
                 ));
                 rejected += 1;
@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn missing_discovery_or_refused_connection_is_not_connected() {
-        let dir = std::env::temp_dir().join(format!("scrawl-hex-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("apparent-hex-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(Client::connect_at(&dir.join("nope.json")).is_err());
         let closed = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn connect_checks_token_and_api_version() {
-        let dir = std::env::temp_dir().join(format!("scrawl-hex-v-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("apparent-hex-v-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fake = fake_hex(|_, path, authorized| {
             match (path, authorized) {

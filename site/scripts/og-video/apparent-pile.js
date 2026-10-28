@@ -1,4 +1,4 @@
-// Scrawl 1 · Pile: marks get drawn in the air (circles, arrows, checks, pins),
+// Apparent 1 · Pile: marks get drawn in the air (circles, arrows, checks, pins),
 // then drop and pile up under the brush. The floor lets go, the pile falls away,
 // and the empty frame is the first frame again.
 ;(() => {
@@ -130,7 +130,7 @@
       ctx.font = `600 54px ${SANS}`
       ctx.textAlign = "left"
       ctx.textBaseline = "middle"
-      ctx.fillText("Scrawl", LOGO.x - 44, LOGO.y + 2)
+      ctx.fillText("Apparent", LOGO.x - 44, LOGO.y + 2)
       ctx.restore()
     },
   })

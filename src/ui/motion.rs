@@ -1,6 +1,6 @@
 //! The capsule's motion plumbing: one animation clock that can run slow, springs and durations
-//! that can be tuned live from `~/.config/scrawl/tune.json` (debug builds), and a per-frame trace
-//! in motion-lint's format (`SCRAWL_MOTION_TRACE=<file>`). Each costs nothing when it's off.
+//! that can be tuned live from `~/.config/apparent/tune.json` (debug builds), and a per-frame trace
+//! in motion-lint's format (`APPARENT_MOTION_TRACE=<file>`). Each costs nothing when it's off.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -97,7 +97,7 @@ impl Tune {
 
 type Field = fn(&mut Tune) -> &mut f32;
 
-/// `tune.json` keys, in the order `scrawl tune list` prints them.
+/// `tune.json` keys, in the order `apparent tune list` prints them.
 pub(super) const KEYS: &[(&str, &str, Field)] = &[
     ("island.duration", "Phase morph width spring (s)", |t| {
         &mut t.island.response
@@ -286,10 +286,10 @@ impl Tune {
 }
 
 pub(super) fn tune_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("SCRAWL_TUNE") {
+    if let Some(path) = std::env::var_os("APPARENT_TUNE") {
         return Some(PathBuf::from(path));
     }
-    dirs::home_dir().map(|home| home.join(".config/scrawl/tune.json"))
+    dirs::home_dir().map(|home| home.join(".config/apparent/tune.json"))
 }
 
 struct TuneState {
@@ -336,14 +336,14 @@ pub(crate) fn poll_tune() {
             .and_then(|_| std::fs::read_to_string(&path).ok())
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
             .map_or(Tune::DEFAULT, |value| Tune::from_json(&value));
-        if let Some(scale) = std::env::var("SCRAWL_TIME_SCALE")
+        if let Some(scale) = std::env::var("APPARENT_TIME_SCALE")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
         {
             tune.time_scale = scale.clamp(0.02, 4.0);
         }
         if tune != state.tune {
-            crate::capture::scrawl_log(format!(
+            crate::capture::apparent_log(format!(
                 "tune: {} ({})",
                 if stamp.is_some() {
                     "loaded"
@@ -359,7 +359,7 @@ pub(crate) fn poll_tune() {
     });
 }
 
-/// `scrawl tune …`: edits `tune.json`, which debug builds (the lab, the installed app) re-read
+/// `apparent tune …`: edits `tune.json`, which debug builds (the lab, the installed app) re-read
 /// within a quarter second.
 pub(crate) enum TuneAction {
     List,
@@ -413,7 +413,7 @@ pub(crate) fn tune_command(action: TuneAction) -> anyhow::Result<()> {
         TuneAction::Set(key, value) => {
             anyhow::ensure!(
                 Tune::DEFAULT.get(&key).is_some(),
-                "unknown key {key}; `scrawl tune list` shows them"
+                "unknown key {key}; `apparent tune list` shows them"
             );
             let mut map = read();
             map.insert(key.clone(), serde_json::json!(value));
@@ -551,7 +551,7 @@ thread_local! {
 fn trace_target() -> Option<&'static PathBuf> {
     static TARGET: OnceLock<Option<PathBuf>> = OnceLock::new();
     TARGET
-        .get_or_init(|| std::env::var_os("SCRAWL_MOTION_TRACE").map(PathBuf::from))
+        .get_or_init(|| std::env::var_os("APPARENT_MOTION_TRACE").map(PathBuf::from))
         .as_ref()
 }
 
@@ -571,7 +571,7 @@ pub(crate) fn trace_open(launch: &str, display: [f32; 2]) {
             let _ = std::fs::create_dir_all(parent);
         }
         let Ok(file) = std::fs::File::create(path) else {
-            crate::capture::scrawl_log(format!("motion trace: can't write {}", path.display()));
+            crate::capture::apparent_log(format!("motion trace: can't write {}", path.display()));
             return;
         };
         let mut out = std::io::BufWriter::new(file);

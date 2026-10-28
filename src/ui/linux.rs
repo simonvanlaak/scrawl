@@ -3,7 +3,7 @@
 //! and ink overlay above every window (override-redirect, on top, click-through).
 //!
 //! GPUI's X11 backend sees the whole X screen as one display with its origin at (0, 0), so a
-//! window's DIPs are root-window pixels divided by the scale. Scrawl places its floating
+//! window's DIPs are root-window pixels divided by the scale. Apparent places its floating
 //! windows itself, in pixels, once GPUI has mapped them (`linux::x11::float`).
 
 use std::cell::RefCell;
@@ -28,7 +28,7 @@ pub(super) const HEADER_TRAIL: f32 = 0.0;
 /// The pill's top edge on the screen, below the work area's top (GNOME's top bar).
 pub(super) const PILL_TOP: f32 = 14.0;
 
-/// GPUI lays out in DIPs; Scrawl's global coordinates are pixels.
+/// GPUI lays out in DIPs; Apparent's global coordinates are pixels.
 pub(super) fn points_per_pixel(window: &Window) -> f32 {
     1.0 / window.scale_factor().max(0.25)
 }
@@ -94,7 +94,7 @@ pub(super) fn move_picker_window(frame: [f64; 4], cx: &mut App) {
 /// The picker takes the keys itself (`configure_picker_window`).
 pub(super) fn take_keys(_cx: &mut App) {}
 
-/// The window manager focuses the window below when Scrawl's closes.
+/// The window manager focuses the window below when Apparent's closes.
 pub(super) fn hand_back_keys(_cx: &mut App) {}
 
 /// The desktop's title bar drags the window.
@@ -135,7 +135,7 @@ pub(super) fn check_for_updates() {
 pub(super) fn open_overlay(
     telemetry: Arc<SharedCaptureTelemetry>,
     on: Option<[f64; 4]>,
-    cx: &mut gpui::Context<super::ScrawlCoordinator>,
+    cx: &mut gpui::Context<super::ApparentCoordinator>,
 ) -> Result<LaserOverlay, String> {
     LaserOverlay::open(telemetry, on, cx)
 }
@@ -183,7 +183,7 @@ fn icon_rgba(size: usize) -> Option<Vec<u8>> {
 }
 
 /// The app icon on a window (`_NET_WM_ICON`) and its class, so the dock and the window switcher
-/// show Scrawl's icon and match it to `scrawl.desktop`.
+/// show Apparent's icon and match it to `apparent.desktop`.
 pub(crate) fn set_app_icon(window: &Window) {
     let Some(id) = x11::window_id(window) else {
         return;
@@ -206,14 +206,14 @@ pub(crate) fn set_app_icon(window: &Window) {
     }
 }
 
-/// Brings one of Scrawl's floating windows to the top.
+/// Brings one of Apparent's floating windows to the top.
 pub(super) fn raise_window(window: &mut Window) {
     if let Some(id) = x11::window_id(window) {
         x11::raise(id);
     }
 }
 
-/// `scrawl lab`'s backdrop stays an ordinary popup on Linux.
+/// `apparent lab`'s backdrop stays an ordinary popup on Linux.
 pub(super) fn configure_lab_backdrop(_w: f32, _h: f32) {}
 
 struct KeepAlive;
@@ -224,7 +224,7 @@ impl gpui::Render for KeepAlive {
     }
 }
 
-/// GPUI on Linux quits when its last window closes, and Scrawl lives in the tray with no window
+/// GPUI on Linux quits when its last window closes, and Apparent lives in the tray with no window
 /// most of the time: an unmanaged 1 px window off the screen keeps it running.
 pub(super) fn keep_alive(cx: &mut App) {
     let _ = cx.open_window(
@@ -253,7 +253,7 @@ pub(super) fn keep_alive(cx: &mut App) {
     );
 }
 
-/// Opens a window Scrawl's way on this platform.
+/// Opens a window Apparent's way on this platform.
 pub(super) fn decorate_app_window(window: &mut Window) {
     set_app_icon(window);
 }
@@ -407,7 +407,7 @@ pub(super) fn pointer_on_hud_pill() -> bool {
     })
 }
 
-/// The largest of Scrawl's windows (for `scrawl preview --capture-screenshot`).
+/// The largest of Apparent's windows (for `apparent preview --capture-screenshot`).
 pub(super) fn front_own_window() -> Option<isize> {
     let pid = std::process::id();
     linux::top_level_windows()
@@ -424,9 +424,9 @@ pub(super) fn capture_own_window_screenshot(
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let window = window.ok_or_else(|| anyhow::anyhow!("Could not find Scrawl's window"))?;
+    let window = window.ok_or_else(|| anyhow::anyhow!("Could not find Apparent's window"))?;
     let info = linux::window_info(window)
-        .ok_or_else(|| anyhow::anyhow!("Scrawl's window went away"))?;
+        .ok_or_else(|| anyhow::anyhow!("Apparent's window went away"))?;
     let frame = x11::capture_rect(info.rect)?;
     crate::render::save_png(&frame, out_path)
 }
@@ -435,7 +435,7 @@ pub(super) fn capture_own_window_screenshot(
 
 /// The tray icon (a StatusNotifierItem: KDE Plasma, and GNOME with the AppIndicator extension,
 /// which Ubuntu turns on). Its menu is rebuilt whenever the host asks, so it's always current.
-struct ScrawlTray {
+struct ApparentTray {
     actions: flume::Sender<MenuAction>,
     status: Option<String>,
     inbox: usize,
@@ -449,7 +449,7 @@ fn record_title() -> String {
     )
 }
 
-impl ScrawlTray {
+impl ApparentTray {
     fn item(&self, label: impl Into<String>, action: MenuAction) -> ksni::MenuItem<Self> {
         ksni::menu::StandardItem {
             label: label.into(),
@@ -462,13 +462,13 @@ impl ScrawlTray {
     }
 }
 
-impl ksni::Tray for ScrawlTray {
+impl ksni::Tray for ApparentTray {
     fn id(&self) -> String {
-        "dev.kitlangton.scrawl".into()
+        "dev.kitlangton.apparent".into()
     }
 
     fn title(&self) -> String {
-        "Scrawl".into()
+        "Apparent".into()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -504,7 +504,7 @@ impl ksni::Tray for ScrawlTray {
             (None, n) => format!("{n} captures from iPhone"),
         };
         ksni::ToolTip {
-            title: "Scrawl".into(),
+            title: "Apparent".into(),
             description,
             ..Default::default()
         }
@@ -546,33 +546,33 @@ impl ksni::Tray for ScrawlTray {
         items.push(ksni::MenuItem::Separator);
         items.push(self.item("Settings…", MenuAction::Settings));
         items.push(self.item("Check for Updates…", MenuAction::CheckForUpdates));
-        items.push(self.item("Quit Scrawl", MenuAction::Quit));
+        items.push(self.item("Quit Apparent", MenuAction::Quit));
         items
     }
 }
 
 thread_local! {
-    static TRAY: RefCell<Option<ksni::blocking::Handle<ScrawlTray>>> = const { RefCell::new(None) };
+    static TRAY: RefCell<Option<ksni::blocking::Handle<ApparentTray>>> = const { RefCell::new(None) };
 }
 
 pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
     if let Some(warning) = linux::media::decoder_warning() {
-        crate::capture::scrawl_log(&warning);
-        linux::shell::notify("Scrawl setup: H.264 decoder missing", &warning);
+        crate::capture::apparent_log(&warning);
+        linux::shell::notify("Apparent setup: H.264 decoder missing", &warning);
     }
     let (sender, receiver) = flume::bounded(16);
     // A second launch (`linux::ipc`) opens Settings: GNOME without the AppIndicator extension
-    // shows no tray icon, and this is how to reach Scrawl there.
+    // shows no tray icon, and this is how to reach Apparent there.
     let open = linux::ipc::open_requests();
     let open_sender = sender.clone();
     let _ = std::thread::Builder::new()
-        .name("scrawl-open-requests".into())
+        .name("apparent-open-requests".into())
         .spawn(move || {
             while open.recv().is_ok() {
                 let _ = open_sender.try_send(MenuAction::Settings);
             }
         });
-    let tray = ScrawlTray {
+    let tray = ApparentTray {
         actions: sender,
         status: None,
         inbox: 0,
@@ -580,13 +580,13 @@ pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
     match tray.spawn() {
         Ok(handle) => TRAY.with(|slot| *slot.borrow_mut() = Some(handle)),
         Err(error) => {
-            crate::capture::scrawl_log(format!(
-                "Tray icon unavailable ({error}); launch Scrawl again to open Settings"
+            crate::capture::apparent_log(format!(
+                "Tray icon unavailable ({error}); launch Apparent again to open Settings"
             ));
             linux::shell::notify(
-                "Scrawl is running",
+                "Apparent is running",
                 &format!(
-                    "Press {} to record. Your desktop shows no tray icons, so open Scrawl again for Settings.",
+                    "Press {} to record. Your desktop shows no tray icons, so open Apparent again for Settings.",
                     crate::settings::Shortcuts::load().record.label
                 ),
             );
@@ -596,7 +596,7 @@ pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
 }
 
 /// Called from the UI loop: refreshes the menu now and then (the record shortcut's label and the
-/// export item can change while Scrawl runs).
+/// export item can change while Apparent runs).
 pub(super) fn poll_status_bar() {
     static LAST: Mutex<Option<Instant>> = Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

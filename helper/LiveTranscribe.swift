@@ -7,7 +7,7 @@ import Speech
 /// `{"segment":{t0,t1,text},"words":[…]}` per finalized result, and after stdin closes and the
 /// tail is finalized `{"done":true,"samples":N}`. Times are ms from the first sample, as
 /// `transcribe` gives them for the WAV. It never downloads a model: one that isn't installed
-/// fails at once, and Scrawl transcribes the finished recording instead.
+/// fails at once, and Apparent transcribes the finished recording instead.
 /// Before macOS 26 there is no SpeechAnalyzer to stream to, so it fails at once the same way.
 enum LiveTranscriber {
   static func run(preferred: String? = nil) async throws {

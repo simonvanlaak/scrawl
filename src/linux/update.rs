@@ -12,8 +12,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const REPO: &str = "simonvanlaak/scrawl";
-const MAIN_FEED: &str = "https://raw.githubusercontent.com/simonvanlaak/scrawl/linux-main-feed/main-updates.json";
+const REPO: &str = "tryapparent/apparent";
 static CHECK: Mutex<()> = Mutex::new(());
 
 pub fn set_channel_in(path: &Path, channel: &str) -> Result<()> {
@@ -47,7 +46,7 @@ fn same_executable(current: &Path, recorded: &str) -> bool {
 pub fn record_running() -> Result<()> {
     let pid = std::process::id();
     write_runtime_in(&crate::handoff::default_config_path(), pid,
-        process_ticks(pid).context("cannot read Scrawl process start time")?)
+        process_ticks(pid).context("cannot read Apparent process start time")?)
 }
 
 pub fn status_at(path: &Path) -> Result<serde_json::Value> {
@@ -87,29 +86,24 @@ pub fn check_cli() -> Result<&'static str> {
     target()?.context("Updates require an AppImage owned by you under your home directory")?;
     let _guard = CHECK.lock().map_err(|_| anyhow::anyhow!("update check lock poisoned"))?;
     Ok(if check()? {
-        "installed; restart Scrawl to use it"
+        "installed; restart Apparent to use it"
     } else if status()?["pendingRestart"] == true {
-        "already installed; restart Scrawl to use it"
+        "already installed; restart Apparent to use it"
     } else {
         "up to date"
     })
 }
 
-#[derive(Debug, Deserialize)]
-struct Asset {
-    name: String,
-    sha256: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct MainFeed {
-    sha: String,
-    assets: std::collections::BTreeMap<String, Asset>,
-}
+// Main previews are published from main as GitHub releases.
 
 #[derive(Debug, Deserialize)]
 struct Release {
     tag_name: String,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
+    published_at: Option<String>,
     assets: Vec<ReleaseAsset>,
 }
 
@@ -134,21 +128,77 @@ fn arch() -> Option<&'static str> {
     }
 }
 
-fn main_candidate(feed: MainFeed, arch: &str) -> Result<Candidate> {
-    ensure!(feed.sha.len() == 40 && feed.sha.bytes().all(|b| b.is_ascii_hexdigit()), "invalid main revision");
-    let asset = feed.assets.get(arch).context("main has no AppImage for this CPU")?;
-    let prefix = "Scrawl-";
+fn main_candidate(release: &Release, arch: &str, checksum: &str) -> Result<Candidate> {
+    let sha = release.tag_name.strip_prefix("linux-main-").context("not a main preview")?;
+    ensure!(sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "invalid main revision");
     let suffix = format!("-linux-{arch}.AppImage");
-    let version = asset.name.strip_prefix(prefix).and_then(|n| n.strip_suffix(&suffix))
-        .context("unexpected main AppImage name")?;
-    ensure!(!version.is_empty() && version.bytes().all(|b| b.is_ascii_digit() || b == b'.'), "invalid main version");
-    validate_hash(&asset.sha256)?;
-    Ok(Candidate {
-        id: feed.sha.clone(),
-        channel: "main",
-        url: format!("https://github.com/{REPO}/releases/download/linux-main-{}/{}", feed.sha, asset.name),
-        sha256: asset.sha256.clone(),
-    })
+    let image = release.assets.iter().find(|asset| asset.name.starts_with("Apparent-") && asset.name.ends_with(&suffix))
+        .context("main preview has no AppImage for this CPU")?;
+    let version = image.name.strip_prefix("Apparent-").and_then(|name| name.strip_suffix(&suffix)).unwrap();
+    ensure!(!version.is_empty() && version.bytes().all(|b| b.is_ascii_digit() || b == b'.'), "invalid main AppImage version");
+    let checksum_asset = release.assets.iter().find(|asset| asset.name == format!("{}.sha256", image.name))
+        .context("main preview has no checksum")?;
+    let prefix = format!("https://github.com/{REPO}/releases/download/{}/", release.tag_name);
+    ensure!(image.browser_download_url == format!("{prefix}{}", image.name)
+        && checksum_asset.browser_download_url == format!("{prefix}{}", checksum_asset.name), "unexpected main preview asset URL");
+    let (hash, name) = checksum.trim().split_once(char::is_whitespace).context("invalid main preview checksum")?;
+    ensure!(name.trim() == image.name, "checksum refers to another file");
+    validate_hash(hash)?;
+    Ok(Candidate { id: sha.to_owned(), channel: "main", url: image.browser_download_url.clone(), sha256: hash.to_owned() })
+}
+
+fn main_releases(releases: Vec<Release>, arch: &str) -> Vec<Release> {
+    let suffix = format!("-linux-{arch}.AppImage");
+    let mut releases: Vec<_> = releases.into_iter().filter(|release| {
+        release.prerelease && !release.draft && release.published_at.is_some()
+            && release.tag_name.strip_prefix("linux-main-").is_some_and(|sha| {
+                sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+            })
+            && release.assets.iter().any(|asset| {
+                asset.name.starts_with("Apparent-") && asset.name.ends_with(&suffix)
+                    && release.assets.iter().any(|sum| sum.name == format!("{}.sha256", asset.name))
+            })
+    }).collect();
+    releases.sort_by(|a, b| b.published_at.cmp(&a.published_at));
+    releases
+}
+
+fn candidate_from_release(release: &Release, arch: &str, fetch: &impl Fn(&str) -> Result<Vec<u8>>) -> Result<Candidate> {
+    let suffix = format!("-linux-{arch}.AppImage.sha256");
+    let checksum = release.assets.iter().find(|asset| asset.name.starts_with("Apparent-") && asset.name.ends_with(&suffix))
+        .context("main preview has no checksum for this CPU")?;
+    let prefix = format!("https://github.com/{REPO}/releases/download/{}/", release.tag_name);
+    ensure!(checksum.browser_download_url == format!("{prefix}{}", checksum.name), "unexpected main preview checksum URL");
+    let text = fetch(&checksum.browser_download_url)?;
+    main_candidate(&release, arch, std::str::from_utf8(&text)?)
+}
+
+fn first_usable_main(releases: Vec<Release>, arch: &str, fetch: &impl Fn(&str) -> Result<Vec<u8>>) -> Result<Option<Candidate>> {
+    let mut last_error = None;
+    for release in main_releases(releases, arch) {
+        match candidate_from_release(&release, arch, fetch) {
+            Ok(candidate) => return Ok(Some(candidate)),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    match last_error {
+        Some(error) => Err(error),
+        None => Ok(None),
+    }
+}
+
+fn latest_main_candidate(arch: &str) -> Result<Candidate> {
+    // Release lists include Mac previews, old Scrawl assets and stable releases.
+    // GitHub pages by creation date, not publication date: inspect all pages before choosing.
+    let mut releases = Vec::new();
+    for page in 1.. {
+        let body = get(&format!("https://api.github.com/repos/{REPO}/releases?per_page=10&page={page}"), None)?;
+        let page_releases: Vec<Release> = serde_json::from_slice(&body).context("invalid release list")?;
+        if page_releases.is_empty() { break; }
+        releases.extend(page_releases);
+    }
+    first_usable_main(releases, arch, &|url| get(url, None))?
+        .context("no published Linux main preview yet")
 }
 
 fn validate_hash(hash: &str) -> Result<()> {
@@ -159,7 +209,7 @@ fn validate_hash(hash: &str) -> Result<()> {
 fn get(url: &str, out: Option<&Path>) -> Result<Vec<u8>> {
     ensure!(url.starts_with("https://"), "update URL must use HTTPS");
     let mut cmd = Command::new("curl");
-    cmd.args(["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "10", "--max-time", "300", "--user-agent", "Scrawl", "--url", url]);
+    cmd.args(["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "10", "--max-time", "300", "--user-agent", "Apparent", "--url", url]);
     if let Some(path) = out {
         cmd.args(["--max-filesize", "1073741824"]);
         cmd.arg("--output").arg(path);
@@ -175,7 +225,7 @@ fn stable_candidate(arch: &str) -> Result<Candidate> {
     let body = get(&format!("https://api.github.com/repos/{REPO}/releases/latest"), None)?;
     let release: Release = serde_json::from_slice(&body).context("invalid stable release")?;
     ensure!(release.tag_name.starts_with('v') && release.tag_name[1..].bytes().all(|b| b.is_ascii_digit() || b == b'.'), "invalid stable tag");
-    let name = format!("Scrawl-{}-linux-{arch}.AppImage", &release.tag_name[1..]);
+    let name = format!("Apparent-{}-linux-{arch}.AppImage", &release.tag_name[1..]);
     let image = release.assets.iter().find(|a| a.name == name).context("no Linux AppImage in the stable release yet")?;
     let checksum = release.assets.iter().find(|a| a.name == format!("{name}.sha256")).context("stable release has no checksum")?;
     let prefix = format!("https://github.com/{REPO}/releases/download/{}/", release.tag_name);
@@ -189,8 +239,7 @@ fn stable_candidate(arch: &str) -> Result<Candidate> {
 }
 
 fn installed_id(image: &Path) -> Option<(String, String)> {
-    let sidecar = image.with_extension("AppImage.scrawl-update.json");
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(sidecar).ok()?).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(image.with_extension("AppImage.apparent-update.json")).ok()?).ok()?;
     Some((value["channel"].as_str()?.to_owned(), value["id"].as_str()?.to_owned()))
 }
 
@@ -256,7 +305,7 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
     let name = image.file_name().context("AppImage has no name")?.to_string_lossy();
     let stage = parent.join(format!(".{name}.download-{}", std::process::id()));
     let backup = parent.join(format!(".{name}.previous"));
-    let sidecar = image.with_extension("AppImage.scrawl-update.json");
+    let sidecar = image.with_extension("AppImage.apparent-update.json");
     let staged_sidecar = parent.join(format!(".{name}.update-{}", std::process::id()));
     // Reserve only our own temporary path; never reuse another process's download.
     let _reserved = OpenOptions::new().write(true).create_new(true).open(&stage)?;
@@ -277,10 +326,10 @@ fn install(candidate: &Candidate, image: &Path) -> Result<()> {
         swapped = true;
         // The old AppImage is now at stage; it remains a rollback copy.
         if let Err(error) = fs::rename(&stage, &backup) {
-            crate::capture::scrawl_log(format!("Linux update: previous AppImage remains at {}: {error}", stage.display()));
+            crate::capture::apparent_log(format!("Linux update: previous AppImage remains at {}: {error}", stage.display()));
         }
         if let Err(error) = fs::rename(&staged_sidecar, &sidecar) {
-            crate::capture::scrawl_log(format!("Linux update: updated AppImage but could not write version marker: {error}"));
+            crate::capture::apparent_log(format!("Linux update: updated AppImage but could not write version marker: {error}"));
         }
         Ok(())
     })();
@@ -295,14 +344,13 @@ fn check() -> Result<bool> {
     let status = status()?;
     let arch = arch().context("no AppImage for this CPU")?;
     let candidate = if status["channel"] == "main" {
-        let feed: MainFeed = serde_json::from_slice(&get(MAIN_FEED, None)?)?;
-        main_candidate(feed, arch)?
+        latest_main_candidate(arch)?
     } else {
         stable_candidate(arch)?
     };
     if !newer(&candidate, installed_id(&image)) { return Ok(false) }
     install(&candidate, &image)?;
-    super::shell::notify("Scrawl updated", "The new version will start the next time you open Scrawl. Your previous AppImage is kept beside it.");
+    super::shell::notify("Apparent updated", "The new version will start the next time you open Apparent. Your previous AppImage is kept beside it.");
     Ok(true)
 }
 
@@ -310,7 +358,7 @@ pub fn check_now() {
     if let Ok(_guard) = CHECK.try_lock()
         && let Err(error) = check()
     {
-        crate::capture::scrawl_log(format!("Linux update: {error:#}"));
+        crate::capture::apparent_log(format!("Linux update: {error:#}"));
     }
 }
 
@@ -327,26 +375,116 @@ mod tests {
     use super::*;
 
     #[test]
-    fn main_feed_rejects_foreign_name_and_digest() {
-        let feed = |name: &str, hash: &str| MainFeed {
-            sha: "a".repeat(40),
-            assets: [("x86_64".into(), Asset { name: name.into(), sha256: hash.into() })].into(),
+    fn main_channel_selects_latest_published_main_release() {
+        let release = |tag: &str, date: &str, draft: bool, name: &str| Release {
+            tag_name: tag.into(), prerelease: true, draft, published_at: Some(date.into()),
+            assets: [name.to_owned(), format!("{name}.sha256")].into_iter().map(|name| ReleaseAsset {
+                browser_download_url: format!("https://example.org/{name}"), name,
+            }).collect(),
         };
-        let expected = format!("Scrawl-{}-linux-x86_64.AppImage", env!("CARGO_PKG_VERSION"));
-        assert!(main_candidate(feed("other.AppImage", &"b".repeat(64)), "x86_64").is_err());
-        assert!(main_candidate(feed(&expected, "invalid"), "x86_64").is_err());
-        let candidate = main_candidate(feed(&expected, &"b".repeat(64)), "x86_64").unwrap();
+        let apparent = "Apparent-0.3.13-linux-x86_64.AppImage";
+        let releases = vec![
+            release("preview-mac-1", "2026-10-29T01:00:00Z", false, apparent),
+            release(&format!("linux-main-{}", "a".repeat(40)), "2026-10-27T01:00:00Z", false, apparent),
+            release(&format!("linux-main-{}", "b".repeat(40)), "2026-10-28T01:00:00Z", false, apparent),
+            release(&format!("linux-main-{}", "c".repeat(40)), "2026-10-29T01:00:00Z", true, apparent),
+            release(&format!("linux-main-{}", "d".repeat(40)), "2026-10-30T01:00:00Z", false,
+                "Scrawl-0.3.13-linux-x86_64.AppImage"),
+        ];
+        assert_eq!(main_releases(releases, "x86_64")[0].tag_name,
+            "linux-main-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert!(main_releases(Vec::new(), "x86_64").is_empty());
+    }
+
+    #[test]
+    fn main_channel_falls_back_when_newest_preview_is_incomplete() {
+        let image = format!("Apparent-{}-linux-x86_64.AppImage", env!("CARGO_PKG_VERSION"));
+        let release = |letter: &str, date: &str| {
+            let tag = format!("linux-main-{}", letter.repeat(40));
+            let url = format!("https://github.com/{REPO}/releases/download/{tag}/");
+            Release {
+                tag_name: tag, prerelease: true, draft: false, published_at: Some(date.into()),
+                assets: [image.clone(), format!("{image}.sha256")].into_iter().map(|name| ReleaseAsset {
+                    browser_download_url: format!("{url}{name}"), name,
+                }).collect(),
+            }
+        };
+        let releases = vec![
+            release("a", "2026-10-28T01:00:00Z"),
+            release("b", "2026-10-29T01:00:00Z"),
+        ];
+        let candidate = first_usable_main(releases, "x86_64", &|url| {
+            if url.contains(&format!("linux-main-{}", "b".repeat(40))) {
+                Ok(b"invalid checksum".to_vec())
+            } else {
+                Ok(format!("{}  {image}", "c".repeat(64)).into_bytes())
+            }
+        }).unwrap().unwrap();
+        assert_eq!(candidate.id, "a".repeat(40));
+    }
+
+    #[test]
+    fn main_channel_orders_publications_across_release_pages() {
+        let image = "Apparent-0.3.13-linux-x86_64.AppImage";
+        let release = |letter: &str, date: &str| {
+            let tag = format!("linux-main-{}", letter.repeat(40));
+            Release {
+                tag_name: tag.clone(), prerelease: true, draft: false, published_at: Some(date.into()),
+                assets: [image.to_owned(), format!("{image}.sha256")].into_iter().map(|name| ReleaseAsset {
+                    browser_download_url: format!("https://github.com/{REPO}/releases/download/{tag}/{name}"), name,
+                }).collect(),
+            }
+        };
+        // A later page can contain a later publication when GitHub orders by tag creation.
+        let pages = [
+            vec![release("a", "2026-10-28T01:00:00Z")],
+            vec![release("b", "2026-10-29T01:00:00Z")],
+        ];
+        let candidate = first_usable_main(pages.into_iter().flatten().collect(), "x86_64", &|_| {
+            Ok(format!("{}  {image}", "c".repeat(64)).into_bytes())
+        }).unwrap().unwrap();
+        assert_eq!(candidate.id, "b".repeat(40));
+    }
+
+    #[test]
+    fn main_release_rejects_foreign_name_and_digest() {
+        let expected = format!("Apparent-{}-linux-x86_64.AppImage", env!("CARGO_PKG_VERSION"));
+        let url = format!("https://github.com/{REPO}/releases/download/linux-main-{}/", "a".repeat(40));
+        let release = |name: &str| Release {
+            tag_name: format!("linux-main-{}", "a".repeat(40)),
+            prerelease: true, draft: false, published_at: Some("2026-10-28T01:00:00Z".into()),
+            assets: [name.to_owned(), format!("{expected}.sha256")].iter().map(|name| ReleaseAsset {
+                name: name.clone(), browser_download_url: format!("{url}{name}"),
+            }).collect(),
+        };
+        let checksum = format!("{}  {expected}", "b".repeat(64));
+        assert!(main_candidate(&release("other.AppImage"), "x86_64", &checksum).is_err());
+        assert!(main_candidate(&release(&expected), "x86_64", "invalid").is_err());
+        let candidate = main_candidate(&release(&expected), "x86_64", &checksum).unwrap();
         assert!(candidate.url.contains("linux-main-"));
-        assert!(main_candidate(feed("Scrawl-0.4.0-linux-x86_64.AppImage", &"b".repeat(64)), "x86_64").is_ok());
+        assert!(main_candidate(&release(&expected), "x86_64", &format!("{}  other.AppImage", "b".repeat(64))).is_err());
+        let mut foreign = release(&expected);
+        foreign.assets[1].browser_download_url = "https://example.org/checksum".into();
+        assert!(main_candidate(&foreign, "x86_64", &checksum).is_err());
         assert!(!newer(&candidate, Some(("main".into(), "a".repeat(40)))));
         assert!(newer(&candidate, Some(("stable".into(), "v0.3.13".into()))));
     }
 
     #[test]
-    fn bad_download_cannot_replace_the_image_and_exchange_preserves_the_previous_one() {
-        let dir = std::env::temp_dir().join(format!("scrawl-update-test-{}", crate::make_bundle_id()));
+    fn update_identity_reads_its_sidecar() {
+        let dir = std::env::temp_dir().join(crate::make_bundle_id());
         fs::create_dir(&dir).unwrap();
-        let image = dir.join("Scrawl.AppImage");
+        let image = dir.join("Apparent.AppImage");
+        fs::write(image.with_extension("AppImage.apparent-update.json"), br#"{"channel":"main","id":"new"}"#).unwrap();
+        assert_eq!(installed_id(&image), Some(("main".into(), "new".into())));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bad_download_cannot_replace_the_image_and_exchange_preserves_the_previous_one() {
+        let dir = std::env::temp_dir().join(format!("apparent-update-test-{}", crate::make_bundle_id()));
+        fs::create_dir(&dir).unwrap();
+        let image = dir.join("Apparent.AppImage");
         let stage = dir.join("download");
         fs::write(&image, b"old image").unwrap();
         fs::write(&stage, b"new image").unwrap();
@@ -418,8 +556,8 @@ mod tests {
 
     #[test]
     fn exchanged_appimage_still_identifies_its_running_process() {
-        assert!(same_executable(Path::new("/home/user/Scrawl.AppImage"), "/home/user/Scrawl.AppImage"));
-        assert!(same_executable(Path::new("/home/user/Scrawl.AppImage (deleted)"), "/home/user/Scrawl.AppImage"));
-        assert!(!same_executable(Path::new("/home/user/Other.AppImage (deleted)"), "/home/user/Scrawl.AppImage"));
+        assert!(same_executable(Path::new("/home/user/Apparent.AppImage"), "/home/user/Apparent.AppImage"));
+        assert!(same_executable(Path::new("/home/user/Apparent.AppImage (deleted)"), "/home/user/Apparent.AppImage"));
+        assert!(!same_executable(Path::new("/home/user/Other.AppImage (deleted)"), "/home/user/Apparent.AppImage"));
     }
 }

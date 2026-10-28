@@ -2,8 +2,8 @@
   import ReplayKit
   import UIKit
 
-  /// How ScrawlKit records the screen.
-  public enum ScrawlCaptureMethod: String, Equatable, Sendable {
+  /// How ApparentKit records the screen.
+  public enum ApparentCaptureMethod: String, Equatable, Sendable {
     /// Draws the app's own windows into the movie (`AppFrameRecorder`). No screen-recording
     /// prompt; the microphone asks once. The strip and ink stay out of the video; the system
     /// keyboard shows as a labelled panel (its keys are another process's); system alerts and
@@ -17,9 +17,9 @@
   /// Something that records the app into a movie, on the clock the timeline uses: t=0 is the
   /// movie's first frame.
   @MainActor
-  protocol ScrawlRecorder: AnyObject {
+  protocol ApparentRecorder: AnyObject {
     var startupTrace: StartupTrace? { get set }
-    var method: ScrawlCaptureMethod { get }
+    var method: ApparentCaptureMethod { get }
     var isAvailable: Bool { get }
     /// Whether the finished movie has the microphone in it. Read after `stop`.
     var recordsAudio: Bool { get }
@@ -34,10 +34,10 @@
     func cancel()
   }
 
-  extension ScrawlCaptureMethod {
+  extension ApparentCaptureMethod {
     @MainActor
     /// `hosted`: the recording goes to an HTTPS endpoint, so it has to fit under its upload limit.
-    func makeRecorder(hosted: Bool) -> any ScrawlRecorder {
+    func makeRecorder(hosted: Bool) -> any ApparentRecorder {
       switch self {
       case .appFrames: AppFrameRecorder(videoBitRate: hosted ? AppFrameRecorder.hostedVideoBitRate : AppFrameRecorder.videoBitRate)
       case .replayKit: ReplayKitRecorder()
@@ -47,11 +47,11 @@
 
   /// ReplayKit's in-app recording (`RPScreenRecorder`).
   @MainActor
-  final class ReplayKitRecorder: ScrawlRecorder {
+  final class ReplayKitRecorder: ApparentRecorder {
     var startupTrace: StartupTrace?
     var onInterruption: (@MainActor @Sendable () -> Void)?
 
-    var method: ScrawlCaptureMethod { .replayKit }
+    var method: ApparentCaptureMethod { .replayKit }
     var isAvailable: Bool { RPScreenRecorder.shared().isAvailable }
     var recordsAudio: Bool { RPScreenRecorder.shared().isMicrophoneEnabled }
 

@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 
-use crate::model::{InteractionEvent, LASER_MS, ScrawlBundle, Stroke};
+use crate::model::{InteractionEvent, LASER_MS, ApparentBundle, Stroke};
 use crate::render::{annotation_sizes as sizes, is_long_press};
 use crate::sketch::{FreehandOptions, freehand_outline, slice_laser_window, smooth_laser_points};
 
@@ -110,7 +110,7 @@ pub struct Layers {
 
 /// Builds the plan for `bundle` on a video of `video_px`, whose first frame is `offset_ms` into
 /// the bundle's clock. Anything that ended before the video began is left out.
-pub fn plan(bundle: &ScrawlBundle, video_px: (u32, u32), layers: Layers) -> InkPlan {
+pub fn plan(bundle: &ApparentBundle, video_px: (u32, u32), layers: Layers) -> InkPlan {
     let offset = bundle.video_offset_ms;
     let (w, h) = (video_px.0 as f32, video_px.1 as f32);
     let (k, size, pin_scale) = sizes(w, h);
@@ -309,7 +309,7 @@ mod tests {
     use super::*;
     use crate::model::{Mark, Shape};
 
-    fn bundle() -> ScrawlBundle {
+    fn bundle() -> ApparentBundle {
         serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 20_000,
             "target": {"mode": "display", "displayId": 0,

@@ -4,9 +4,9 @@ set -euo pipefail
 export LC_ALL=C
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# SCRAWL_APP_DIR builds the signed bundle somewhere else (staging for remote installs, see
-# install-app-remote.sh); SCRAWL_NO_LAUNCH=1 skips the ~/bin link and the restart.
-APP_DIR="${SCRAWL_APP_DIR:-${HOME}/Applications/Scrawl.app}"
+# APPARENT_APP_DIR builds the signed bundle somewhere else (staging for remote installs, see
+# install-app-remote.sh); APPARENT_NO_LAUNCH=1 skips the ~/bin link and the restart.
+APP_DIR="${APPARENT_APP_DIR:-${HOME}/Applications/Apparent.app}"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
@@ -21,14 +21,16 @@ taskpolicy -c utility cargo build -j 3
 
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${FRAMEWORKS_DIR}" "${HOME}/bin"
 
-rm -f "${MACOS_DIR}/scrawl" "${MACOS_DIR}/scrawl-helper"
-cp -f "${REPO_DIR}/target/debug/scrawl" "${MACOS_DIR}/scrawl"
-cp -f "${REPO_DIR}/target/debug/scrawl-helper" "${MACOS_DIR}/scrawl-helper"
-chmod +x "${MACOS_DIR}/scrawl" "${MACOS_DIR}/scrawl-helper"
+rm -f "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
+cp -f "${REPO_DIR}/target/debug/apparent" "${MACOS_DIR}/apparent"
+cp -f "${REPO_DIR}/target/debug/apparent-helper" "${MACOS_DIR}/apparent-helper"
+chmod +x "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
 
-if [[ -f "${REPO_DIR}/assets/Scrawl.icns" ]]; then
-  cp -f "${REPO_DIR}/assets/Scrawl.icns" "${RESOURCES_DIR}/Scrawl.icns"
+if [[ -f "${REPO_DIR}/assets/Apparent.icns" ]]; then
+  cp -f "${REPO_DIR}/assets/Apparent.icns" "${RESOURCES_DIR}/Apparent.icns"
 fi
+cp -f "${REPO_DIR}/assets/fonts/HostGrotesk-Variable.ttf" "${RESOURCES_DIR}/HostGrotesk-Variable.ttf"
+cp -f "${REPO_DIR}/assets/brand/apparent-wordmark.png" "${RESOURCES_DIR}/apparent-wordmark.png"
 
 if [[ -n "${SPARKLE_DIR}" && -d "${SPARKLE_DIR}/Sparkle.framework" ]]; then
   rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework"
@@ -41,17 +43,17 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>scrawl</string>
+  <string>apparent</string>
   <key>CFBundleIconFile</key>
-  <string>Scrawl</string>
+  <string>Apparent</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.kitlangton.scrawl</string>
+  <string>dev.kitlangton.apparent</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Scrawl</string>
+  <string>Apparent</string>
   <key>CFBundleDisplayName</key>
-  <string>Scrawl</string>
+  <string>Apparent</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -65,15 +67,15 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSScreenCaptureUsageDescription</key>
-  <string>Scrawl captures your screen to build annotated agent bundles.</string>
+  <string>Apparent captures your screen to build annotated agent bundles.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Scrawl records your voice to align transcripts with keyframes.</string>
+  <string>Apparent records your voice to align transcripts with keyframes.</string>
   <key>NSCameraUsageDescription</key>
-  <string>Scrawl mirrors and records a cabled iPhone's screen.</string>
+  <string>Apparent mirrors and records a cabled iPhone's screen.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>Scrawl transcribes your narration on this Mac.</string>
+  <string>Apparent transcribes your narration on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Scrawl reads the address of the browser tab you captured, to send a capture of a dev site to its project's session.</string>
+  <string>Apparent reads the address of the browser tab you captured to record its context.</string>
   <key>SUEnableAutomaticChecks</key>
   <false/>
   <key>SUAutomaticallyUpdate</key>
@@ -81,7 +83,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <key>SUAllowsAutomaticUpdates</key>
   <false/>
   <key>SUFeedURL</key>
-  <string>https://scrawl.kitlangton.com/appcast.xml</string>
+  <string>https://app.tryapparent.com/appcast.xml</string>
   <key>SUPublicEDKey</key>
   <string>${SPARKLE_PUBLIC_KEY}</string>
   <key>SUVerifyUpdateBeforeExtraction</key>
@@ -103,36 +105,42 @@ if [[ -d "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B" ]]; then
   codesign --force --sign "${IDENTITY}" "${SPARKLE_VER}/Updater.app"
   codesign --force --sign "${IDENTITY}" "${FRAMEWORKS_DIR}/Sparkle.framework"
 fi
-codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.scrawl.helper" "${MACOS_DIR}/scrawl-helper"
-codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.scrawl" "${APP_DIR}"
+codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.apparent.helper" "${MACOS_DIR}/apparent-helper"
+codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.apparent" "${APP_DIR}"
 
-if [[ "${SCRAWL_NO_LAUNCH:-0}" == "1" ]]; then
+if [[ "${APPARENT_NO_LAUNCH:-0}" == "1" ]]; then
   exit 0
 fi
 
-ln -sf "${MACOS_DIR}/scrawl" "${HOME}/bin/scrawl"
+if [[ -e "${HOME}/bin/apparent" || -L "${HOME}/bin/apparent" ]]; then
+  if [[ ! -L "${HOME}/bin/apparent" ]] || [[ "$(readlink "${HOME}/bin/apparent")" != "${MACOS_DIR}/apparent" ]]; then
+    echo "${HOME}/bin/apparent belongs to another program; leaving it alone" >&2
+    exit 1
+  fi
+fi
+ln -sfn "${MACOS_DIR}/apparent" "${HOME}/bin/apparent"
 
-scrawl_running() {
+apparent_running() {
   local status=0
-  pgrep -f "Scrawl.app/Contents/MacOS/scrawl" >/dev/null || status=$?
+  pgrep -f "Apparent.app/Contents/MacOS/apparent" >/dev/null || status=$?
   case "${status}" in
     0) return 0 ;;
     1) return 1 ;;
-    *) echo "pgrep failed (exit ${status}); can't tell whether the old Scrawl stopped" >&2; exit 1 ;;
+    *) echo "pgrep failed (exit ${status}); can't tell whether the old Apparent stopped" >&2; exit 1 ;;
   esac
 }
 
-pkill -f "Scrawl.app/Contents/MacOS/scrawl" 2>/dev/null || true
-pkill -f "target/debug/scrawl" 2>/dev/null || true
+pkill -f "Apparent.app/Contents/MacOS/apparent" 2>/dev/null || true
+pkill -f "target/debug/apparent" 2>/dev/null || true
 for _ in {1..40}; do
-  scrawl_running || break
+  apparent_running || break
   sleep 0.05
 done
-if scrawl_running; then
-  pgrep -fl "Scrawl.app/Contents/MacOS/scrawl" >&2 || true
-  echo "the old Scrawl is still running; quit it and run this again" >&2
+if apparent_running; then
+  pgrep -fl "Apparent.app/Contents/MacOS/apparent" >&2 || true
+  echo "the old Apparent is still running; quit it and run this again" >&2
   exit 1
 fi
 open -a "${APP_DIR}" || (sleep 0.3 && open -n -a "${APP_DIR}")
 sleep 0.3
-pgrep -fl "Scrawl.app/Contents/MacOS/scrawl"
+pgrep -fl "Apparent.app/Contents/MacOS/apparent"

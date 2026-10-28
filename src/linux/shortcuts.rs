@@ -6,14 +6,14 @@ use anyhow::{Context, Result, bail};
 
 use crate::capture::{ShortcutConfig, ShortcutKind};
 
-const COMPONENT: &str = "dev.kitlangton.scrawl";
+const COMPONENT: &str = "dev.kitlangton.apparent";
 static BUS: OnceLock<zbus::blocking::Connection> = OnceLock::new();
 
 fn action(id: &str) -> [&str; 4] {
     [
         COMPONENT,
         id,
-        "Scrawl",
+        "Apparent",
         if id == "record" {
             "Record or finish"
         } else {
@@ -66,7 +66,7 @@ pub fn bind(
         let action = action(id).to_vec();
         proxy.call_method("doRegister", &(&action,))?;
         let requested = requested_keys(cfg, paused)?;
-        // SetPresent | NoAutoloading: Scrawl's configured chord, active while the bus is alive.
+        // SetPresent | NoAutoloading: Apparent's configured chord, active while the bus is alive.
         let bound: Vec<i32> = proxy.call("setShortcut", &(&action, &requested, 6_u32))?;
         if bound != requested {
             bail!("Shortcut is already taken");
@@ -78,7 +78,7 @@ pub fn bind(
         ("paste", paste, ShortcutKind::Paste),
     ] {
         if let Err(error) = bind_one(id, cfg) {
-            crate::capture::scrawl_log(format!("KGlobalAccel {id}: {error:#}"));
+            crate::capture::apparent_log(format!("KGlobalAccel {id}: {error:#}"));
             return Err(kind);
         }
     }
@@ -103,7 +103,7 @@ pub fn listen(
     let path: zbus::zvariant::OwnedObjectPath = proxy.call("getComponent", &(COMPONENT,))?;
     let (ready_tx, ready_rx) = flume::bounded(1);
     std::thread::Builder::new()
-        .name("scrawl-kglobalaccel".into())
+        .name("apparent-kglobalaccel".into())
         .spawn(move || {
             let run = || -> Result<()> {
                 let component = zbus::blocking::Proxy::new(

@@ -1,6 +1,8 @@
 name: Release (Linux)
 
 on:
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -8,7 +10,7 @@ on:
         required: false
         default: ""
       publish_main:
-        description: Publish a checked main build as a Linux preview release and advance its update feed.
+        description: Publish a checked main build as a Linux preview release.
         type: boolean
         required: false
         default: false
@@ -20,7 +22,25 @@ concurrency:
   group: release-linux-${{ github.ref }}-${{ inputs.tag }}
 
 jobs:
+  preview-needed:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_MAIN: ${{ github.event_name == 'schedule' || inputs.publish_main }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$PUBLISH_MAIN" == "true" && -z "$TAG" ]] && gh release view "linux-main-$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
   linux:
+    needs: preview-needed
+    if: needs.preview-needed.outputs.build == 'true'
     name: Linux ${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -34,7 +54,7 @@ jobs:
     timeout-minutes: 90
     env:
       TAG: ${{ inputs.tag }}
-      PUBLISH_MAIN: ${{ inputs.publish_main }}
+      PUBLISH_MAIN: ${{ github.event_name == 'schedule' || inputs.publish_main }}
     steps:
       - name: Validate release request
         run: |
@@ -57,8 +77,8 @@ jobs:
         run: |
           cargo test --release --locked -- --test-threads=2
           cargo test --release --locked speech:: -- --nocapture
-          cargo test --release --locked --bin scrawl --no-run --message-format=json > target/test-artifacts.jsonl
-          test=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "scrawl" and .profile.test) | .executable // empty' target/test-artifacts.jsonl)
+          cargo test --release --locked --bin apparent --no-run --message-format=json > target/test-artifacts.jsonl
+          test=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "apparent" and .profile.test) | .executable // empty' target/test-artifacts.jsonl)
           test -f "$test"
           echo "SPEECH_TEST=$test" >> "$GITHUB_ENV"
       - name: No build-machine CPU specialization
@@ -80,10 +100,10 @@ jobs:
             echo "Tag $TAG does not match Cargo.toml $version" >&2
             exit 1
           fi
-          ./scripts/linux/appimage.sh target/release/scrawl
-          name="Scrawl-$version-linux-${{ matrix.arch }}.AppImage"
+          ./scripts/linux/appimage.sh target/release/apparent
+          name="Apparent-$version-linux-${{ matrix.arch }}.AppImage"
           mkdir -p dist
-          cp "target/appimage/Scrawl-${{ matrix.arch }}.AppImage" "dist/$name"
+          cp "target/appimage/Apparent-${{ matrix.arch }}.AppImage" "dist/$name"
           (cd dist && sha256sum "$name" > "$name.sha256")
           echo "name=$name" >> "$GITHUB_OUTPUT"
       - name: AppImage runs headless without FUSE
@@ -98,7 +118,7 @@ jobs:
         if: matrix.arch == 'x86_64'
         timeout-minutes: 30
         env:
-          SCRAWL_TEST_NO_AVX_VNNI: "1"
+          APPARENT_TEST_NO_AVX_VNNI: "1"
         run: |
           sde=$(find "$SDE_PATH" -type f -name sde64 -print -quit)
           test -x "$sde"
@@ -116,54 +136,33 @@ jobs:
         run: |
           # The Mac/Windows job may create it concurrently. Re-read on a create conflict.
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --verify-tag --title "Scrawl ${TAG#v}" --notes "Release notes to follow." || \
+            gh release create "$TAG" --verify-tag --title "Apparent ${TAG#v}" --notes "Release notes to follow." || \
             gh release view "$TAG" >/dev/null
           gh release upload "$TAG" dist/* --clobber
 
-  main-feed:
-    if: inputs.publish_main && inputs.tag == '' && github.ref == 'refs/heads/main'
+  main-preview:
+    if: (github.event_name == 'schedule' || inputs.publish_main) && inputs.tag == '' && github.ref == 'refs/heads/main'
     needs: linux
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v5
         with:
-          pattern: Scrawl-*.AppImage
+          pattern: Apparent-*.AppImage
           path: dist
           merge-multiple: true
-      - name: Publish both checked AppImages before updating the feed
+      - name: Publish both checked AppImages
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="linux-main-$GITHUB_SHA"
+          # A superseded build must not become the newest published preview.
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            echo "Main moved to $head; not publishing an older preview"
+            exit 0
+          fi
+          test "$(find dist -name '*.AppImage' | wc -l)" -eq 2
           gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --latest=false --title "Linux main ${GITHUB_SHA:0:12}" \
             --notes "Automatic Linux preview from main; not a stable release."
-          # An older queued run must not replace a newer main pointer.
-          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          if [[ "$head" != "$GITHUB_SHA" ]]; then
-            echo "Main moved to $head; leaving its feed alone"
-            exit 0
-          fi
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib
-          files = sorted(pathlib.Path('dist').glob('*.AppImage'))
-          assert len(files) == 2, files
-          assets = {('aarch64' if 'aarch64' in f.name else 'x86_64'): {
-              'name': f.name, 'sha256': hashlib.sha256(f.read_bytes()).hexdigest()
-          } for f in files}
-          assert set(assets) == {'aarch64', 'x86_64'}, assets
-          pathlib.Path('main-updates.json').write_text(json.dumps({'sha': os.environ['GITHUB_SHA'], 'assets': assets}))
-          PY
-          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/linux-main-feed" >/dev/null 2>&1; then
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/heads/linux-main-feed -f sha="$GITHUB_SHA" >/dev/null
-          fi
-          current=$(gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json?ref=linux-main-feed" --jq .sha 2>/dev/null || true)
-          content=$(base64 -w0 main-updates.json)
-          if [[ -n "$current" ]]; then
-            gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json" --method PUT \
-              -f branch=linux-main-feed -f message="Linux main feed $GITHUB_SHA" -f content="$content" -f sha="$current" >/dev/null
-          else
-            gh api "repos/$GITHUB_REPOSITORY/contents/main-updates.json" --method PUT \
-              -f branch=linux-main-feed -f message="Linux main feed $GITHUB_SHA" -f content="$content" >/dev/null
-          fi

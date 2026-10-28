@@ -4,7 +4,7 @@
 //! On X11 the X server answers everything: shortcuts are passive key grabs on the root window,
 //! and the pointer, buttons and keys are polled. On a Wayland session the compositor keeps
 //! other apps' input to itself, so the shortcuts come from the GlobalShortcuts portal (or, on
-//! GNOME without it, custom keybindings that run `scrawl shortcut record`, and on Hyprland
+//! GNOME without it, custom keybindings that run `apparent shortcut record`, and on Hyprland
 //! runtime binds that do the same), and ⇧, clicks and
 //! Esc from the input devices when the user may read them (`crate::linux::input`). See
 //! `docs/linux.md`.
@@ -29,7 +29,7 @@ use x11rb::rust_connection::RustConnection;
 use super::{
     CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY, CARBON_SHIFT_KEY, LiveOverlayEvent,
     Sampler, SharedCaptureTelemetry, ShortcutConfig, ShortcutKind, clean_label, hotkey_combos,
-    layout_default_keycode, pick_display, poll_clicks, scrawl_log, shortcut_label,
+    layout_default_keycode, pick_display, poll_clicks, apparent_log, shortcut_label,
     shortcut_matches, track_shift_ink,
 };
 use crate::linux::{self, input, x11};
@@ -41,7 +41,7 @@ pub const MAX_CAPTURE_SCALE: f64 = 1.0;
 /// Where a session's clicks and keys come from, for the log. Clicks are always polled.
 pub(super) const MOUSE_SOURCE: &str = "polled mouse buttons";
 pub(super) const KEY_SOURCE: &str = "polled key state (the X server or the input devices)";
-pub(super) const NO_KEY_SOURCE: &str = "nothing outside Scrawl's windows (no input devices)";
+pub(super) const NO_KEY_SOURCE: &str = "nothing outside Apparent's windows (no input devices)";
 
 /// `VK_S`, `VK_V` and `VK_Z`: shortcuts are stored as Windows virtual keys.
 pub const KEY_S: u16 = 0x53;
@@ -49,7 +49,7 @@ pub const KEY_V: u16 = 0x56;
 const KEY_Z: u16 = 0x5A;
 const VK_ESCAPE: u16 = 0x1B;
 
-/// `~/.local/share/scrawl/Logs`.
+/// `~/.local/share/apparent/Logs`.
 pub fn log_dir() -> Option<PathBuf> {
     Some(linux::local_dir().join("Logs"))
 }
@@ -88,7 +88,7 @@ pub fn screen_capture_usable(_probe: bool) -> bool {
     true
 }
 
-/// The primary display's size (`scrawl sck-probe`).
+/// The primary display's size (`apparent sck-probe`).
 pub fn screen_capture_probe() -> Result<(u32, u32), String> {
     let monitor = linux::primary_monitor().ok_or("no display")?;
     Ok((monitor.rect[2] as u32, monitor.rect[3] as u32))
@@ -153,7 +153,7 @@ fn keysym_for_vk(vk: u32) -> Option<u32> {
     }
 }
 
-/// The virtual key a keysym stands for, for the keys Scrawl notices.
+/// The virtual key a keysym stands for, for the keys Apparent notices.
 fn vk_for_keysym(sym: u32) -> Option<u16> {
     Some(match sym {
         0x61..=0x7a => (sym - 0x20) as u16,
@@ -310,9 +310,9 @@ pub fn record_external_frontmost_app() {
     }
 }
 
-/// Puts the last app that was in front (before Scrawl's own window took focus) back in front,
+/// Puts the last app that was in front (before Apparent's own window took focus) back in front,
 /// so a paste lands in it. On Wayland only an X11 app can be asked; the compositor gives focus
-/// back to the previous window by itself when Scrawl's closes.
+/// back to the previous window by itself when Apparent's closes.
 pub fn ensure_external_app_active() {
     if let Some(front) = linux::foreground_window()
         && !is_ours(front.pid)
@@ -348,7 +348,7 @@ fn external_front_window() -> Option<linux::WindowInfo> {
     }
 }
 
-/// The frontmost app's pid, or the last external one while Scrawl itself is in front.
+/// The frontmost app's pid, or the last external one while Apparent itself is in front.
 pub fn frontmost_external_pid() -> Option<i32> {
     if linux::wayland_session()
         && let Some(app) = linux::atspi::last_external_app()
@@ -358,7 +358,7 @@ pub fn frontmost_external_pid() -> Option<i32> {
     external_front_window().map(|w| w.pid as i32)
 }
 
-/// The frontmost app (pid, name, identifier), or the last one before Scrawl. On Wayland the
+/// The frontmost app (pid, name, identifier), or the last one before Apparent. On Wayland the
 /// X server sees only X11 apps, so the accessibility bus is asked first (`linux::atspi`).
 pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
     if linux::wayland_session()
@@ -387,7 +387,7 @@ fn frame_of(rect: [f64; 4], scale: f64) -> TargetFrame {
     }
 }
 
-/// Selectable app windows (not Scrawl's), front to back, with their app names. On Wayland only
+/// Selectable app windows (not Apparent's), front to back, with their app names. On Wayland only
 /// X11 apps' windows are known.
 fn app_windows() -> Vec<(linux::WindowInfo, String, String)> {
     let mut names: std::collections::HashMap<u32, Option<(String, String)>> =
@@ -483,7 +483,7 @@ pub(super) fn raw_windows_now() -> Vec<crate::windows::RawWindow> {
     crate::windows::raw_windows()
 }
 
-/// Linux has no `scrawl-helper`: every Scrawl window is in its own process.
+/// Linux has no `apparent-helper`: every Apparent window is in its own process.
 pub(super) fn is_helper_process(_pid: i32) -> bool {
     false
 }
@@ -588,11 +588,11 @@ enum Backend {
     X11,
     /// The GlobalShortcuts portal: the desktop owns the binding (its settings can change it).
     Portal,
-    /// GNOME custom keybindings running `scrawl shortcut …` (`linux::ipc`).
+    /// GNOME custom keybindings running `apparent shortcut …` (`linux::ipc`).
     Gnome,
     /// Plasma 5's native KGlobalAccel service.
     Kde,
-    /// Hyprland runtime binds running `scrawl shortcut …` (`linux::hyprland`).
+    /// Hyprland runtime binds running `apparent shortcut …` (`linux::hyprland`).
     Hyprland,
     /// Polled from the input devices: the press also reaches the app in front.
     Devices,
@@ -611,7 +611,7 @@ fn set_backend(backend: Backend) {
     *BACKEND
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = backend;
-    scrawl_log(format!("shortcuts: {backend:?}"));
+    apparent_log(format!("shortcuts: {backend:?}"));
 }
 
 /// The grabs' own X connection, so their key events don't mix with anything else.
@@ -702,7 +702,7 @@ fn grab_shortcuts(record: &ShortcutConfig, paste: &ShortcutConfig) -> Result<(),
                     .and_then(|cookie| cookie.check().ok())
                     .is_some()
             });
-            scrawl_log(format!(
+            apparent_log(format!(
                 "XGrabKey({kind:?} {}) -> {}",
                 shortcut_label(mods, cfg.key_label()),
                 if ok { "ok" } else { "taken" }
@@ -808,7 +808,7 @@ fn bind_hyprland(
         let key = shortcut_key(cfg);
         let chord = (!paused && !cfg.is_unset()).then_some((cfg.carbon_modifiers, key.as_str()));
         if let Err(error) = linux::hyprland::bind(id, chord) {
-            scrawl_log(format!("Hyprland {id}: {error:#}"));
+            apparent_log(format!("Hyprland {id}: {error:#}"));
             return Err(kind);
         }
     }
@@ -816,7 +816,7 @@ fn bind_hyprland(
 }
 
 /// Sets up the shortcuts for this session on a thread of its own (the portal may show a
-/// dialog), and listens for `scrawl shortcut …` from GNOME's keybindings.
+/// dialog), and listens for `apparent shortcut …` from GNOME's keybindings.
 pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
     if HOTKEY_TELEMETRY.set(Arc::clone(telemetry)).is_err() {
         return;
@@ -826,17 +826,17 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
         "shortcut record" => emit(&ipc_telemetry, ShortcutKind::Record),
         "shortcut paste" => emit(&ipc_telemetry, ShortcutKind::Paste),
         "open" => linux::ipc::request_open(),
-        other => scrawl_log(format!("ipc: unknown request {other:?}")),
+        other => apparent_log(format!("ipc: unknown request {other:?}")),
     });
-    scrawl_log(format!("session: {}", linux::session_label()));
+    apparent_log(format!("session: {}", linux::session_label()));
     let telemetry = Arc::clone(telemetry);
     let _ = thread::Builder::new()
-        .name("scrawl-hotkeys".into())
+        .name("apparent-hotkeys".into())
         .spawn(move || {
             let (record, paste) = telemetry.shortcuts();
             if !linux::wayland_session() {
                 if let Err(kind) = grab_shortcuts(&record, &paste) {
-                    scrawl_log(format!(
+                    apparent_log(format!(
                         "install_global_hotkeys: {kind:?} shortcut is taken"
                     ));
                 }
@@ -844,7 +844,7 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                 run_grab_events(telemetry);
                 return;
             }
-            // Hyprland's portal needs an app id and a hand-written bind, so Scrawl binds its own
+            // Hyprland's portal needs an app id and a hand-written bind, so Apparent binds its own
             // chords, which the compositor consumes. A config reload drops them.
             if linux::hyprland() {
                 match bind_hyprland(&record, &paste, false) {
@@ -855,18 +855,18 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                             let paused = reloads.shortcuts_paused.load(Ordering::Acquire);
                             let _ = bind_hyprland(&record, &paste, paused);
                         }) {
-                            scrawl_log(format!("Hyprland events: {error:#}"));
+                            apparent_log(format!("Hyprland events: {error:#}"));
                         }
                         return set_backend(Backend::Hyprland);
                     }
-                    Err(kind) => scrawl_log(format!("Hyprland: {kind:?} shortcut was refused")),
+                    Err(kind) => apparent_log(format!("Hyprland: {kind:?} shortcut was refused")),
                 }
             }
             // Plasma 5's portal opens System Settings but never binds the requested keys.
             // KGlobalAccel consumes the chord; Plasma 6 uses the portal normally.
             let plasma5 =
                 linux::kde() && std::env::var("KDE_SESSION_VERSION").is_ok_and(|v| v == "5");
-            if !plasma5 && std::env::var_os("SCRAWL_NO_SHORTCUTS_PORTAL").is_none() {
+            if !plasma5 && std::env::var_os("APPARENT_NO_SHORTCUTS_PORTAL").is_none() {
                 let portal_telemetry = Arc::clone(&telemetry);
                 let bound = linux::portal::global_shortcuts(
                     linux::portal::portal_trigger(record.carbon_modifiers, &shortcut_key(&record)),
@@ -881,13 +881,13 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                 );
                 match bound {
                     Ok(()) => return set_backend(Backend::Portal),
-                    Err(error) => scrawl_log(format!("GlobalShortcuts portal: {error:#}")),
+                    Err(error) => apparent_log(format!("GlobalShortcuts portal: {error:#}")),
                 }
             }
             if linux::gnome() {
                 match bind_gnome(&record, &paste, false) {
                     Ok(()) => return set_backend(Backend::Gnome),
-                    Err(error) => scrawl_log(format!("GNOME keybindings: {error:#}")),
+                    Err(error) => apparent_log(format!("GNOME keybindings: {error:#}")),
                 }
             }
             if linux::kde() {
@@ -898,15 +898,15 @@ pub fn install_global_hotkeys(telemetry: &Arc<SharedCaptureTelemetry>) {
                     _ => {}
                 }) {
                     Ok(()) => return set_backend(Backend::Kde),
-                    Err(error) => scrawl_log(format!("KDE shortcuts: {error:#}")),
+                    Err(error) => apparent_log(format!("KDE shortcuts: {error:#}")),
                 }
             }
             if input::start() {
                 set_backend(Backend::Devices);
             } else {
-                scrawl_log(
+                apparent_log(
                     "shortcuts: no portal, no GNOME and no readable input devices; \
-                     use the tray menu or `scrawl shortcut record`",
+                     use the tray menu or `apparent shortcut record`",
                 );
             }
         });
@@ -931,10 +931,10 @@ pub fn set_shortcuts(
             }
             Backend::Gnome => {
                 if let Err(error) = bind_gnome(&record, &paste, false) {
-                    scrawl_log(format!("GNOME keybindings: {error:#}"));
+                    apparent_log(format!("GNOME keybindings: {error:#}"));
                 }
             }
-            Backend::Portal => scrawl_log(
+            Backend::Portal => apparent_log(
                 "shortcuts: the desktop owns the portal's binding; change it in its settings",
             ),
             Backend::Kde => {
@@ -963,7 +963,7 @@ pub fn set_shortcuts(
     Ok(())
 }
 
-/// While Settings records a new shortcut, Scrawl's own stop answering, so pressing the current
+/// While Settings records a new shortcut, Apparent's own stop answering, so pressing the current
 /// combo reaches the recorder instead of starting a capture.
 pub fn pause_shortcuts(telemetry: &SharedCaptureTelemetry, paused: bool) {
     if telemetry.shortcuts_paused.swap(paused, Ordering::AcqRel) == paused {
@@ -998,7 +998,7 @@ pub fn update_global_shortcut(telemetry: &SharedCaptureTelemetry, config: Shortc
     let (_, paste) = telemetry.shortcuts();
     match set_shortcuts(telemetry, config.clone(), paste) {
         Ok(()) => crate::settings::save_shortcut(ShortcutKind::Record, &config),
-        Err(kind) => scrawl_log(format!("update_global_shortcut: {kind:?} refused")),
+        Err(kind) => apparent_log(format!("update_global_shortcut: {kind:?} refused")),
     }
 }
 
@@ -1011,12 +1011,12 @@ fn check_tap(telemetry: &SharedCaptureTelemetry) {
     }
     let keys = !linux::wayland_session() || from_devices();
     if telemetry.tap_live.swap(keys, Ordering::AcqRel) != keys {
-        scrawl_log(format!(
+        apparent_log(format!(
             "keys: {}",
             if keys {
                 "readable"
             } else {
-                "only over Scrawl's windows (add yourself to the input group)"
+                "only over Apparent's windows (add yourself to the input group)"
             }
         ));
     }
@@ -1024,13 +1024,13 @@ fn check_tap(telemetry: &SharedCaptureTelemetry) {
 
 pub fn start_global_input_tap(telemetry: Arc<SharedCaptureTelemetry>) {
     if linux::wayland_session() && !input::start() {
-        scrawl_log(
+        apparent_log(
             "input devices unreadable: ⇧ ink, clicks and Esc work only over X11 apps \
              (see docs/linux.md)",
         );
     }
     let _ = thread::Builder::new()
-        .name("scrawl-key-poller".into())
+        .name("apparent-key-poller".into())
         .spawn(move || run_key_poller(telemetry));
 }
 
@@ -1162,7 +1162,7 @@ fn run_key_poller(telemetry: Arc<SharedCaptureTelemetry>) {
             buttons,
             (x, y),
             mods.shift && !mods.super_key && !mods.ctrl && !mods.alt,
-            |x, y| telemetry.on_scrawl_window(x, y),
+            |x, y| telemetry.on_apparent_window(x, y),
         );
 
         // Hold Shift + move the pointer inside the capture target = draw a persistent stroke.

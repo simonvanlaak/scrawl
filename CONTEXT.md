@@ -1,13 +1,13 @@
-# Scrawl
+# Apparent
 
-This is historical routing terminology. Scrawl no longer selects an OpenCode destination or
-sends captures automatically, and `scrawl send` no longer exists. Captures are saved and copied
+This is historical routing terminology. Apparent no longer selects an OpenCode destination or
+sends captures automatically, and `apparent send` no longer exists. Captures are saved and copied
 to the clipboard; the terms below describe the retired design.
 
 ## Routing
 
 **Capture**:
-One recording, compiled into a `.scrawl` bundle.
+One recording, compiled into a `.apparent` bundle.
 
 **Destination**:
 Where a capture is delivered: an OpenCode session, on this Mac or the agent host. The clipboard always gets the capture as well, so "no destination" means clipboard only.
@@ -17,10 +17,10 @@ _Avoid_: target (that's what was recorded)
 A destination someone stated outright, either the user's **choice** or the recording's **recorded destination**. Addresses are obeyed, never weighed.
 
 **Choice**:
-A session the user picked for this capture (`scrawl send --session`, a chip on the pill).
+A session the user picked for this capture (`apparent send --session`, a chip on the pill).
 
 **Recorded destination**:
-The session a recording carries: a ScrawlKit timeline's top-level `session`, or the destination an earlier routing wrote into `scrawl.json`. The session that was merely on screen (`context.session`, OpenCode Desktop's viewed session) is a clue, not a recorded destination.
+The session a recording carries: a ApparentKit timeline's top-level `session`, or the destination an earlier routing wrote into `apparent.json`. The session that was merely on screen (`context.session`, OpenCode Desktop's viewed session) is a clue, not a recorded destination.
 
 **Clue**:
 An observed fact about a capture's surroundings that points at sessions: a page's registration, the folder of the process serving the tab, who published the file the tab shows, a terminal's folder, the session OpenCode Desktop showed, the captured app's name and the checkout it's built from, words in the window title or in what was said.

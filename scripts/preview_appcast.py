@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Construct the Scrawl Preview Sparkle appcast from a signed archive."""
+"""Construct the Apparent Preview Sparkle appcast from a signed archive."""
 import argparse
 import base64
 from datetime import datetime, timezone
@@ -22,8 +22,8 @@ def make_feed(previous: str, archive: Path, version: str, build: str, attrs: str
         raise ValueError("preview version and build number disagree")
     run, attempt = build.split(".")
     expected = (f"https://github.com/tryapparent/apparent/releases/download/"
-                f"preview-mac-{run}-{attempt}/Scrawl-Preview-{version}-arm64.zip")
-    if url != expected or archive.name != f"Scrawl-Preview-{version}-arm64.zip":
+                f"preview-mac-{run}-{attempt}/Apparent-Preview-{version}-arm64.zip")
+    if url != expected or archive.name != f"Apparent-Preview-{version}-arm64.zip":
         raise ValueError("archive URL must match this preview release")
     if previous.strip():
         root = ET.fromstring(previous)
@@ -42,7 +42,7 @@ def make_feed(previous: str, archive: Path, version: str, build: str, attrs: str
     else:
         root = ET.Element("rss", {"version": "2.0"})
         channel = ET.SubElement(root, "channel")
-        ET.SubElement(channel, "title").text = "Scrawl Preview"
+        ET.SubElement(channel, "title").text = "Apparent Preview"
     item = ET.Element("item")
     ET.SubElement(item, "title").text = version
     ET.SubElement(item, "pubDate").text = format_datetime(datetime.now(timezone.utc))

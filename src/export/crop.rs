@@ -3,7 +3,7 @@
 use anyhow::{Result, bail, ensure};
 
 use crate::autocrop::{self, FULL, Rect};
-use crate::model::{CaptureMode, ScrawlBundle};
+use crate::model::{CaptureMode, ApparentBundle};
 
 /// Output long edge unless `--size` says otherwise.
 pub const DEFAULT_LONG_EDGE: u32 = 1920;
@@ -45,7 +45,7 @@ impl std::str::FromStr for CropArg {
 }
 
 /// The crop as `[x0, y0, x1, y1]` normalized to the capture.
-pub fn resolve(arg: CropArg, bundle: &ScrawlBundle, video_px: (u32, u32)) -> Result<Rect> {
+pub fn resolve(arg: CropArg, bundle: &ApparentBundle, video_px: (u32, u32)) -> Result<Rect> {
     match arg {
         CropArg::Full => Ok(FULL),
         CropArg::Auto => Ok(auto(bundle)),
@@ -73,7 +73,7 @@ pub fn resolve(arg: CropArg, bundle: &ScrawlBundle, video_px: (u32, u32)) -> Res
 
 /// The region a Screen capture's activity covered over the whole recording: auto-crop's
 /// `Scope::Whole` crop, else the union of its keyframe crops, else everything.
-pub fn auto(bundle: &ScrawlBundle) -> Rect {
+pub fn auto(bundle: &ApparentBundle) -> Rect {
     if bundle.target.mode != CaptureMode::Display {
         return FULL;
     }
@@ -180,7 +180,7 @@ mod tests {
         assert!("zoomed".parse::<CropArg>().is_err());
     }
 
-    fn bundle() -> ScrawlBundle {
+    fn bundle() -> ApparentBundle {
         serde_json::from_value(serde_json::json!({
             "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 10_000,
             "target": {"mode": "display", "displayId": 0,

@@ -1,4 +1,4 @@
-// Scrawl 3 · Lasso: a busy dashboard. The pen loops one chart, everything else
+// Apparent 3 · Lasso: a busy dashboard. The pen loops one chart, everything else
 // dims, and the spoken note says what's wrong. The ink lifts, the light comes
 // back, and the pen moves to the next one. Two targets per loop.
 ;(() => {

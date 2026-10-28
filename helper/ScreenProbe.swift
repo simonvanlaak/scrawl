@@ -2,14 +2,14 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
-// `scrawl-helper sck-probe [--watch SECONDS]`: can this process capture the screen with
+// `apparent-helper sck-probe [--watch SECONDS]`: can this process capture the screen with
 // ScreenCaptureKit right now? One JSON line per try:
 //   {"ok":true,"preflight":false,"shareableContent":true,"screenshot":"64x40","ms":38,"pid":123}
 // With --watch it tries once a second for that long without restarting, so it can be left
 // running while Screen Recording is turned on to see whether a grant reaches a running process
 // (CGPreflightScreenCaptureAccess keeps its first answer; the capture is the real test). It asks
 // for Screen Recording if that was never decided. Which app the grant is checked against depends
-// on who started it: Scrawl.app when Scrawl runs it, the terminal when you do.
+// on who started it: Apparent.app when Apparent runs it, the terminal when you do.
 
 enum ScreenProbe {
   static func once() async -> [String: Any] {

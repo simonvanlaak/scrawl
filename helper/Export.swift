@@ -3,7 +3,7 @@ import AppKit
 import CoreImage
 import CoreVideo
 
-// `scrawl-helper export PLAN.json`: renders a bundle's recording as one shareable .mp4.
+// `apparent-helper export PLAN.json`: renders a bundle's recording as one shareable .mp4.
 //
 // Rust (src/export) decides what to show and writes the plan: the crop, an optional camera
 // rectangle per time, the annotations as vectors, and which audio to use. This only renders it:

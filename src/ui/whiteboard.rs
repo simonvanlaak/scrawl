@@ -11,7 +11,7 @@ use gpui::{
     prelude::*, px, rgb, size,
 };
 
-use super::{ScrawlCoordinator, platform};
+use super::{ApparentCoordinator, platform};
 
 pub(super) const PAPER_WIDTH: f32 = 1600.0;
 pub(super) const PAPER_HEIGHT: f32 = 1100.0;
@@ -66,7 +66,7 @@ fn paper_point(position: Point<Pixels>) -> [f32; 2] {
 
 pub(super) struct WhiteboardWindow {
     board: Rc<RefCell<Board>>,
-    coordinator: Entity<ScrawlCoordinator>,
+    coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
 }
 
@@ -208,7 +208,7 @@ impl Render for WhiteboardWindow {
     }
 }
 
-pub(super) fn open(coord: &Entity<ScrawlCoordinator>, cx: &mut App) {
+pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
     for handle in cx.windows() {
         if let Some(board) = handle.downcast::<WhiteboardWindow>() {
             let _ = board.update(cx, |_, window, _| window.activate_window());
@@ -222,10 +222,10 @@ pub(super) fn open(coord: &Entity<ScrawlCoordinator>, cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Scrawl Whiteboard".into()),
+                title: Some("Apparent Whiteboard".into()),
                 ..Default::default()
             }),
-            app_id: Some("dev.kitlangton.scrawl".into()),
+            app_id: Some("dev.kitlangton.apparent".into()),
             focus: true,
             show: true,
             kind: WindowKind::Normal,
@@ -252,7 +252,7 @@ pub(super) fn open(coord: &Entity<ScrawlCoordinator>, cx: &mut App) {
                     Err(error) => last_error = Some(error),
                 }
             }
-            crate::capture::scrawl_log(&format!("Whiteboard: could not float Hyprland window: {last_error:?}"));
+            crate::capture::apparent_log(&format!("Whiteboard: could not float Hyprland window: {last_error:?}"));
         })
         .detach();
     }
@@ -277,22 +277,22 @@ pub(super) fn close(cx: &mut App) {
 /// A paper export is optional. Never turn a finished screen recording into a failed capture.
 pub(super) fn finish_handoff(
     dir: &std::path::Path,
-    bundle: crate::model::ScrawlBundle,
+    bundle: crate::model::ApparentBundle,
     summary: String,
     board: &Board,
-) -> (crate::model::ScrawlBundle, String) {
+) -> (crate::model::ApparentBundle, String) {
     finish_handoff_with(dir, bundle, summary, board, |_| Ok(()))
 }
 
 fn finish_handoff_with(
     dir: &std::path::Path,
-    mut bundle: crate::model::ScrawlBundle,
+    mut bundle: crate::model::ApparentBundle,
     summary: String,
     board: &Board,
     before_publish: impl FnMut(usize) -> anyhow::Result<()>,
-) -> (crate::model::ScrawlBundle, String) {
+) -> (crate::model::ApparentBundle, String) {
     if let Err(error) = append_to_bundle_with(dir, &mut bundle, board, before_publish) {
-        crate::capture::scrawl_log(format!("Whiteboard handoff skipped: {error:#}"));
+        crate::capture::apparent_log(format!("Whiteboard handoff skipped: {error:#}"));
         return (bundle, summary);
     }
     let summary = crate::sketch::summary_markdown(&bundle, dir);
@@ -302,7 +302,7 @@ fn finish_handoff_with(
 /// Keep the whole finished sketch legible even if the window was closed or resized at stop.
 fn append_to_bundle_with(
     dir: &std::path::Path,
-    bundle: &mut crate::model::ScrawlBundle,
+    bundle: &mut crate::model::ApparentBundle,
     board: &Board,
     before_publish: impl FnMut(usize) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
@@ -381,7 +381,7 @@ fn append_to_bundle_with(
         crop.changes.push(Vec::new());
     }
     next.keyframes.push(key);
-    writes.push((dir.join("scrawl.json"), serde_json::to_vec_pretty(&next)?));
+    writes.push((dir.join("apparent.json"), serde_json::to_vec_pretty(&next)?));
     writes.push((dir.join("summary.md"), crate::sketch::summary_markdown(&next, dir).into_bytes()));
     publish_artifacts(dir, &writes, before_publish)?;
     *bundle = next;
@@ -422,7 +422,7 @@ fn publish_artifacts(
                     };
                     if let Err(restore_error) = restored {
                         rollback_failed = true;
-                        crate::capture::scrawl_log(format!(
+                        crate::capture::apparent_log(format!(
                             "Whiteboard rollback failed for {}: {restore_error}", path.display()
                         ));
                     }
@@ -434,11 +434,11 @@ fn publish_artifacts(
         Ok(())
     })();
     if rollback_failed {
-        crate::capture::scrawl_log(format!(
+        crate::capture::apparent_log(format!(
             "Whiteboard backups left at {} for recovery", stage.display()
         ));
     } else if let Err(error) = std::fs::remove_dir_all(&stage) {
-        crate::capture::scrawl_log(format!("Whiteboard stage cleanup failed: {error}"));
+        crate::capture::apparent_log(format!("Whiteboard stage cleanup failed: {error}"));
     }
     result
 }
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn finished_whiteboard_is_a_legible_handoff_frame_and_text() {
         let root = std::env::temp_dir().join(crate::make_bundle_id());
-        let (dir, mut bundle, _) = crate::generate_demo_bundle(Some(root.join("demo.scrawl"))).unwrap();
+        let (dir, mut bundle, _) = crate::generate_demo_bundle(Some(root.join("demo.apparent"))).unwrap();
         let sheet_before = std::fs::read(dir.join("contact-sheet.png")).unwrap();
         let full_dir = dir.join("frames-full");
         std::fs::create_dir(&full_dir).unwrap();
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(bundle.autocrop.as_ref().unwrap().crops.len(), bundle.keyframes.len());
         assert!(full_dir.join(std::path::Path::new(&frame.file).file_name().unwrap()).exists());
         assert_ne!(std::fs::read(dir.join("contact-sheet-full.png")).unwrap(), sheet_before);
-        let saved: crate::model::ScrawlBundle = serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
+        let saved: crate::model::ApparentBundle = serde_json::from_slice(&std::fs::read(dir.join("apparent.json")).unwrap()).unwrap();
         assert_eq!(saved.keyframes, bundle.keyframes);
         assert_eq!(std::fs::read_to_string(dir.join("summary.md")).unwrap(), crate::sketch::summary_markdown(&bundle, &dir));
         std::fs::remove_dir_all(root).unwrap();
@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn empty_or_cleared_paper_does_not_add_a_handoff_tile() {
         let root = std::env::temp_dir().join(crate::make_bundle_id());
-        let (dir, mut bundle, _) = crate::generate_demo_bundle(Some(root.join("demo.scrawl"))).unwrap();
+        let (dir, mut bundle, _) = crate::generate_demo_bundle(Some(root.join("demo.apparent"))).unwrap();
         let before = std::fs::read(dir.join("contact-sheet.png")).unwrap();
         let keys = bundle.keyframes.len();
         let mut board = Board::default();
@@ -589,8 +589,8 @@ mod tests {
     fn failed_paper_publish_keeps_the_original_capture_and_clipboard_text() {
         let root = std::env::temp_dir().join(crate::make_bundle_id());
         let (dir, bundle, summary) =
-            crate::generate_demo_bundle(Some(root.join("demo.scrawl"))).unwrap();
-        let manifest = std::fs::read(dir.join("scrawl.json")).unwrap();
+            crate::generate_demo_bundle(Some(root.join("demo.apparent"))).unwrap();
+        let manifest = std::fs::read(dir.join("apparent.json")).unwrap();
         let sheet = std::fs::read(dir.join("contact-sheet.png")).unwrap();
         let text = std::fs::read(dir.join("summary.md")).unwrap();
         let next_frame = dir.join(format!("frames/frame-{:02}.png", bundle.keyframes.len() + 1));
@@ -608,7 +608,7 @@ mod tests {
                 });
             assert_eq!(returned.keyframes, bundle.keyframes);
             assert_eq!(returned_summary, summary);
-            assert_eq!(std::fs::read(dir.join("scrawl.json")).unwrap(), manifest);
+            assert_eq!(std::fs::read(dir.join("apparent.json")).unwrap(), manifest);
             assert_eq!(std::fs::read(dir.join("contact-sheet.png")).unwrap(), sheet);
             assert_eq!(std::fs::read(dir.join("summary.md")).unwrap(), text);
             assert!(!next_frame.exists());

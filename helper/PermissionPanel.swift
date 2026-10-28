@@ -1,16 +1,16 @@
-// `scrawl-helper permission-panel`: the "drag Scrawl into the list" card for the Privacy panes
+// `apparent-helper permission-panel`: the "drag Apparent into the list" card for the Privacy panes
 // that take a dragged app (Screen Recording, Accessibility).
 //
-//   scrawl-helper permission-panel --permission screen-recording|accessibility
+//   apparent-helper permission-panel --permission screen-recording|accessibility
 //                                  [--from X,Y,W,H] [--app PATH] [--preview] [--reduce-motion]
-//   scrawl-helper permission-panel --check PERMISSION        {"granted":true|false} from a fresh process
-//   scrawl-helper permission-panel --plan --settings X,Y,W,H --visible X,Y,W,H   where the card docks
+//   apparent-helper permission-panel --check PERMISSION        {"granted":true|false} from a fresh process
+//   apparent-helper permission-panel --plan --settings X,Y,W,H --visible X,Y,W,H   where the card docks
 //
 // It opens the pane in System Settings, waits for its window to settle, flies a card from
 // `--from` (the Grant button, global top-left points like CGWindow bounds) and docks it below
 // the Settings window, or inside its empty lower area when there's no room (`dock`), with its
 // app row lined up under the Privacy list's column. The row
-// drags the real Scrawl.app, the bundle that holds the grant. stdin takes `cancel` (fade out;
+// drags the real Apparent.app, the bundle that holds the grant. stdin takes `cancel` (fade out;
 // EOF on a pipe does the same), `back` (fly back to `--from`, as the card's back button does) and
 // `granted` (the parent saw the grant first: show it, then fade). Events go to stdout as JSON lines and the last one is either
 //   {"event":"granted","permission":P}    or    {"event":"cancelled","permission":P,"reason":R}
@@ -31,7 +31,7 @@ import SwiftUI
 enum PermissionPanel {
   // MARK: Tuning
 
-  /// The flight from the Grant button to the dock. Duration and bounce, as everywhere in Scrawl:
+  /// The flight from the Grant button to the dock. Duration and bounce, as everywhere in Apparent:
   /// critically damped, so the card leaves fast and decelerates into place without overshooting.
   /// A spring front-loads its travel, so a cross-screen hop needs a longer duration than a drawer.
   static let flightSpring = Spring(duration: 0.85, bounce: 0)
@@ -86,7 +86,7 @@ enum PermissionPanel {
   }
 
   /// The .app that contains this helper, since that bundle is what TCC grants. Outside an app
-  /// (a debug build) it falls back to the installed Scrawl.
+  /// (a debug build) it falls back to the installed Apparent.
   static func appBundleURL(override: String?) -> URL {
     if let override, !override.isEmpty { return URL(filePath: override).standardizedFileURL }
     let executable = (Bundle.main.executableURL ?? URL(filePath: CommandLine.arguments[0]))
@@ -96,9 +96,9 @@ enum PermissionPanel {
       if url.pathExtension.lowercased() == "app" { return url }
       url = url.deletingLastPathComponent()
     }
-    let installed = URL(filePath: NSHomeDirectory()).appending(path: "Applications/Scrawl.app")
+    let installed = URL(filePath: NSHomeDirectory()).appending(path: "Applications/Apparent.app")
     if FileManager.default.fileExists(atPath: installed.path) { return installed }
-    return URL(filePath: "/Applications/Scrawl.app")
+    return URL(filePath: "/Applications/Apparent.app")
   }
 
   /// For the onboarding window: launch the panel from a button's frame (AppKit screen
@@ -960,7 +960,7 @@ extension PermissionPanel {
         let front = NSWorkspace.shared.frontmostApplication
         let ours = front?.bundleIdentifier == settingsBundleID
           || front?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-          || front.map(isScrawl) ?? false
+          || front.map(isApparent) ?? false
           || panelModel.dragging
         let alpha: CGFloat = ours ? 1 : 0
         if panel.alphaValue != alpha, !isFading {
@@ -976,8 +976,8 @@ extension PermissionPanel {
 
     private var isFading = false
 
-    /// Scrawl itself or one of its helpers, such as the onboarding window.
-    private func isScrawl(_ app: NSRunningApplication) -> Bool {
+    /// Apparent itself or one of its helpers, such as the onboarding window.
+    private func isApparent(_ app: NSRunningApplication) -> Bool {
       var url = app.executableURL?.resolvingSymlinksInPath() ?? app.bundleURL
       while let current = url, current.path != "/" {
         if current.pathExtension.lowercased() == "app" {

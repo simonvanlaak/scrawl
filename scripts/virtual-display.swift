@@ -1,4 +1,4 @@
-// A temporary second display for testing Scrawl on more than one screen, through CoreGraphics'
+// A temporary second display for testing Apparent on more than one screen, through CoreGraphics'
 // private CGVirtualDisplay (what BetterDisplay and DeskPad use). It lasts as long as this process.
 //
 //   swiftc -O scripts/virtual-display.swift -o /tmp/virtual-display
@@ -55,7 +55,7 @@ while let arg = args.next() {
 
 let descriptor = (NSClassFromString("CGVirtualDisplayDescriptor") as? NSObject.Type ?? { fail("no CGVirtualDisplay") }()).init()
 descriptor.setValue(DispatchQueue.global(qos: .userInteractive), forKey: "queue")
-descriptor.setValue("Scrawl Test \(width)x\(height)@\(scale)x", forKey: "name")
+descriptor.setValue("Apparent Test \(width)x\(height)@\(scale)x", forKey: "name")
 descriptor.setValue(width * scale, forKey: "maxPixelsWide")
 descriptor.setValue(height * scale, forKey: "maxPixelsHigh")
 // ~ 24" at 1920 pt wide.

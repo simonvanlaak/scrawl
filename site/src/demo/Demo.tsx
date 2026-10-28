@@ -16,7 +16,7 @@ type UserStroke = { points: [number, number, number][]; done: boolean }
 const supportsSvgBackdrop =
   typeof window !== "undefined" &&
   typeof CSS !== "undefined" &&
-  CSS.supports("backdrop-filter", "url(#scrawl-liquid-glass)") &&
+  CSS.supports("backdrop-filter", "url(#apparent-liquid-glass)") &&
   /Chrome|Chromium|CriOS|Edg/i.test(navigator.userAgent) &&
   !("GestureEvent" in window)
 
@@ -64,7 +64,7 @@ const LENS_DATA_URL = createLensDataUrl()
 
 declare global {
   interface Window {
-    __scrawlDemo?: {
+    __apparentDemo?: {
       ready: () => boolean
       t: () => number
       seek: (ms: number) => void
@@ -337,7 +337,7 @@ export function Demo() {
   // Test hook for motion captures: seek the timeline to any ms and render it synchronously, so a
   // capture can step at a fixed 60 fps of demo time regardless of the browser's frame rate.
   useEffect(() => {
-    window.__scrawlDemo = {
+    window.__apparentDemo = {
       ready: () => !!scriptRef.current,
       t: () => tRef.current,
       seek: (ms: number) => {
@@ -458,7 +458,7 @@ export function Demo() {
         <svg className="liquid-glass-defs" aria-hidden>
           <defs>
             <filter
-              id="scrawl-liquid-glass"
+              id="apparent-liquid-glass"
               x="0%"
               y="0%"
               width="100%"

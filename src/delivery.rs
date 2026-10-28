@@ -1,4 +1,4 @@
-//! What became of a ScrawlKit recording once the Mac took it in, what the phone is told about
+//! What became of a ApparentKit recording once the Mac took it in, what the phone is told about
 //! it, and the retries that finish the job when OpenCode didn't take the bundle.
 //!
 //! The phone uploads once. When the bundle is built but queuing it into the session fails, the
@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::capture::scrawl_log;
+use crate::capture::apparent_log;
 
 /// A bundle whose forward to OpenCode is still being retried.
 pub const PENDING: &str = ".deliver.json";
@@ -154,12 +154,12 @@ pub fn deliver(
         },
         Err(err) => {
             let error = format!("{err:#}");
-            scrawl_log(format!(
+            apparent_log(format!(
                 "deliver: OpenCode send to {title} failed ({error}); retrying from the Mac"
             ));
             let pending = Pending::new(session, title, key, &error, crate::now_epoch_ms());
             if let Err(err) = pending.write(dir) {
-                scrawl_log(format!("deliver: {err:#}"));
+                apparent_log(format!("deliver: {err:#}"));
             }
             Delivery::Queued {
                 title: title.to_owned(),
@@ -185,14 +185,14 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
     };
     let mut bundles: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|ext| ext == "scrawl") && p.join(PENDING).is_file())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "apparent") && p.join(PENDING).is_file())
         .collect();
     bundles.sort();
     for dir in bundles {
         let mut pending = match Pending::read(&dir) {
             Ok(pending) => pending,
             Err(err) => {
-                scrawl_log(format!("deliver: {err:#}; giving up on {}", dir.display()));
+                apparent_log(format!("deliver: {err:#}; giving up on {}", dir.display()));
                 let _ = std::fs::rename(dir.join(PENDING), dir.join(FAILED));
                 report.given_up += 1;
                 continue;
@@ -204,7 +204,7 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
         match forward(&dir, &pending.session) {
             Ok(()) => {
                 let _ = std::fs::remove_file(dir.join(PENDING));
-                scrawl_log(format!(
+                apparent_log(format!(
                     "deliver: {} sent to {} on try {}",
                     dir.display(),
                     pending.title,
@@ -216,7 +216,7 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
                 pending.attempts += 1;
                 pending.last_error = short(&format!("{err:#}"));
                 if now.saturating_sub(pending.first_at) >= GIVE_UP_AFTER_MS {
-                    scrawl_log(format!(
+                    apparent_log(format!(
                         "deliver: giving up on {} after {} tries over a day ({})",
                         dir.display(),
                         pending.attempts,
@@ -229,7 +229,7 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
                 } else {
                     let wait = backoff_ms(pending.attempts);
                     pending.next_at = now + wait;
-                    scrawl_log(format!(
+                    apparent_log(format!(
                         "deliver: {} try {} failed ({}); next in {} s",
                         dir.display(),
                         pending.attempts,
@@ -237,7 +237,7 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
                         wait / 1000
                     ));
                     if let Err(err) = pending.write(&dir) {
-                        scrawl_log(format!("deliver: {err:#}"));
+                        apparent_log(format!("deliver: {err:#}"));
                     }
                     report.retrying += 1;
                 }
@@ -251,7 +251,7 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
 /// `on_sent` hears about each that went through.
 pub fn spawn_retries(captures: PathBuf, forward: Forward, on_sent: fn(&Path, &Pending)) {
     let _ = std::thread::Builder::new()
-        .name("scrawl-deliver".into())
+        .name("apparent-deliver".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(SCAN_EVERY);
@@ -268,7 +268,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     fn temp_captures() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("scrawl-deliver-{}", crate::make_bundle_id()));
+        let dir = std::env::temp_dir().join(format!("apparent-deliver-{}", crate::make_bundle_id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn retries_when_due_then_clears_the_marker() {
         let captures = temp_captures();
-        let bundle = captures.join("scrawl-1-a.scrawl");
+        let bundle = captures.join("apparent-1-a.apparent");
         std::fs::create_dir_all(&bundle).unwrap();
         Pending::new("ses_retry", "Retry", Some("k"), "offline", 1_000)
             .write(&bundle)
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn gives_up_after_a_day() {
         let captures = temp_captures();
-        let bundle = captures.join("scrawl-2-b.scrawl");
+        let bundle = captures.join("apparent-2-b.apparent");
         std::fs::create_dir_all(&bundle).unwrap();
         let mut pending = Pending::new("ses_x", "X", None, "offline", 0);
         pending.next_at = GIVE_UP_AFTER_MS;

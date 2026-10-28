@@ -181,7 +181,7 @@ fn rasterize_text(
     (w_px as u32, h_px as u32, size_pt, ctx.data().to_vec())
 }
 
-/// Rasterizes one of Scrawl's line icons into premultiplied white RGBA8 pixels at `scale`.
+/// Rasterizes one of Apparent's line icons into premultiplied white RGBA8 pixels at `scale`.
 fn rasterize_icon(kind: IconKind, size_pt: f32, scale: f32) -> (u32, u32, [f32; 2], Vec<u8>) {
     let w_px = (size_pt * scale).round().max(8.0) as usize;
     let h_px = w_px;

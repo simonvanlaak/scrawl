@@ -20,8 +20,8 @@
 //! 6. Crops around activity move their edges into white space found in the frame (`Content`),
 //!    reach across blank space to the nearest content, and trim wide blank margins.
 //!
-//! `scrawl autocrop` opens a playground that runs this same code (through `--serve`) to tune it,
-//! and `scrawl autocrop-eval` scores it against a corpus of simulated captures with ground truth.
+//! `apparent autocrop` opens a playground that runs this same code (through `--serve`) to tune it,
+//! and `apparent autocrop-eval` scores it against a corpus of simulated captures with ground truth.
 
 use std::collections::HashMap;
 
@@ -219,7 +219,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// From `~/.config/scrawl/config.json` `"autocrop"`: absent or `true` is the defaults,
+    /// From `~/.config/apparent/config.json` `"autocrop"`: absent or `true` is the defaults,
     /// `false` is off, an object overrides some settings.
     pub fn from_config(value: Option<&serde_json::Value>) -> Option<Self> {
         match value {
@@ -1687,7 +1687,7 @@ pub fn change_regions(prev: &RgbaFrame, cur: &RgbaFrame) -> Vec<Rect> {
                 }
             }
             let n = (SAMPLES * SAMPLES) as u64;
-            // Scrawl's keyframe badge sits in a top corner and differs on every frame.
+            // Apparent's keyframe badge sits in a top corner and differs on every frame.
             let badge =
                 row * cell < h * 6 / 100 && !(COLS * 6 / 100..COLS * 94 / 100).contains(&col);
             changed[row * COLS + col] = !badge && diff / n >= 10;
@@ -1738,7 +1738,7 @@ pub fn change_regions(prev: &RgbaFrame, cur: &RgbaFrame) -> Vec<Rect> {
 }
 
 /// Keyframes ready to write: annotated, and cropped when the capture is a Screen capture and the
-/// crop is worth it. The second value is the info for `scrawl.json` and the full annotated
+/// crop is worth it. The second value is the info for `apparent.json` and the full annotated
 /// frames (for `frames-full/`), present only when something was cropped.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn annotate_and_crop(

@@ -47,7 +47,7 @@ impl Pause {
         let worker_stop = Arc::clone(&stop);
         let (tail, finished) = mpsc::channel::<Vec<u8>>();
         let worker = std::thread::Builder::new()
-            .name("scrawl-pause-transcribe".into())
+            .name("apparent-pause-transcribe".into())
             .spawn(move || {
                 let mut consumed = 0;
                 let mut read_at = 0;
@@ -344,11 +344,11 @@ mod tests {
         assert!(pause.finish(&wav).is_err());
     }
 
-    /// Local-only benchmark: set SCRAWL_PAUSE_TEST_WAV and SCRAWL_MODELS_DIR.
+    /// Local-only benchmark: set APPARENT_PAUSE_TEST_WAV and APPARENT_MODELS_DIR.
     #[test]
     #[ignore]
     fn compare_real_audio_with_batch() {
-        let path = std::env::var("SCRAWL_PAUSE_TEST_WAV").unwrap();
+        let path = std::env::var("APPARENT_PAUSE_TEST_WAV").unwrap();
         let wav = std::fs::read(&path).unwrap();
         let start = std::time::Instant::now();
         let baseline = crate::speech::transcribe(std::path::Path::new(&path)).unwrap();

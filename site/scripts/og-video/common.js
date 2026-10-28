@@ -153,7 +153,7 @@ function simulate({ steps, setup, onStep, gravity = 1, substeps = 2 }) {
   return { frames, ctx }
 }
 
-// Scrawl helpers.
+// Apparent helpers.
 const INK = "#ff3b30"
 const SANS = 'system-ui, -apple-system, "Helvetica Neue", sans-serif'
 
@@ -167,7 +167,7 @@ function inkStyle(ctx, width = 7) {
   ctx.shadowOffsetY = 1.5
 }
 
-// The Scrawl brush, tinted to `color` once.
+// The Apparent brush, tinted to `color` once.
 async function loadBrush(color = "#f4f4f5", size = 256) {
   const img = await loadImage("/public/icon.svg")
   const c = document.createElement("canvas")
@@ -204,7 +204,7 @@ function pin(ctx, x, y, n, s = 1, alpha = 1) {
   ctx.restore()
 }
 
-// Scrawl's voice-note bubble: words tick in while the bubble's width leads them.
+// Apparent's voice-note bubble: words tick in while the bubble's width leads them.
 // t is frames since the bubble started; it exits at t = 86..100.
 function bubble(ctx, x, y, text, t, f, { size = 26, exitAt = 86 } = {}) {
   const enter = ease.enter(seg(t, 0, 12))

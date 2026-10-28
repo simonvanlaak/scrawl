@@ -15,7 +15,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use futures_lite::StreamExt as _;
 
 use super::media::Source;
-use crate::capture::scrawl_log;
+use crate::capture::apparent_log;
 use crate::model::{CaptureMode, TargetInfo};
 
 /// A PipeWire stream a compositor is sending, open until dropped.
@@ -67,7 +67,7 @@ pub fn source_for(target: &TargetInfo, stopping: &AtomicBool) -> Result<Source> 
                     crop: None,
                 });
             }
-            Err(error) => scrawl_log(format!("GNOME screencast unavailable: {error:#}")),
+            Err(error) => apparent_log(format!("GNOME screencast unavailable: {error:#}")),
         }
     }
     let window = target.mode == CaptureMode::Window;
@@ -93,7 +93,7 @@ fn mutter_area(rect: [f64; 4]) -> Result<Stream> {
     let (ready_tx, ready_rx) = flume::bounded::<Result<u32>>(1);
     let (stop_tx, stop_rx) = flume::bounded::<()>(1);
     std::thread::Builder::new()
-        .name("scrawl-mutter-screencast".into())
+        .name("apparent-mutter-screencast".into())
         .spawn(move || {
             let run = || -> Result<(zbus::blocking::Connection, zbus::zvariant::OwnedObjectPath, u32)> {
                 let bus = zbus::blocking::Connection::session()?;
@@ -202,7 +202,7 @@ fn portal_screencast(window: bool, stopping: &AtomicBool) -> Result<Stream> {
     let (ready_tx, ready_rx) = flume::bounded::<Result<(u32, OwnedFd, Option<[f64; 4]>)>>(1);
     let (stop_tx, stop_rx) = flume::bounded::<()>(1);
     std::thread::Builder::new()
-        .name("scrawl-portal-screencast".into())
+        .name("apparent-portal-screencast".into())
         .spawn(move || {
             futures_lite::future::block_on(async move {
                 let run = async {
@@ -296,7 +296,7 @@ fn portal_screencast(window: bool, stopping: &AtomicBool) -> Result<Stream> {
 
 // MARK: Shortcuts
 
-/// Binds Scrawl's shortcuts with the GlobalShortcuts portal and calls `pressed` with
+/// Binds Apparent's shortcuts with the GlobalShortcuts portal and calls `pressed` with
 /// `record` or `paste` when one goes down. `Err` when the desktop has no such portal (GNOME
 /// before 48), so the caller can fall back to a desktop keybinding (`bind_gnome_keybindings`).
 pub fn global_shortcuts(
@@ -307,7 +307,7 @@ pub fn global_shortcuts(
     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
     let (ready_tx, ready_rx) = flume::bounded::<Result<()>>(1);
     std::thread::Builder::new()
-        .name("scrawl-global-shortcuts".into())
+        .name("apparent-global-shortcuts".into())
         .spawn(move || {
             futures_lite::future::block_on(async move {
                 let setup = async {
@@ -414,8 +414,8 @@ const GNOME_PATH: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-k
 
 /// GNOME without the GlobalShortcuts portal (before 48): custom keyboard shortcuts in GNOME's
 /// own settings (Settings › Keyboard › Custom Shortcuts lists them) that run
-/// `scrawl shortcut record` and `scrawl shortcut paste`, which hand the press to the running app
-/// (`super::ipc`). Only Scrawl's own two entries are written or changed.
+/// `apparent shortcut record` and `apparent shortcut paste`, which hand the press to the running app
+/// (`super::ipc`). Only Apparent's own two entries are written or changed.
 pub fn bind_gnome_keybindings(bindings: &[(&str, String)]) -> Result<()> {
     let exe = std::env::var_os("APPIMAGE")
         .map(PathBuf::from)
@@ -444,7 +444,7 @@ pub fn bind_gnome_keybindings(bindings: &[(&str, String)]) -> Result<()> {
         .filter(|p| !p.is_empty())
         .collect();
     for (id, binding) in bindings {
-        let path = format!("{GNOME_PATH}/scrawl-{id}/");
+        let path = format!("{GNOME_PATH}/apparent-{id}/");
         if !paths.contains(&path) {
             paths.push(path.clone());
         }
@@ -454,7 +454,7 @@ pub fn bind_gnome_keybindings(bindings: &[(&str, String)]) -> Result<()> {
             "set",
             &schema,
             "name",
-            &gvariant_string(&format!("Scrawl: {id}")),
+            &gvariant_string(&format!("Apparent: {id}")),
         ])?;
         gsettings(&["set", &schema, "command", &gvariant_string(&command)])?;
         gsettings(&["set", &schema, "binding", &gvariant_string(binding)])?;
@@ -551,8 +551,8 @@ mod tests {
         assert_eq!(portal_trigger(mods, "S"), "ALT+SHIFT+s");
         assert_eq!(gnome_binding(mods, "S"), "<Alt><Shift>s");
         assert_eq!(
-            gvariant_string("'/a b/scrawl' shortcut record"),
-            "\"'/a b/scrawl' shortcut record\""
+            gvariant_string("'/a b/apparent' shortcut record"),
+            "\"'/a b/apparent' shortcut record\""
         );
         assert_eq!(gvariant_string(r#"say "hi"\"#), r#""say \"hi\"\\""#);
     }

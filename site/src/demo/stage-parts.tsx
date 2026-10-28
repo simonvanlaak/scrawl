@@ -48,7 +48,7 @@ const MenuBarInner = memo(function MenuBarInner({ active }: { active: boolean })
         <span>Help</span>
       </div>
       <div className="menubar-right">
-        <span className="menubar-extra menubar-scrawl" aria-label="Apparent">
+        <span className="menubar-extra menubar-apparent" aria-label="Apparent">
           <strong style={{ color: "#b7a5d8", fontSize: 17, lineHeight: 1 }}>a</strong>
         </span>
         <span className="menubar-extra">

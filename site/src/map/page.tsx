@@ -13,7 +13,7 @@ export function mapPage(audit: Audit): string {
     <meta name="robots" content="noindex,nofollow" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0a0a0b" />
-    <title>Scrawl feature map</title>
+    <title>Apparent feature map</title>
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <style>${css.replaceAll("</style", "<\\/style")}</style>
   </head>

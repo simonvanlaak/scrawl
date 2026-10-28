@@ -2,7 +2,7 @@
 //! drawing `crate::ink_view::OverlayView`. It is left out of the recording
 //! (`WDA_EXCLUDEFROMCAPTURE`).
 //!
-//! Also the Win32 window helpers Scrawl's other popups use.
+//! Also the Win32 window helpers Apparent's other popups use.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
@@ -36,9 +36,9 @@ use crate::ink_view::{OverlayView, Placement};
 use crate::model::RgbaFrame;
 
 /// Leaves a window out of every screen capture (Windows 10 2004 and later).
-/// `SCRAWL_SHOW_OWN_WINDOWS=1` keeps them in, for screenshots of Scrawl itself.
+/// `APPARENT_SHOW_OWN_WINDOWS=1` keeps them in, for screenshots of Apparent itself.
 pub fn exclude_from_capture(hwnd: HWND) {
-    if std::env::var_os("SCRAWL_SHOW_OWN_WINDOWS").is_some() {
+    if std::env::var_os("APPARENT_SHOW_OWN_WINDOWS").is_some() {
         return;
     }
     let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
@@ -289,7 +289,7 @@ impl InkOverlay {
     }
 }
 
-/// Puts one of Scrawl's GPUI windows (the overlay, picker or pill) over `rect` (global pixels)
+/// Puts one of Apparent's GPUI windows (the overlay, picker or pill) over `rect` (global pixels)
 /// on top, and shows it without activating it. Call it outside GPUI updates: the moves it makes
 /// reach GPUI's resize and DPI handlers at once.
 pub(crate) fn place(id: isize, rect: [f64; 4]) {

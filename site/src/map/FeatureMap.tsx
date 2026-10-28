@@ -3,7 +3,7 @@
 import type { Audit } from "../../scripts/feature-audit.ts"
 import { FEATURES, FLOW, GROUPS, PLATFORMS, STATUS_KINDS, parseStatus, type Feature, type Platform, type Status } from "../features"
 
-const REPO = "https://github.com/kitlangton/scrawl"
+const REPO = "https://github.com/tryapparent/apparent"
 
 const KIND_LABEL: Record<Status["kind"], string> = {
   stable: "Stable",
@@ -244,7 +244,7 @@ function References() {
       </section>
       <section className="group" id="config">
         <h2>
-          Config keys <code>~/.config/scrawl/config.json</code>
+          Config keys <code>~/.config/apparent/config.json</code>
         </h2>
         <table className="ref">
           <tbody>
@@ -294,7 +294,7 @@ export function FeatureMap({ audit }: { audit: Audit }) {
       <header className="top">
         <a className="brand" href="/">
           <img src="/app-icon-64.png" width={22} height={22} alt="" />
-          Scrawl
+          Apparent
         </a>
         <nav>
           <a href="#status">Status</a>

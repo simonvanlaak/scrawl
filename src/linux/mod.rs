@@ -1,12 +1,12 @@
 //! Linux platform helpers: the session (X11 or Wayland), displays, top-level windows,
 //! processes, the clipboard, the shell, autostart, the tray and the media pipeline.
 //!
-//! Scrawl's own windows are GPUI windows on X11, through XWayland on a Wayland session
+//! Apparent's own windows are GPUI windows on X11, through XWayland on a Wayland session
 //! (`prepare_process`), because GPUI 0.2.2's Wayland windows can't be placed, kept on top or
 //! made click-through. Global coordinates are X11 root-window pixels, top-left origin, like
 //! Windows' physical pixels; `TargetFrame` holds pixels too.
 //!
-//! What Scrawl can see depends on the session: on X11 it reads the window list, the pointer and
+//! What Apparent can see depends on the session: on X11 it reads the window list, the pointer and
 //! the keys straight from the X server (`x11`). On Wayland the compositor keeps those to itself:
 //! the screen comes from the ScreenCast portal (or GNOME's own screencast API), the shortcut
 //! from the GlobalShortcuts portal (or runtime binds on Hyprland), and clicks and ⇧ from the input devices when the user may
@@ -44,12 +44,12 @@ static WAYLAND_DISPLAY: OnceLock<Option<OsString>> = OnceLock::new();
 pub fn prepare_process() {
     let wayland = std::env::var_os("WAYLAND_DISPLAY").filter(|v| !v.is_empty());
     let _ = WAYLAND_DISPLAY.set(wayland.clone());
-    if wayland.is_some() && std::env::var_os("SCRAWL_NATIVE_WAYLAND").is_none() {
+    if wayland.is_some() && std::env::var_os("APPARENT_NATIVE_WAYLAND").is_none() {
         // SAFETY: called from `main` before any other thread exists.
         unsafe {
             std::env::remove_var("WAYLAND_DISPLAY");
             // GTK dialogs GPUI opens (file pickers) and xdg-open's children follow along.
-            std::env::set_var("SCRAWL_WAYLAND_DISPLAY", &wayland.unwrap_or_default());
+            std::env::set_var("APPARENT_WAYLAND_DISPLAY", &wayland.unwrap_or_default());
         }
     }
 }
@@ -59,13 +59,13 @@ pub fn wayland_display() -> Option<OsString> {
     WAYLAND_DISPLAY
         .get_or_init(|| {
             std::env::var_os("WAYLAND_DISPLAY")
-                .or_else(|| std::env::var_os("SCRAWL_WAYLAND_DISPLAY"))
+                .or_else(|| std::env::var_os("APPARENT_WAYLAND_DISPLAY"))
                 .filter(|v| !v.is_empty())
         })
         .clone()
 }
 
-/// A Wayland session: the X server Scrawl talks to is XWayland, which sees only X11 apps.
+/// A Wayland session: the X server Apparent talks to is XWayland, which sees only X11 apps.
 pub fn wayland_session() -> bool {
     wayland_display().is_some()
         || std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t.eq_ignore_ascii_case("wayland"))
@@ -150,9 +150,9 @@ pub fn hyprland() -> bool {
     desktop().split(':').any(|d| d == "hyprland") || hyprland::running()
 }
 
-/// What a keybinding or launcher should run for Scrawl: the AppImage while one runs, else this
+/// What a keybinding or launcher should run for Apparent: the AppImage while one runs, else this
 /// executable.
-pub fn scrawl_exe() -> std::io::Result<PathBuf> {
+pub fn apparent_exe() -> std::io::Result<PathBuf> {
     std::env::var_os("APPIMAGE")
         .map(PathBuf::from)
         .map_or_else(std::env::current_exe, Ok)
@@ -173,11 +173,11 @@ pub fn session_label() -> String {
     )
 }
 
-/// `~/.local/share/scrawl`: logs and machine-local state.
+/// `~/.local/share/apparent`: logs and machine-local state.
 pub fn local_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("scrawl")
+        .join("apparent")
 }
 
 /// A process's executable.
@@ -187,7 +187,7 @@ pub fn process_path(pid: u32) -> Option<PathBuf> {
 
 /// An app's name and identifier for a process: the identifier stands in for a macOS bundle
 /// identifier (the executable's name, `firefox`, `gnome-terminal-server`), and the name comes
-/// from its window's class when Scrawl knows one (`Firefox`), else the executable's.
+/// from its window's class when Apparent knows one (`Firefox`), else the executable's.
 pub fn app_identity(pid: u32) -> Option<(String, String)> {
     let comm = std::fs::read_to_string(format!("/proc/{pid}/comm"))
         .ok()

@@ -7,7 +7,7 @@ set -euo pipefail
 host=$(scutil --get LocalHostName 2>/dev/null || hostname)
 idle=$(ioreg -c IOHIDSystem -d 4 | awk '/HIDIdleTime/ {print int($NF / 1000000000); exit}')
 if [[ $host == *Studio* ]]; then
-  if [[ ${SCRAWL_STUDIO_SCREEN_OK:-} != 1 ]]; then
+  if [[ ${APPARENT_STUDIO_SCREEN_OK:-} != 1 ]]; then
     echo "screen-guard: refusing on $host: run real-screen captures on the Pro (ssh pro, /tmp/pro-gui.lock) or a virtual display" >&2
     exit 1
   fi

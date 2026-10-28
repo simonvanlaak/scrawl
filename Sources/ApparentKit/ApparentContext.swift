@@ -1,68 +1,68 @@
 #if os(iOS)
   import SwiftUI
 
-  public extension Scrawl {
+  public extension Apparent {
     /// Names the screen the app is showing ("Settings › Experimental"), so recordings say which
     /// page they were on. While recording, each change lands on the timeline. `nil` clears it.
     ///
-    /// The most recent setter wins: this call, or the latest `.scrawlScreen` view still on screen.
+    /// The most recent setter wins: this call, or the latest `.apparentScreen` view still on screen.
     static func screen(_ name: String?) {
-      ScrawlAppContext.shared.setScreen(name, token: ScrawlAppContext.manualToken, promote: true)
+      ApparentAppContext.shared.setScreen(name, token: ApparentAppContext.manualToken, promote: true)
     }
 
     /// Sets an app-defined value that helps whoever reads the recording ("session" = "ses_…",
     /// "server" = "studio"). `nil` clears it. Recordings include every value at their start and
     /// each change while recording. Only what you pass here is sent.
     static func context(_ key: String, _ value: String?) {
-      ScrawlAppContext.shared.setContext(key, value, token: ScrawlAppContext.manualToken, promote: true)
+      ApparentAppContext.shared.setContext(key, value, token: ApparentAppContext.manualToken, promote: true)
     }
   }
 
   public extension View {
-    /// Names the screen this view shows while it's visible (`Scrawl.screen(_:)`), following
+    /// Names the screen this view shows while it's visible (`Apparent.screen(_:)`), following
     /// `name` as it changes. When the view goes away, the screen it covered comes back.
-    func scrawlScreen(_ name: String) -> some View {
-      modifier(ScrawlScreenModifier(name: name))
+    func apparentScreen(_ name: String) -> some View {
+      modifier(ApparentScreenModifier(name: name))
     }
 
-    /// Sets an app-defined value (`Scrawl.context(_:_:)`) while this view is visible, following
+    /// Sets an app-defined value (`Apparent.context(_:_:)`) while this view is visible, following
     /// `value` as it changes. `nil` leaves the key to enclosing views; when the view goes away, the
     /// value it covered comes back.
-    func scrawlContext(_ key: String, _ value: String?) -> some View {
-      modifier(ScrawlContextModifier(key: key, value: value))
+    func apparentContext(_ key: String, _ value: String?) -> some View {
+      modifier(ApparentContextModifier(key: key, value: value))
     }
   }
 
-  private struct ScrawlScreenModifier: ViewModifier {
+  private struct ApparentScreenModifier: ViewModifier {
     let name: String
     @State private var token = UUID()
 
     func body(content: Content) -> some View {
       content
-        .onAppear { ScrawlAppContext.shared.setScreen(name, token: token, promote: true) }
+        .onAppear { ApparentAppContext.shared.setScreen(name, token: token, promote: true) }
         .onChange(of: name) { _, name in
-          ScrawlAppContext.shared.setScreen(name, token: token, promote: false)
+          ApparentAppContext.shared.setScreen(name, token: token, promote: false)
         }
-        .onDisappear { ScrawlAppContext.shared.setScreen(nil, token: token, promote: false) }
+        .onDisappear { ApparentAppContext.shared.setScreen(nil, token: token, promote: false) }
     }
   }
 
-  private struct ScrawlContextModifier: ViewModifier {
+  private struct ApparentContextModifier: ViewModifier {
     let key: String
     let value: String?
     @State private var token = UUID()
 
     func body(content: Content) -> some View {
       content
-        .onAppear { ScrawlAppContext.shared.setContext(key, value, token: token, promote: true) }
+        .onAppear { ApparentAppContext.shared.setContext(key, value, token: token, promote: true) }
         .onChange(of: value) { _, value in
-          ScrawlAppContext.shared.setContext(key, value, token: token, promote: false)
+          ApparentAppContext.shared.setContext(key, value, token: token, promote: false)
         }
         .onChange(of: key) { old, key in
-          ScrawlAppContext.shared.setContext(old, nil, token: token, promote: false)
-          ScrawlAppContext.shared.setContext(key, value, token: token, promote: true)
+          ApparentAppContext.shared.setContext(old, nil, token: token, promote: false)
+          ApparentAppContext.shared.setContext(key, value, token: token, promote: true)
         }
-        .onDisappear { ScrawlAppContext.shared.setContext(key, nil, token: token, promote: false) }
+        .onDisappear { ApparentAppContext.shared.setContext(key, nil, token: token, promote: false) }
     }
   }
 
@@ -72,8 +72,8 @@
   /// Each screen or key is a stack of setters (a view's token, or the static API's): the most
   /// recently appeared one still present wins.
   @MainActor
-  final class ScrawlAppContext {
-    static let shared = ScrawlAppContext()
+  final class ApparentAppContext {
+    static let shared = ApparentAppContext()
     static let manualToken = UUID()
 
     private struct Entry {
@@ -146,7 +146,7 @@
     }
 
     private var elapsed: Double? {
-      guard let startedAt, Scrawl.shared.isRecording else { return nil }
+      guard let startedAt, Apparent.shared.isRecording else { return nil }
       return (max(Date().timeIntervalSince(startedAt), 0) * 1000).rounded() / 1000
     }
 

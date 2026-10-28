@@ -16,7 +16,7 @@ use super::{Hooks, WebUrl, parse_url, project_root, run_with_timeout};
 use crate::handoff::{
     ApiGet, OpenCodeSession, Scan, find_root_session, get_session, normalize_slug, query_escape,
 };
-use crate::model::ScrawlBundle;
+use crate::model::ApparentBundle;
 
 /// Pages of newest root sessions read (100 each), besides the exact-folder and by-ID reads.
 pub const SESSION_PAGES: usize = 2;
@@ -306,7 +306,7 @@ pub fn url_clues(url: &str, senses: &Senses, own_host: bool) -> Vec<Clue> {
 /// The rest of the evidence, from the finished bundle: its title, what was said, the session
 /// OpenCode Desktop showed, the checkout the captured app is built from, and the destination the
 /// recording carries.
-pub fn evidence_for(bundle: &ScrawlBundle, dir: &Path, live: Live) -> Evidence {
+pub fn evidence_for(bundle: &ApparentBundle, dir: &Path, live: Live) -> Evidence {
     let mut clues = live.clues;
     clues.extend(bundle_clues(
         bundle,
@@ -324,7 +324,7 @@ pub fn evidence_for(bundle: &ScrawlBundle, dir: &Path, live: Live) -> Evidence {
 
 /// A saved `routing.json`'s evidence with the clues the bundle gives read again under today's
 /// rules: what was seen live (the tab, the port, the terminal) and the sessions are kept as saved.
-pub fn replay(saved: Evidence, bundle: &ScrawlBundle, apps: &[(String, PathBuf)]) -> Evidence {
+pub fn replay(saved: Evidence, bundle: &ApparentBundle, apps: &[(String, PathBuf)]) -> Evidence {
     let mut clues: Vec<Clue> = saved
         .clues
         .into_iter()
@@ -360,7 +360,7 @@ fn opencode_points(about: &About) -> (u32, u32) {
 /// (`routing.apps` in config.json); otherwise an open session's repository named like the app is
 /// its checkout.
 pub fn bundle_clues(
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     candidates: &[Candidate],
     apps: &[(String, PathBuf)],
 ) -> Vec<Clue> {
@@ -634,7 +634,7 @@ const INTERFACE_ROLES: [&str; 12] = [
 
 /// Reads what an OpenCode capture is about from what was said, clicked and marked. Only clear
 /// talk about the session's work counts for the session; it's unclear otherwise.
-pub fn about(bundle: &ScrawlBundle) -> About {
+pub fn about(bundle: &ApparentBundle) -> About {
     let text = bundle
         .transcript
         .text
@@ -704,7 +704,7 @@ fn last_viewed(candidates: &[Candidate], end: u64) -> Option<(&Candidate, u64)> 
 /// `url` standing in for the tab.
 pub fn evidence_for_bundle(
     dir: &Path,
-    bundle: &ScrawlBundle,
+    bundle: &ApparentBundle,
     url: Option<&str>,
     senses: &Senses,
 ) -> (Evidence, Option<String>, bool) {
@@ -972,7 +972,7 @@ mod tests {
 
     #[test]
     fn worktrees_share_their_repository() {
-        let base = std::env::temp_dir().join(format!("scrawl-repo-{}", crate::make_bundle_id()));
+        let base = std::env::temp_dir().join(format!("apparent-repo-{}", crate::make_bundle_id()));
         let main = base.join("main");
         std::fs::create_dir_all(main.join(".git/worktrees/wt")).unwrap();
         std::fs::write(main.join(".git/worktrees/wt/commondir"), "../..\n").unwrap();
@@ -1053,7 +1053,7 @@ mod tests {
     #[test]
     fn the_ladder_policy_reproduces_route() {
         use super::super::smart::{Policy, decide, destination};
-        let base = std::env::temp_dir().join(format!("scrawl-ladder-{}", crate::make_bundle_id()));
+        let base = std::env::temp_dir().join(format!("apparent-ladder-{}", crate::make_bundle_id()));
         let repo = base.join("repo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         std::fs::create_dir_all(repo.join("site")).unwrap();
@@ -1225,7 +1225,7 @@ mod tests {
 
     /// A capture's bundle and the evidence its `routing.json` saved (sessions trimmed), and the
     /// decision it got then (`"send TITLE"`, `"offer"`, `"keep"`).
-    fn fixture(json: &str) -> (ScrawlBundle, Evidence, String) {
+    fn fixture(json: &str) -> (ApparentBundle, Evidence, String) {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         (
             serde_json::from_value(value["bundle"].clone()).unwrap(),
@@ -1234,7 +1234,7 @@ mod tests {
         )
     }
 
-    fn replayed(bundle: &ScrawlBundle, saved: Evidence) -> (Evidence, Judgement) {
+    fn replayed(bundle: &ApparentBundle, saved: Evidence) -> (Evidence, Judgement) {
         let evidence = replay(saved, bundle, &[]);
         let judgement = decide(&evidence, Policy::Weigh);
         (evidence, judgement)
@@ -1481,7 +1481,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         let page = &value["page"];
         let (bundle, saved, _) = fixture(json);
-        let root = std::env::temp_dir().join(format!("scrawl-page-{}", crate::make_bundle_id()));
+        let root = std::env::temp_dir().join(format!("apparent-page-{}", crate::make_bundle_id()));
         let file = root.join(page["file"].as_str().unwrap());
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         let handle = std::fs::File::create(&file).unwrap();
@@ -1571,7 +1571,7 @@ mod tests {
         let json = ARTIFACTS[2];
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         let (bundle, saved, _) = fixture(json);
-        let root = std::env::temp_dir().join(format!("scrawl-mark-{}", crate::make_bundle_id()));
+        let root = std::env::temp_dir().join(format!("apparent-mark-{}", crate::make_bundle_id()));
         let file = root.join(value["page"]["file"].as_str().unwrap());
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "").unwrap();
@@ -1638,7 +1638,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(ONBOARDING).unwrap();
         let server = &value["server"];
         let (bundle, mut saved, _) = fixture(ONBOARDING);
-        let repo = std::env::temp_dir().join(format!("scrawl-story-{}", crate::make_bundle_id()));
+        let repo = std::env::temp_dir().join(format!("apparent-story-{}", crate::make_bundle_id()));
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         let dir = repo.join(server["folder"].as_str().unwrap());
         std::fs::create_dir_all(&dir).unwrap();

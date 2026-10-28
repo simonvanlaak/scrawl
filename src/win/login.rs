@@ -12,7 +12,7 @@ use super::wide;
 
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-const NAME: &str = "Scrawl";
+const NAME: &str = "Apparent";
 
 /// The command Windows runs at login: this executable's tray app.
 fn command() -> Result<String> {

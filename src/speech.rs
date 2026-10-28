@@ -1,7 +1,7 @@
 //! On-device transcription on Windows and Linux, with measured word timings: Parakeet through
 //! `transcribe.cpp`, the engine Hex uses. It loads a model Hex has already installed
-//! (`voice-control/models` in the user's data folder), else Scrawl's own copy of Hex's Parakeet
-//! Unified English (`%LOCALAPPDATA%\Scrawl\models`, `~/.local/share/scrawl/models`), which
+//! (`voice-control/models` in the user's data folder), else Apparent's own copy of Hex's Parakeet
+//! Unified English (`%LOCALAPPDATA%\Apparent\models`, `~/.local/share/apparent/models`), which
 //! `install` downloads once in the background and checks against its SHA-256. Like the Hex
 //! client, it transcribes each speech island on its own; unlike it, every word keeps the time the
 //! model heard it (`estimated: false`), so spoken cues ("look here") can cut keyframes.
@@ -69,7 +69,7 @@ impl Incremental {
     }
 }
 
-/// The model Scrawl downloads when Hex hasn't installed one: the same file, revision and
+/// The model Apparent downloads when Hex hasn't installed one: the same file, revision and
 /// checksum as Hex's `PARAKEET_UNIFIED_ENGLISH_ARTIFACT`.
 pub struct Artifact {
     pub filename: &'static str,
@@ -89,9 +89,9 @@ fn models_dir() -> PathBuf {
     crate::hex::support_dir().join("models")
 }
 
-/// Where Scrawl keeps the model it downloaded (`SCRAWL_MODELS_DIR` for tests).
+/// Where Apparent keeps the model it downloaded (`APPARENT_MODELS_DIR` for tests).
 pub fn own_models_dir() -> PathBuf {
-    std::env::var_os("SCRAWL_MODELS_DIR")
+    std::env::var_os("APPARENT_MODELS_DIR")
         .map(PathBuf::from)
         .filter(|dir| !dir.as_os_str().is_empty())
         .unwrap_or_else(default_models_dir)
@@ -106,7 +106,7 @@ fn default_models_dir() -> PathBuf {
 fn default_models_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("scrawl/models")
+        .join("apparent/models")
 }
 
 fn receipt_path(model: &Path) -> PathBuf {
@@ -130,7 +130,7 @@ fn verified_in(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Hex's installed models (verified downloads), Hex's chosen one first, then Parakeet ones;
-/// then the one Scrawl downloaded.
+/// then the one Apparent downloaded.
 pub fn installed_models() -> Vec<PathBuf> {
     let mut models = hex_models();
     models.extend(verified_in(&own_models_dir()));
@@ -280,9 +280,9 @@ fn init_backends() -> Result<()> {
     .map_err(|error| anyhow::anyhow!("transcribe.cpp backends: {error}"))
 }
 
-/// Makes sure a model is on disk: `installed` when Hex's or Scrawl's own is there, else downloads
+/// Makes sure a model is on disk: `installed` when Hex's or Apparent's own is there, else downloads
 /// `PARAKEET` into `own_models_dir()`, reporting progress, and keeps it only if its SHA-256
-/// matches. The same lines as macOS's `scrawl-helper speech-model --install`.
+/// matches. The same lines as macOS's `apparent-helper speech-model --install`.
 pub fn install(mut line: impl FnMut(SpeechModelLine)) -> Result<()> {
     let report = |status: &str, progress: Option<f64>, error: Option<String>| SpeechModelLine {
         status: status.into(),
@@ -443,7 +443,7 @@ mod tests {
     };
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("scrawl-speech-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("apparent-speech-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     #[ignore]
     fn downloads_and_runs_parakeet() {
-        let kept = std::env::var_os("SCRAWL_TEST_MODEL_DIR").map(PathBuf::from);
+        let kept = std::env::var_os("APPARENT_TEST_MODEL_DIR").map(PathBuf::from);
         let dir = kept.clone().unwrap_or_else(|| temp_dir("parakeet"));
         let fresh = !dir.join(PARAKEET.filename).is_file();
         let mut last = 0.0;
@@ -483,12 +483,12 @@ mod tests {
             assert_eq!(last, 1.0);
         }
         #[cfg(target_arch = "x86_64")]
-        if std::env::var_os("SCRAWL_TEST_NO_AVX512").is_some() {
+        if std::env::var_os("APPARENT_TEST_NO_AVX512").is_some() {
             // Under SDE: proves the emulated CPU is the one without AVX-512 (#58).
             assert!(!std::arch::is_x86_feature_detected!("avx512f"));
         }
         #[cfg(target_arch = "x86_64")]
-        if std::env::var_os("SCRAWL_TEST_NO_AVX_VNNI").is_some() {
+        if std::env::var_os("APPARENT_TEST_NO_AVX_VNNI").is_some() {
             assert!(!std::arch::is_x86_feature_detected!("avxvnni"));
             assert!(std::arch::is_x86_feature_detected!("avx512vnni"));
         }

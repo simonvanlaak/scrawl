@@ -2,20 +2,20 @@ use fframes::{EncoderOptions, RenderOptions, StaticMediaProvider, cli, cli::clap
 use fframes_skia_renderer::{
     SkiaFFramesRenderer, SkiaPipelineConcurrencyPolicy, SkiaPipelineConfig, metal::SkiaMetalCtx,
 };
-use scrawl_demo::{HEIGHT, ScrawlDemoMedia, ScrawlDemoVideo, WIDTH};
+use apparent_demo::{HEIGHT, ApparentDemoMedia, ApparentDemoVideo, WIDTH};
 use std::process::ExitCode;
 
 #[derive(Debug, clap::Args)]
 struct VideoArgs {
-    #[arg(long, default_value = "Scrawl", global = true)]
+    #[arg(long, default_value = "Apparent", global = true)]
     title: String,
 }
 
 fn main() -> ExitCode {
     let args = cli::parse::<VideoArgs>();
-    let media = ScrawlDemoMedia::prepare().expect("media");
+    let media = ApparentDemoMedia::prepare().expect("media");
     let title = args.app.title.clone();
-    let video = ScrawlDemoVideo::new(&media, &title);
+    let video = ApparentDemoVideo::new(&media, &title);
     let gpu = SkiaMetalCtx::new(WIDTH, HEIGHT).expect("GPU context");
 
     cli::new(

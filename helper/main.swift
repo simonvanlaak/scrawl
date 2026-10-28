@@ -1,23 +1,23 @@
-// scrawl-helper: the parts of Scrawl that need Swift-only Apple frameworks.
+// apparent-helper: the parts of Apparent that need Swift-only Apple frameworks.
 //
-//   scrawl-helper devices                               cabled iPhones/iPads (USB registry) as JSON
-//   scrawl-helper mirror --out FILE.mov [--device ID] [--microphone UID --microphone-name NAME]
+//   apparent-helper devices                               cabled iPhones/iPads (USB registry) as JSON
+//   apparent-helper mirror --out FILE.mov [--device ID] [--microphone UID --microphone-name NAME]
 //                                                       live mirror window + native recording (JSON lines)
-//   scrawl-helper transcribe FILE [--locale ID]          SpeechAnalyzer transcript with word timings
-//   scrawl-helper transcribe-stream [--locale ID]        the same while recording: PCM on stdin, JSON lines (LiveTranscribe.swift)
-//   scrawl-helper speech-model [--install] [--locale ID] the speech model's status; install it (JSON lines)
-//   scrawl-helper frames MOVIE --out-dir DIR (--every MS | --at MS,MS…) [--max-edge PX]
-//   scrawl-helper audio MOVIE OUT.wav                   16 kHz mono PCM of every audio track, mixed
-//   scrawl-helper probe MOVIE                           duration and video size
-//   scrawl-helper shrink MOVIE --out FILE.mov [--max-edge PX] [--bitrate BPS]   HEVC copy, same timeline
-//   scrawl-helper export PLAN.json                      shareable .mp4: crop/camera, burned-in ink, audio (Export.swift)
-//   scrawl-helper permissions                           what Scrawl has been granted, as JSON
-//   scrawl-helper sck-probe [--watch SECONDS]           can this process capture with ScreenCaptureKit (ScreenProbe.swift)
-//   scrawl-helper permission-panel --permission P [--from X,Y,W,H]   drag-to-allow card (PermissionPanel.swift)
-//   scrawl-helper onboarding [--shortcut L] [--render DIR]   the welcome window (Onboarding.swift)
-//   scrawl-helper settings [--pane P] [--render DIR]         the Settings window (Settings.swift)
+//   apparent-helper transcribe FILE [--locale ID]          SpeechAnalyzer transcript with word timings
+//   apparent-helper transcribe-stream [--locale ID]        the same while recording: PCM on stdin, JSON lines (LiveTranscribe.swift)
+//   apparent-helper speech-model [--install] [--locale ID] the speech model's status; install it (JSON lines)
+//   apparent-helper frames MOVIE --out-dir DIR (--every MS | --at MS,MS…) [--max-edge PX]
+//   apparent-helper audio MOVIE OUT.wav                   16 kHz mono PCM of every audio track, mixed
+//   apparent-helper probe MOVIE                           duration and video size
+//   apparent-helper shrink MOVIE --out FILE.mov [--max-edge PX] [--bitrate BPS]   HEVC copy, same timeline
+//   apparent-helper export PLAN.json                      shareable .mp4: crop/camera, burned-in ink, audio (Export.swift)
+//   apparent-helper permissions                           what Apparent has been granted, as JSON
+//   apparent-helper sck-probe [--watch SECONDS]           can this process capture with ScreenCaptureKit (ScreenProbe.swift)
+//   apparent-helper permission-panel --permission P [--from X,Y,W,H]   drag-to-allow card (PermissionPanel.swift)
+//   apparent-helper onboarding [--shortcut L] [--render DIR]   the welcome window (Onboarding.swift)
+//   apparent-helper settings [--pane P] [--render DIR]         the Settings window (Settings.swift)
 //
-// Every timestamp in the output is integer milliseconds. Scrawl drives the long-running
+// Every timestamp in the output is integer milliseconds. Apparent drives the long-running
 // `mirror` command over stdin (`stop`, `cancel`) and reads its events from stdout.
 
 import AppKit
@@ -76,7 +76,7 @@ func emit(_ object: Any) {
 }
 
 func fail(_ message: String) -> Never {
-  FileHandle.standardError.write(Data("scrawl-helper: \(message)\n".utf8))
+  FileHandle.standardError.write(Data("apparent-helper: \(message)\n".utf8))
   exit(1)
 }
 
@@ -169,5 +169,5 @@ case "qr":
   }
   emit(["qr": qr])
 default:
-  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|permission-panel|permissions|sck-probe|onboarding|settings|qr …")
+  fail("usage: apparent-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|permission-panel|permissions|sck-probe|onboarding|settings|qr …")
 }

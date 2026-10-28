@@ -1,5 +1,5 @@
 import Foundation
-@testable import ScrawlKit
+@testable import ApparentKit
 import Testing
 
 struct IngestReplyTests {
@@ -17,9 +17,9 @@ struct IngestReplyTests {
 
   @Test func serversFromBeforeDeliveredReadAsSent() {
     #expect(reply(#"{"ok":true,"sessionTitle":"Problems · Ledger","item":"I-1"}"#) == .delivered(sessionTitle: "Problems · Ledger"))
-    #expect(reply(#"{"ok":true,"sessionTitle":""}"#) == .delivered(sessionTitle: "Scrawl"))
-    #expect(reply("") == .delivered(sessionTitle: "Scrawl"))
-    #expect(reply("not json") == .delivered(sessionTitle: "Scrawl"))
+    #expect(reply(#"{"ok":true,"sessionTitle":""}"#) == .delivered(sessionTitle: "Apparent"))
+    #expect(reply("") == .delivered(sessionTitle: "Apparent"))
+    #expect(reply("not json") == .delivered(sessionTitle: "Apparent"))
   }
 
   @Test func usbMarkersFallBackToTheSessionName() {

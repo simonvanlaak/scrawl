@@ -3,12 +3,13 @@
 // paint doesn't wait for the bundle. The client still mounts with createRoot
 // and replaces this markup in one commit.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { audit, MAP_DIR } from "./feature-audit.ts"
 
 process.env.NODE_ENV ??= "production"
 
-const site = join(import.meta.dir, "..")
+const site = join(dirname(fileURLToPath(import.meta.url)), "..")
 const dist = join(site, "dist")
 const ssr = join(site, "dist-ssr")
 

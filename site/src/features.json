@@ -14,11 +14,11 @@
     { "id": "platforms", "title": "Platforms" }
   ],
   "flow": [
-    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone or ScrawlKit", "group": "start" },
+    { "title": "Capture", "detail": "⌥⇧S, the picker, a cabled iPhone or ApparentKit", "group": "start" },
     { "title": "Record", "detail": "Screen, voice, clicks and ⇧ ink on one clock", "group": "record" },
-    { "title": "Bundle", "detail": "Keyframes, contact sheet, summary.md, scrawl.json", "group": "agent" },
-    { "title": "Deliver", "detail": "Clipboard and ⌥⇧V, or straight to a session", "group": "delivery" },
-    { "title": "Agent", "detail": "The skill, then scrawl zoom for a closer look", "group": "cli" }
+    { "title": "Bundle", "detail": "Keyframes, contact sheet, summary.md, apparent.json", "group": "agent" },
+    { "title": "Deliver", "detail": "Clipboard and ⌥⇧V; no automatic session send", "group": "delivery" },
+    { "title": "Agent", "detail": "The skill, then apparent zoom for a closer look", "group": "cli" }
   ],
   "features": [
     {
@@ -34,7 +34,7 @@
       "id": "record-screen",
       "group": "start",
       "name": "Record the screen",
-      "says": "Press the shortcut and Scrawl records the display under the pointer once the keys come up, with a red edge glow as the cue.",
+      "says": "Press the shortcut and Apparent records the display under the pointer once the keys come up, with a red edge glow as the cue.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
       "shortcuts": [{ "keys": "⌥⇧S", "does": "Start or finish a capture (Alt+Shift+S on Windows and Linux)" }],
@@ -203,7 +203,7 @@
       "id": "hidden-windows",
       "group": "record",
       "name": "Own windows left out",
-      "says": "Scrawl's capsule, picker and overlay, and macOS prompts over a Screen or Area capture, stay out of the recording.",
+      "says": "Apparent's capsule, picker and overlay, and macOS prompts over a Screen or Area capture, stay out of the recording.",
       "status": "stable@0.3.6",
       "platforms": ["mac", "windows"],
       "note": "Prompts are a macOS case. The Linux preview records its own windows and masks the capsule from keyframe picking.",
@@ -274,6 +274,15 @@
       "docs": ["README.md#capture-controls"]
     },
     {
+      "id": "finish-trace",
+      "group": "finish",
+      "name": "Local finish timing trace",
+      "says": "Saves per-stage finish durations next to each completed bundle for debugging and performance comparisons. No transcript or screen content is added to the trace.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
       "id": "copied",
       "group": "finish",
       "name": "Copied, with a Paste chip",
@@ -296,7 +305,7 @@
       "id": "click-visual-handoff",
       "group": "finish",
       "name": "Attach visuals after a click",
-      "says": "Automatic agent delivery omits the image on no-click captures, while the recorded visuals remain available through scrawl zoom.",
+      "says": "The old automatic attachment rule is inactive; recorded visuals remain available through apparent zoom.",
       "status": "main",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
@@ -304,8 +313,8 @@
     {
       "id": "agent-demo-video",
       "group": "finish",
-      "name": "Ask the agent for a Scrawl video",
-      "says": "When enabled, a copied or pasted capture asks an agent to demonstrate complex changes in a short Scrawl video if it can access the screen.",
+      "name": "Ask the agent for an Apparent video",
+      "says": "When enabled, a copied or pasted capture asks an agent to demonstrate complex changes in a short Apparent video if it can access the screen.",
       "status": "experiment:agentDemoVideo",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md", "docs/onboarding-and-settings.md"]
@@ -413,10 +422,10 @@
       "id": "bundle",
       "group": "agent",
       "name": "The bundle",
-      "says": "A .scrawl folder with contact-sheet.png, frames/, summary.md, scrawl.json, the recording and audio.wav.",
+      "says": "A .apparent folder with contact-sheet.png, frames/, summary.md, apparent.json, the recording and audio.wav.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md"]
+      "docs": ["skills/apparent/SKILL.md"]
     },
     {
       "id": "contact-sheet",
@@ -443,7 +452,7 @@
       "says": "Each keyframe line gives what was done and the words said while it was on screen, split at clause boundaries.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md", "docs/keyframes-and-text.md"]
+      "docs": ["skills/apparent/SKILL.md", "docs/keyframes-and-text.md"]
     },
     {
       "id": "spoken-cues",
@@ -459,7 +468,7 @@
       "id": "mark-numbers",
       "group": "agent",
       "name": "Numbered marks",
-      "says": "Several marks on one keyframe are numbered ①② in the text, never on the image; scrawl zoom --mark finds one.",
+      "says": "Several marks on one keyframe are numbered ①② in the text, never on the image; apparent zoom --mark finds one.",
       "status": "stable@0.3.7",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["docs/keyframes-and-text.md"]
@@ -502,7 +511,7 @@
       "id": "parakeet",
       "group": "agent",
       "name": "Parakeet on device",
-      "says": "Transcribes with Hex's Parakeet model, or downloads Scrawl's own copy (730 MB) at first launch.",
+      "says": "Transcribes with Hex's Parakeet model, or downloads Apparent's own copy (730 MB) at first launch.",
       "status": "stable@0.3.6",
       "platforms": ["windows", "linux"],
       "docs": ["docs/windows.md"]
@@ -625,17 +634,17 @@
       "docs": ["README.md#iphone", "docs/iphone-and-routing.md"]
     },
     {
-      "id": "scrawlkit",
+      "id": "apparentkit",
       "group": "iphone",
-      "name": "ScrawlKit",
+      "name": "ApparentKit",
       "says": "A Swift package for your iOS app: a three-finger long press records the app with narration, touches, strokes and events.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "iOS 18+; recordings go to Scrawl on a Mac.",
-      "docs": ["README.md#scrawlkit-ios"]
+      "note": "iOS 18+; recordings go to Apparent on a Mac.",
+      "docs": ["README.md#apparentkit-ios"]
     },
     {
-      "id": "scrawlkit-https",
+      "id": "apparentkit-https",
       "group": "iphone",
       "name": "HTTPS endpoint and outbox",
       "says": "A setup link can point at an HTTPS endpoint; recordings queue on the phone and upload in the background with retries.",
@@ -645,7 +654,7 @@
       "docs": ["README.md#sending-to-an-https-endpoint"]
     },
     {
-      "id": "scrawlkit-context",
+      "id": "apparentkit-context",
       "group": "iphone",
       "name": "App context",
       "says": "The app names its screen and adds key/values, which the summary shows beside each keyframe.",
@@ -655,7 +664,7 @@
       "docs": ["README.md#app-context"]
     },
     {
-      "id": "scrawlkit-hooks",
+      "id": "apparentkit-hooks",
       "group": "iphone",
       "name": "Host app hooks",
       "says": "A team endpoint, a timeline supplement and a submit hook let a host app handle recordings itself.",
@@ -669,7 +678,7 @@
       "id": "pairing",
       "group": "iphone",
       "name": "Pairing link",
-      "says": "scrawl link prints a setup link and QR code with this Mac's Tailscale and LAN addresses; usbApps adds a cabled fallback.",
+      "says": "apparent link prints a setup link and QR code with this Mac's Tailscale and LAN addresses; usbApps adds a cabled fallback.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "note": "The iPhone path is Mac only.",
@@ -677,7 +686,7 @@
         { "key": "ingestToken", "value": "generated", "does": "Bearer token for phone uploads" },
         { "key": "usbApps", "value": "[\"com.example.App\"]", "does": "Apps whose recordings come over USB" }
       ],
-      "docs": ["README.md#scrawlkit-ios"]
+      "docs": ["README.md#apparentkit-ios"]
     },
     {
       "id": "remote-phone-ingest",
@@ -689,27 +698,27 @@
       "config": [
         { "key": "remotePhoneIngest", "value": "false", "does": "Allow the GUI ingest listener on other IPv4 interfaces; off binds loopback only" }
       ],
-      "docs": ["README.md#scrawlkit-ios"]
+      "docs": ["README.md#apparentkit-ios"]
     },
     {
       "id": "import",
       "group": "iphone",
       "name": "Import a recording",
-      "says": "scrawl import builds a bundle from an AirDropped .mp4 and its timeline.",
+      "says": "apparent import builds a bundle from an AirDropped .mp4 and its timeline.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#scrawlkit-ios"]
+      "docs": ["README.md#apparentkit-ios"]
     },
     {
       "id": "serve",
       "group": "iphone",
       "name": "Headless ingest",
-      "says": "scrawl serve takes ScrawlKit uploads on an always-on Mac without the app running.",
+      "says": "apparent serve takes ApparentKit uploads on an always-on Mac without the app running.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "note": "The iPhone path is Mac only.",
-      "docs": ["README.md#headless-ingest-server-scrawl-serve"]
+      "docs": ["README.md#headless-ingest-server-apparent-serve"]
     },
 
     {
@@ -725,7 +734,7 @@
       "id": "custom-shortcuts",
       "group": "settings",
       "name": "Custom shortcuts",
-      "says": "Record new keys for Record and Paste; Scrawl turns down combinations the system or another app uses, and Paste can be turned off.",
+      "says": "Record new keys for Record and Paste; Apparent turns down combinations the system or another app uses, and Paste can be turned off.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
       "config": [{ "key": "shortcuts", "value": "{\"record\": …, \"paste\": null}", "does": "Both shortcuts; paste null turns it off" }],
@@ -738,7 +747,7 @@
       "says": "A switch in General; the preference is stored in config.json and applied to OS login registration.",
       "status": "main",
       "platforms": ["mac", "windows", "linux"],
-      "config": [{ "key": "launchAtLogin", "value": "true | false", "does": "Register or unregister Scrawl at login; absent leaves the OS choice alone" }],
+      "config": [{ "key": "launchAtLogin", "value": "true | false", "does": "Register or unregister Apparent at login; absent leaves the OS choice alone" }],
       "docs": ["README.md#settings"]
     },
     {
@@ -778,7 +787,7 @@
       "id": "pin",
       "group": "storage",
       "name": "Pin a capture",
-      "says": "scrawl pin keeps a capture out of cleanup; scrawl clean --dry-run shows what a pass would do.",
+      "says": "apparent pin keeps a capture out of cleanup; apparent clean --dry-run shows what a pass would do.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["README.md#keeping-captures-small"]
@@ -804,45 +813,45 @@
       "note": "The Change… button is Mac only; elsewhere set capturesDir.",
       "pr": 86,
       "docs": ["README.md#settings"],
-      "config": [{ "key": "capturesDir", "value": "\"~/Scrawl\"", "does": "Where captures are written" }]
+      "config": [{ "key": "capturesDir", "value": "\"~/Apparent\"", "does": "Where captures are written" }]
     },
 
     {
       "id": "cli-install",
       "group": "cli",
       "name": "Command-line tool",
-      "says": "Settings › Agents links scrawl onto PATH and it always runs the app's current copy; Homebrew links it too.",
-      "status": "stable@0.3.4",
+      "says": "Settings › Agents installs apparent on PATH without replacing another program.",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
-      "note": "Windows gets a scrawl.cmd shim.",
+      "note": "Windows gets an apparent.cmd shim. Unrelated or package-manager-owned commands are not deleted.",
       "docs": ["README.md#agents"]
     },
     {
       "id": "skill",
       "group": "cli",
       "name": "Agent skill",
-      "says": "bunx skills add kitlangton/scrawl teaches an agent to read a paste and use the CLI; scrawl skill prints it.",
+      "says": "bunx skills add tryapparent/apparent teaches an agent to read a paste and use the CLI; apparent skill prints it.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md"]
+      "docs": ["skills/apparent/SKILL.md"]
     },
     {
       "id": "cli-zoom",
       "group": "cli",
-      "name": "scrawl zoom",
+      "name": "apparent zoom",
       "says": "A dense sheet of frames around a time, a phrase that was said, or a numbered mark.",
-      "status": "stable@0.3.4",
+      "status": "main",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md"]
+      "docs": ["skills/apparent/SKILL.md"]
     },
     {
       "id": "cli-read",
       "group": "cli",
       "name": "inspect and frames",
-      "says": "Print summary.md, scrawl.json or the marks; pull plain PNGs of a time range.",
+      "says": "Print summary.md, apparent.json or the marks; pull plain PNGs of a time range.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md"]
+      "docs": ["skills/apparent/SKILL.md"]
     },
     {
       "id": "cli-copy",
@@ -852,7 +861,7 @@
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["mac", "windows", "linux"],
-      "docs": ["skills/scrawl/SKILL.md", "README.md#usage"]
+      "docs": ["skills/apparent/SKILL.md", "README.md#usage"]
     },
     {
       "id": "cli-reprocess",
@@ -867,7 +876,7 @@
       "id": "autocrop-playground",
       "group": "cli",
       "name": "Auto-crop playground",
-      "says": "scrawl autocrop --serve opens sliders that run the real crop on a capture and copy the settings as JSON.",
+      "says": "apparent autocrop --serve opens sliders that run the real crop on a capture and copy the settings as JSON.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows", "linux"],
       "docs": ["README.md#auto-crop-screen-captures"]
@@ -876,7 +885,7 @@
     {
       "id": "export-cli",
       "group": "export",
-      "name": "scrawl export",
+      "name": "apparent export",
       "says": "One .mp4 with ink, pins and clicks burned in, cropped to the activity, audio in sync; --zoom eases toward clicks and marks.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
@@ -887,7 +896,7 @@
       "id": "export-menu",
       "group": "export",
       "name": "Export from the menu",
-      "says": "Export Last Capture as Video… saves to ~/Movies/Scrawl with progress beside the menu bar icon.",
+      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent with progress beside the menu bar icon.",
       "status": "experiment:videoExport",
       "platforms": ["mac"],
       "added": "2026-10-18",
@@ -899,10 +908,11 @@
       "id": "mac-download",
       "group": "install",
       "name": "Mac download and Homebrew",
-      "says": "A notarized DMG for Apple silicon, or brew install --cask kitlangton/tap/scrawl.",
-      "status": "stable@0.3.4",
+      "says": "The Mac installer builds Apparent.app; a branded release has not been published yet.",
+      "status": "main",
       "platforms": ["mac"],
-      "note": "Windows has its own zip.",
+      "added": "2026-10-28",
+      "note": "No branded download or Homebrew cask has been published.",
       "docs": ["README.md#install", "docs/release.md"]
     },
     {
@@ -919,12 +929,12 @@
       "id": "linux-appimage-updates",
       "group": "install",
       "name": "Linux AppImage update channels",
-      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or manually published main previews, a manual check, and live version status.",
+      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or nightly published main previews, a manual check, and live version status.",
       "status": "main",
       "platforms": ["linux"],
       "config": [
-        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux update feed" },
-        { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with scrawl update status" }
+        { "key": "updateChannel", "value": "\"stable\" | \"main\"", "does": "Choose the Linux release channel" },
+        { "key": "running", "value": "{ version, revision, pid, startTicks, executable, updateId, updateChannel }", "does": "Last launched process identity; verify liveness with apparent update status" }
       ],
       "docs": ["docs/linux.md"]
     },
@@ -932,7 +942,7 @@
       "id": "windows-zip",
       "group": "install",
       "name": "Windows zip",
-      "says": "scrawl.exe for Windows 10 (2004) and later on x64, unsigned, without automatic updates.",
+      "says": "apparent.exe for Windows 10 (2004) and later on x64, unsigned, without automatic updates.",
       "status": "stable@0.3.6",
       "platforms": ["windows"],
       "docs": ["README.md#windows", "docs/windows.md"]
@@ -951,7 +961,7 @@
       "id": "aur",
       "group": "install",
       "name": "AUR package",
-      "says": "yay -S scrawl-linux-bin installs the AppImage with a scrawl command.",
+      "says": "yay -S apparent-linux-bin installs the AppImage with a apparent command.",
       "status": "review:#81",
       "platforms": ["linux"],
       "added": "2026-10-22",
@@ -971,7 +981,7 @@
       "id": "permission-card",
       "group": "install",
       "name": "Drag-in permission card",
-      "says": "For Screen Recording and Accessibility, a card flies to System Settings so you drag Scrawl into the list.",
+      "says": "For Screen Recording and Accessibility, a card flies to System Settings so you drag Apparent into the list.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "note": "Windows only asks for the microphone switch; Linux Wayland asks for the input group.",
@@ -981,7 +991,7 @@
       "id": "self-relaunch",
       "group": "install",
       "name": "Reopens after a grant",
-      "says": "If a Screen Recording grant doesn't reach the running app, Scrawl reopens itself on the same screen.",
+      "says": "If a Screen Recording grant doesn't reach the running app, Apparent reopens itself on the same screen.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "note": "Only macOS caches the grant.",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the current `main` as ~/Applications/Scrawl.app on another Mac over SSH (default: pro).
+# Installs the current `main` as ~/Applications/Apparent.app on another Mac over SSH (default: pro).
 #
 # Two macOS rules shape this. Signing needs the login keychain, which only processes in the GUI
 # session can use, so the build and signing run as a one-off launchd job there. App Management
@@ -8,8 +8,8 @@
 set -euo pipefail
 
 HOST="${1:-pro}"
-STAGE="/tmp/ScrawlStage.app"
-LABEL="dev.kitlangton.scrawl-install-$(date +%s)"
+STAGE="/tmp/ApparentStage.app"
+LABEL="dev.kitlangton.apparent-install-$(date +%s)"
 
 ssh "${HOST}" bash -s -- "${STAGE}" "${LABEL}" <<'REMOTE'
 set -euo pipefail
@@ -17,7 +17,7 @@ set -euo pipefail
 export LC_ALL=C
 STAGE="$1"; LABEL="$2"
 JOB="/tmp/${LABEL}.sh"; PLIST="/tmp/${LABEL}.plist"; LOG="/tmp/${LABEL}.log"
-cd ~/code/open-source/scrawl
+cd ~/code/open-source/apparent
 git pull -q --ff-only
 git log --oneline -1
 
@@ -25,9 +25,9 @@ cat > "${JOB}" <<EOF
 #!/bin/zsh
 export PATH="\$HOME/.cargo/bin:\$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 exec > "${LOG}" 2>&1
-cd ~/code/open-source/scrawl
+cd ~/code/open-source/apparent
 rm -rf "${STAGE}"
-SCRAWL_APP_DIR="${STAGE}" SCRAWL_NO_LAUNCH=1 ./scripts/install-app.sh && codesign --verify --deep --strict "${STAGE}"
+APPARENT_APP_DIR="${STAGE}" APPARENT_NO_LAUNCH=1 ./scripts/install-app.sh && codesign --verify --deep --strict "${STAGE}"
 echo "STAGE-EXIT=\$?"
 EOF
 chmod +x "${JOB}"
@@ -52,26 +52,33 @@ if ! grep -q "STAGE-EXIT=0" "${LOG}" 2>/dev/null; then
   exit 1
 fi
 
-APP="${HOME}/Applications/Scrawl.app"
+APP="${HOME}/Applications/Apparent.app"
 mkdir -p "${APP}"
 /usr/bin/ditto "${STAGE}" "${APP}"
 codesign --verify --deep --strict "${APP}"
 codesign -dvv "${APP}" 2>&1 | grep -E "^Authority=Developer ID Application" || echo "warning: not Developer ID signed" >&2
-ln -sf "${APP}/Contents/MacOS/scrawl" "${HOME}/bin/scrawl"
-pkill -f "Scrawl.app/Contents/MacOS/scrawl" 2>/dev/null || true
+mkdir -p "${HOME}/bin"
+if [[ -e "${HOME}/bin/apparent" || -L "${HOME}/bin/apparent" ]]; then
+  if [[ ! -L "${HOME}/bin/apparent" ]] || [[ "$(readlink "${HOME}/bin/apparent")" != "${APP}/Contents/MacOS/apparent" ]]; then
+    echo "${HOME}/bin/apparent belongs to another program; leaving it alone" >&2
+    exit 1
+  fi
+fi
+ln -sfn "${APP}/Contents/MacOS/apparent" "${HOME}/bin/apparent"
+pkill -f "Apparent.app/Contents/MacOS/apparent" 2>/dev/null || true
 for _ in $(seq 1 40); do
   status=0
-  pgrep -f "Scrawl.app/Contents/MacOS/scrawl" >/dev/null || status=$?
+  pgrep -f "Apparent.app/Contents/MacOS/apparent" >/dev/null || status=$?
   [[ "${status}" == 0 ]] || break
   sleep 0.05
 done
 if [[ "${status}" != 1 ]]; then
-  pgrep -fl "Scrawl.app/Contents/MacOS/scrawl" >&2 || true
-  echo "the old Scrawl is still running (pgrep exit ${status}); quit it and run this again" >&2
+  pgrep -fl "Apparent.app/Contents/MacOS/apparent" >&2 || true
+  echo "the old Apparent is still running (pgrep exit ${status}); quit it and run this again" >&2
   exit 1
 fi
 open -a "${APP}"
 sleep 2
-pgrep -fl "Scrawl.app/Contents/MacOS/scrawl"
+pgrep -fl "Apparent.app/Contents/MacOS/apparent"
 rm -rf "${STAGE}" "${JOB}" "${PLIST}"
 REMOTE

@@ -19,8 +19,8 @@ mkdirSync(OUT, { recursive: true });
 
 const bundles = inputs.flatMap((p) => {
   p = resolve(p);
-  if (existsSync(join(p, 'scrawl.json'))) return [p];
-  return readdirSync(p).map((n) => join(p, n)).filter((d) => existsSync(join(d, 'scrawl.json'))).sort();
+  if (existsSync(join(p, 'apparent.json'))) return [p];
+  return readdirSync(p).map((n) => join(p, n)).filter((d) => existsSync(join(d, 'apparent.json'))).sort();
 });
 
 async function loadPlaywright() {
@@ -48,9 +48,9 @@ h2 { margin: 0 0 2px; font-size: 20px; } .desc { color: #9aa0ab; margin-bottom: 
 `;
 
 function section(dir) {
-  const b = JSON.parse(readFileSync(join(dir, 'scrawl.json'), 'utf8'));
+  const b = JSON.parse(readFileSync(join(dir, 'apparent.json'), 'utf8'));
   const truth = existsSync(join(dir, 'truth.json')) ? JSON.parse(readFileSync(join(dir, 'truth.json'), 'utf8')) : null;
-  const name = truth?.scenario || basename(dir).replace(/\.scrawl$/, '');
+  const name = truth?.scenario || basename(dir).replace(/\.apparent$/, '');
   const sc = scores.find((s) => s.name === name);
   const [W, H] = [b.target.frame.width, b.target.frame.height];
   const crops = b.autocrop?.crops || [];
@@ -82,7 +82,7 @@ writeFileSync(join(OUT, 'index.html'), page(sections.map((s) => s.html).join('')
 
 // Overview: one cropped keyframe per scenario next to its full frame with the box.
 const tiles = bundles.map((dir) => {
-  const b = JSON.parse(readFileSync(join(dir, 'scrawl.json'), 'utf8'));
+  const b = JSON.parse(readFileSync(join(dir, 'apparent.json'), 'utf8'));
   const truth = existsSync(join(dir, 'truth.json')) ? JSON.parse(readFileSync(join(dir, 'truth.json'), 'utf8')) : null;
   const i = Math.min(1, b.keyframes.length - 1), kf = b.keyframes[i], c = b.autocrop?.crops[i];
   const [W, H] = [b.target.frame.width, b.target.frame.height];
@@ -96,7 +96,7 @@ const OV = `.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1
 .tile .cropped { margin-top: 8px; height: 300px; display: flex; justify-content: center; background: #0c0c0e; } .tile .cropped img { height: 100%; max-width: 100%; object-fit: contain; }
 .cap { margin-top: 6px; color: #c9ccd3; } .cap b { color: #fff; }
 h1 { padding: 22px 22px 0; margin: 0; font-size: 22px; } .sub { padding: 0 22px; color: #9aa0ab; }`;
-writeFileSync(join(OUT, 'overview.html'), `<!doctype html><html><head><meta charset="utf-8"><style>${CSS}${OV}</style></head><body><h1>Scrawl auto-crop · simulated Screen captures</h1><div class="sub">Each tile: the full keyframe with the crop (red), and the cropped keyframe Scrawl writes to frames/.</div><div class="grid">${tiles}</div></body></html>`);
+writeFileSync(join(OUT, 'overview.html'), `<!doctype html><html><head><meta charset="utf-8"><style>${CSS}${OV}</style></head><body><h1>Apparent auto-crop · simulated Screen captures</h1><div class="sub">Each tile: the full keyframe with the crop (red), and the cropped keyframe Apparent writes to frames/.</div><div class="grid">${tiles}</div></body></html>`);
 
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch();

@@ -119,7 +119,7 @@ pub struct ScreenRecording {
     pub video_offset_ms: u64,
 }
 
-/// Live UI events emitted by the global input monitor to drive Scrawl's HUD & Review windows.
+/// Live UI events emitted by the global input monitor to drive Apparent's HUD & Review windows.
 #[derive(Clone, Debug)]
 pub enum LiveOverlayEvent {
     /// ⌥⇧S (or the configured shortcut) went down; `shortcut::Shortcut` decides what it means.
@@ -133,10 +133,10 @@ pub enum LiveOverlayEvent {
     Onboarding(crate::onboarding::Event),
     /// The Settings window: an action, fresh permission states, or the helper exiting.
     Settings(crate::settings::Event),
-    /// A ScrawlKit recording was ingested from an iPhone and compiled into a `.scrawl` bundle.
+    /// A ApparentKit recording was ingested from an iPhone and compiled into a `.apparent` bundle.
     IngestedBundle {
         dir: PathBuf,
-        bundle: Box<crate::model::ScrawlBundle>,
+        bundle: Box<crate::model::ApparentBundle>,
         status: Option<String>,
     },
 }
@@ -160,7 +160,7 @@ impl Default for ShortcutConfig {
     }
 }
 
-/// Scrawl's two global shortcuts.
+/// Apparent's two global shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShortcutKind {
@@ -202,7 +202,7 @@ impl ShortcutKind {
         }
     }
 
-    /// Whether it can be turned off. Record can't: it's the way into Scrawl.
+    /// Whether it can be turned off. Record can't: it's the way into Apparent.
     pub fn can_unset(self) -> bool {
         self == Self::Paste
     }
@@ -339,7 +339,7 @@ pub fn shortcut_keys(label: &str) -> Vec<String> {
     }
 }
 
-pub fn scrawl_log(msg: impl AsRef<str>) {
+pub fn apparent_log(msg: impl AsRef<str>) {
     use std::io::Write;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -358,7 +358,7 @@ pub fn scrawl_log(msg: impl AsRef<str>) {
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("scrawl.log"))
+        .open(dir.join("apparent.log"))
     {
         let _ = f.write_all(line.as_bytes());
     }
@@ -403,7 +403,7 @@ pub fn is_capture_shortcut(
     )
 }
 
-/// `is_capture_shortcut` for any of Scrawl's shortcuts; `layout_code` is the default key on the
+/// `is_capture_shortcut` for any of Apparent's shortcuts; `layout_code` is the default key on the
 /// active layout.
 #[allow(clippy::too_many_arguments)]
 pub fn shortcut_matches(
@@ -570,7 +570,7 @@ pub fn capture_size(target: &TargetInfo, long_edge: f64) -> (u32, u32) {
 pub(crate) struct Sampler {
     pub target: TargetInfo,
     pub video_output_path: Option<PathBuf>,
-    /// Scrawl's own windows to leave out of the recording.
+    /// Apparent's own windows to leave out of the recording.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub excluded_window_ids: Arc<Mutex<Vec<u32>>>,
     pub started_at: Instant,
@@ -610,7 +610,7 @@ impl ScreenCaptureSession {
         let thread_offset = Arc::clone(&video_offset_ms);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
-            .name("scrawl-frame-sampler".into())
+            .name("apparent-frame-sampler".into())
             .spawn(move || {
                 platform::run_sampler(Sampler {
                     target: sampler_target,
@@ -699,7 +699,7 @@ pub struct SharedCaptureTelemetry {
     /// The record shortcut (`crate::settings` loads and saves it).
     pub shortcut: Mutex<ShortcutConfig>,
     pub paste_shortcut: Mutex<ShortcutConfig>,
-    /// Settings is recording a new shortcut: none of Scrawl's fire (`pause_shortcuts`).
+    /// Settings is recording a new shortcut: none of Apparent's fire (`pause_shortcuts`).
     pub shortcuts_paused: AtomicBool,
     pub started_at: Mutex<Instant>,
     pub picker_started_at: Mutex<Instant>,
@@ -715,14 +715,14 @@ pub struct SharedCaptureTelemetry {
     /// a snapshot right away.
     pub window_log_request: Arc<AtomicBool>,
     pub ui_sender: flume::Sender<LiveOverlayEvent>,
-    /// Scrawl's windows that let clicks through (the ink overlay), skipped when deciding whether
-    /// a click landed on Scrawl itself.
+    /// Apparent's windows that let clicks through (the ink overlay), skipped when deciding whether
+    /// a click landed on Apparent itself.
     pub passthrough_window_ids: Mutex<Vec<u32>>,
-    /// The `scrawl-helper` whose window is what's being recorded (the iPhone mirror): its clicks
+    /// The `apparent-helper` whose window is what's being recorded (the iPhone mirror): its clicks
     /// count, unlike those on other helper windows (Settings, onboarding). 0 when none.
     capture_source_pid: AtomicI32,
-    /// The last `on_scrawl_window` answer (when, where, what), reused for a burst of scrolls.
-    scrawl_hit: Mutex<Option<(Instant, f64, f64, bool)>>,
+    /// The last `on_apparent_window` answer (when, where, what), reused for a burst of scrolls.
+    apparent_hit: Mutex<Option<(Instant, f64, f64, bool)>>,
     /// macOS's key event tap (`CFMachPortRef`), made once Accessibility is on (`check_key_tap`).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     tap_port: AtomicU64,
@@ -785,7 +785,7 @@ impl SharedCaptureTelemetry {
             ui_sender,
             passthrough_window_ids: Mutex::new(Vec::new()),
             capture_source_pid: AtomicI32::new(0),
-            scrawl_hit: Mutex::new(None),
+            apparent_hit: Mutex::new(None),
             tap_port: AtomicU64::new(0),
             tap_run_loop: AtomicU64::new(0),
             tap_starting: AtomicBool::new(false),
@@ -818,7 +818,7 @@ impl SharedCaptureTelemetry {
                 .compare_exchange(prev, now_ms, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
         {
-            scrawl_log("emit_capture_shortcut");
+            apparent_log("emit_capture_shortcut");
             let _ = self.ui_sender.try_send(LiveOverlayEvent::CaptureShortcut);
         }
     }
@@ -838,7 +838,7 @@ impl SharedCaptureTelemetry {
                 .compare_exchange(prev, now_ms, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
         {
-            scrawl_log("emit_paste_shortcut -> sending PasteLatestShortcut");
+            apparent_log("emit_paste_shortcut -> sending PasteLatestShortcut");
             let _ = self
                 .ui_sender
                 .try_send(LiveOverlayEvent::PasteLatestShortcut);
@@ -961,7 +961,7 @@ impl SharedCaptureTelemetry {
         } else {
             platform::NO_KEY_SOURCE
         };
-        scrawl_log(format!("session clicks from {clicks}, keys from {keys}"));
+        apparent_log(format!("session clicks from {clicks}, keys from {keys}"));
     }
 
     /// Whether Esc went down since the last call (a pending shortcut or an open picker cancels on it).
@@ -1159,12 +1159,12 @@ impl SharedCaptureTelemetry {
             .store(i32::try_from(pid).unwrap_or(0), Ordering::Release);
     }
 
-    /// Whether the topmost window at a global point is Scrawl's own or a `scrawl-helper`'s other
+    /// Whether the topmost window at a global point is Apparent's own or a `apparent-helper`'s other
     /// than the capture source (ignoring the click-through ink overlay). Asked once per press, and
     /// for scrolls, which come in bursts at one point, at most every 250 ms.
-    fn on_scrawl_window(&self, x: f64, y: f64) -> bool {
+    fn on_apparent_window(&self, x: f64, y: f64) -> bool {
         let mut hit = self
-            .scrawl_hit
+            .apparent_hit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some((at, hx, hy, on)) = *hit
@@ -1174,7 +1174,7 @@ impl SharedCaptureTelemetry {
         {
             return on;
         }
-        let on = self.scrawl_window_in(
+        let on = self.apparent_window_in(
             &platform::raw_windows_now(),
             x,
             y,
@@ -1184,7 +1184,7 @@ impl SharedCaptureTelemetry {
         on
     }
 
-    fn scrawl_window_in(
+    fn apparent_window_in(
         &self,
         windows: &[crate::windows::RawWindow],
         x: f64,
@@ -1298,7 +1298,7 @@ impl SharedCaptureTelemetry {
 }
 
 /// Clicks from the mouse buttons' polled state, while the mouse monitor (or hook) is missing: a
-/// press starts a click (unless it lands on Scrawl's own window), a release ends it. A ⇧-press may
+/// press starts a click (unless it lands on Apparent's own window), a release ends it. A ⇧-press may
 /// be a pin, as in the mouse monitor's handler.
 fn poll_clicks(
     telemetry: &SharedCaptureTelemetry,
@@ -1306,7 +1306,7 @@ fn poll_clicks(
     now: [bool; 2],
     (x, y): (f64, f64),
     pure_shift: bool,
-    on_scrawl: impl Fn(f64, f64) -> bool,
+    on_apparent: impl Fn(f64, f64) -> bool,
 ) {
     let was = std::mem::replace(prev, now);
     if telemetry.mouse_live.load(Ordering::Acquire) {
@@ -1314,7 +1314,7 @@ fn poll_clicks(
     }
     for (button, (&down, &before)) in now.iter().zip(&was).enumerate() {
         let left = button == 0;
-        if down && !before && !on_scrawl(x, y) {
+        if down && !before && !on_apparent(x, y) {
             if !pure_shift {
                 telemetry.pointer_down(telemetry.elapsed_ms(), x, y);
             } else if left {
@@ -1484,11 +1484,11 @@ pub fn is_frontmost_terminal() -> bool {
     .any(|needle| a.contains(needle) || b.contains(needle))
 }
 
-/// Writes all bundle artifacts (`scrawl.json`, `summary.md`, `contact-sheet.png`, `frames/frame-XX.png`)
-/// into a new or specified `.scrawl` bundle directory.
+/// Writes all bundle artifacts (`apparent.json`, `summary.md`, `contact-sheet.png`, `frames/frame-XX.png`)
+/// into a new or specified `.apparent` bundle directory.
 pub fn write_bundle_artifacts(
     out_dir: &Path,
-    bundle: &crate::model::ScrawlBundle,
+    bundle: &crate::model::ApparentBundle,
     annotated_frames: &[(crate::model::Keyframe, RgbaFrame)],
     contact_sheet: &RgbaFrame,
     summary_md: &str,
@@ -1520,7 +1520,7 @@ pub fn write_bundle_artifacts(
     })?;
 
     let manifest_bytes = serde_json::to_vec_pretty(bundle)?;
-    std::fs::write(out_dir.join("scrawl.json"), manifest_bytes)?;
+    std::fs::write(out_dir.join("apparent.json"), manifest_bytes)?;
     std::fs::write(out_dir.join("summary.md"), summary_md.as_bytes())?;
 
     Ok(())
@@ -1570,10 +1570,10 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    /// Clicks on `scrawl-helper`'s windows (the SwiftUI capsule, Settings, onboarding) are
-    /// Scrawl's own, except on the iPhone mirror, which is what's being recorded.
+    /// Clicks on `apparent-helper`'s windows (the SwiftUI capsule, Settings, onboarding) are
+    /// Apparent's own, except on the iPhone mirror, which is what's being recorded.
     #[test]
-    fn helper_windows_are_scrawl_s_except_the_capture_source() {
+    fn helper_windows_are_apparent_s_except_the_capture_source() {
         let (sender, _receiver) = flume::unbounded();
         let telemetry = SharedCaptureTelemetry::new(sender);
         let window = |id, pid, bounds| crate::windows::RawWindow {
@@ -1596,7 +1596,7 @@ mod tests {
         telemetry.passthrough_window_ids.lock().unwrap().push(1);
         telemetry.set_capture_source_pid(mirror as u32);
         let helper = |pid| pid == settings || pid == mirror;
-        let at = |x, y| telemetry.scrawl_window_in(&windows, x, y, helper);
+        let at = |x, y| telemetry.apparent_window_in(&windows, x, y, helper);
         assert!(at(300.0, 300.0), "Settings");
         assert!(!at(1400.0, 400.0), "the iPhone mirror");
         assert!(!at(1000.0, 900.0), "the app under the ink overlay");
@@ -1620,7 +1620,7 @@ mod tests {
         });
         assert!(!telemetry.mouse_live.load(Ordering::Acquire));
         let mut prev = [false; 2];
-        let not_scrawl = |_: f64, _: f64| false;
+        let not_apparent = |_: f64, _: f64| false;
         let composer = (778.0, 1050.0);
         // A ⇧-click is a pin, not a click.
         poll_clicks(
@@ -1629,7 +1629,7 @@ mod tests {
             [true, false],
             composer,
             true,
-            not_scrawl,
+            not_apparent,
         );
         poll_clicks(
             &telemetry,
@@ -1637,7 +1637,7 @@ mod tests {
             [false, false],
             composer,
             true,
-            not_scrawl,
+            not_apparent,
         );
         // A click on the composer.
         poll_clicks(
@@ -1646,7 +1646,7 @@ mod tests {
             [true, false],
             composer,
             false,
-            not_scrawl,
+            not_apparent,
         );
         poll_clicks(
             &telemetry,
@@ -1654,7 +1654,7 @@ mod tests {
             [true, false],
             composer,
             false,
-            not_scrawl,
+            not_apparent,
         );
         poll_clicks(
             &telemetry,
@@ -1662,9 +1662,9 @@ mod tests {
             [false, false],
             composer,
             false,
-            not_scrawl,
+            not_apparent,
         );
-        // Then the stop button, which is Scrawl's own.
+        // Then the stop button, which is Apparent's own.
         let stop = (860.0, 20.0);
         poll_clicks(&telemetry, &mut prev, [true, false], stop, false, |_, _| {
             true
@@ -1685,7 +1685,7 @@ mod tests {
             [true, false],
             composer,
             false,
-            not_scrawl,
+            not_apparent,
         );
         poll_clicks(
             &telemetry,
@@ -1693,7 +1693,7 @@ mod tests {
             [false, false],
             composer,
             false,
-            not_scrawl,
+            not_apparent,
         );
 
         let (events, _) = telemetry.finish_session();
@@ -1969,10 +1969,10 @@ mod tests {
     fn shift_clicks_drop_pins_from_polled_buttons_too() {
         let telemetry = session(1000.0, 1000.0);
         let mut prev = [false; 2];
-        // ⇧-clicks at a point, the second on Scrawl's own window.
-        for (at, on_scrawl) in [((250.0, 750.0), false), ((400.0, 400.0), true)] {
+        // ⇧-clicks at a point, the second on Apparent's own window.
+        for (at, on_apparent) in [((250.0, 750.0), false), ((400.0, 400.0), true)] {
             for buttons in [[true, false], [false, false]] {
-                poll_clicks(&telemetry, &mut prev, buttons, at, true, |_, _| on_scrawl);
+                poll_clicks(&telemetry, &mut prev, buttons, at, true, |_, _| on_apparent);
             }
         }
         let (events, strokes) = telemetry.finish_session();

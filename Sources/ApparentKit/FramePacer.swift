@@ -50,7 +50,7 @@ struct FramePacer: Equatable, Sendable {
   /// Target interval while scrolling, dragging, or drawing (12 fps).
   static let defaultInteractionInterval: TimeInterval = 1.0 / 12.0
   /// Adaptive backoff never drops the target cadence below 10 fps (100 ms), keeping every timestamp
-  /// within ±50 ms of a frame for `scrawl-helper`'s 80 ms keyframe decode tolerance.
+  /// within ±50 ms of a frame for `apparent-helper`'s 80 ms keyframe decode tolerance.
   static let defaultMaxAdaptiveInterval: TimeInterval = 1.0 / 10.0
   /// Maximum gap allowed when skipping tight-budget ticks before forcing a capture anyway.
   static let defaultMaxStarvationInterval: TimeInterval = 0.14

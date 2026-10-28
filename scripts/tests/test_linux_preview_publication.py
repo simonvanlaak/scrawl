@@ -153,8 +153,11 @@ class LinuxPreviewPublicationTest(unittest.TestCase):
     def test_main_preview_job_runs_the_checked_publisher(self):
         workflow = (ROOT / ".github/workflows/release-linux.yml").read_text()
         job = workflow.split("  main-preview:\n", 1)[1]
+        build = workflow.split("  linux:\n", 1)[1].split("  main-preview:\n", 1)[0]
         self.assertIn("actions: write", workflow)
         self.assertIn("--json isDraft --jq .isDraft", workflow)
+        self.assertIn("ref: ${{ inputs.tag || github.sha }}", build)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', build)
         self.assertIn("ref: ${{ github.sha }}", job)
         self.assertIn("python3 scripts/linux/publish-main-preview.py", job)
         self.assertNotIn("exit 0", job)

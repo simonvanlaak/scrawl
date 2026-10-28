@@ -202,8 +202,25 @@ fn compile_helper() {
     }
     let plist = helper_dir.join("Info.plist");
     println!("cargo:rerun-if-changed={}", plist.display());
+    println!("cargo:rerun-if-env-changed=SCRAWL_HELPER_BUNDLE_ID");
+    println!("cargo:rerun-if-env-changed=SCRAWL_PREVIEW_BUILD");
     // OUT_DIR is target/<profile>/build/scrawl-<hash>/out.
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let plist = if let Ok(bundle_id) = std::env::var("SCRAWL_HELPER_BUNDLE_ID") {
+        assert_eq!(bundle_id, "dev.simonvanlaak.scrawl.preview.helper");
+        let source = std::fs::read_to_string(&plist).expect("read helper plist");
+        let original = "<string>dev.kitlangton.scrawl.helper</string>";
+        assert!(source.contains(original), "helper bundle ID changed");
+        let preview_plist = out_dir.join("preview-helper-Info.plist");
+        std::fs::write(
+            &preview_plist,
+            source.replace(original, &format!("<string>{bundle_id}</string>")),
+        )
+        .expect("write preview helper plist");
+        preview_plist
+    } else {
+        plist
+    };
     let profile_dir = out_dir
         .ancestors()
         .nth(3)

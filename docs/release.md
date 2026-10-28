@@ -1,5 +1,25 @@
 # Releasing Scrawl
 
+## Separate Mac preview for friends
+
+The fork's **Mac preview DMG** workflow (`.github/workflows/release-mac-preview.yml`) is a
+manual, Apple-silicon-only prototype path; it does **not** run the production steps below.
+After merging it into `simonvanlaak/scrawl`'s `main`, choose **Actions → Mac preview DMG → Run
+workflow → main**. The job builds on `macos-26`, assigns version `0.<workflow run>.<attempt>` and
+tag `preview-mac-<run>-<attempt>`, and creates a GitHub **prerelease** with the DMG and SHA-256
+file. A re-run uses a new attempt number; an existing tag is never overwritten. Download it
+from the release assets, not from the Actions log.
+
+The app is named `Scrawl Preview` with bundle ID `dev.simonvanlaak.scrawl.preview`, so it
+does not overwrite `Scrawl.app` or follow Kit's Sparkle feed. It is ad-hoc signed, **not
+notarized**: testers may have to use System Settings → Privacy & Security → Open Anyway.
+Updates are **manual downloads**, not in-app automatic updates. It still uses Scrawl's normal
+capture/config paths, so it is not a separate data profile: don't run it alongside production
+Scrawl or assume their settings and hotkeys are independent. The preview cannot register itself
+at login or install the `scrawl` command, to avoid replacing production integrations. Do not use
+this workflow for a production release; that still requires the Developer ID, notarization,
+Sparkle signing and the checks below.
+
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
 is one Mac build (notarized DMG + Sparkle zip) and one Windows zip, built from the same tagged commit.
 

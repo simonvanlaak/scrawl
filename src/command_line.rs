@@ -26,6 +26,10 @@ pub struct Places {
 
 impl Places {
     pub fn system() -> Self {
+        // The preview must not claim (or remove) production's `scrawl` command.
+        if option_env!("SCRAWL_PREVIEW_BUILD").is_some() {
+            return Self { target: None, install: Vec::new(), also: Vec::new() };
+        }
         let home = std::env::var_os("HOME").map(PathBuf::from);
         // On Linux the AppImage is the app (`$APPIMAGE` names it while it runs).
         #[cfg(target_os = "linux")]

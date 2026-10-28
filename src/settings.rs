@@ -549,6 +549,9 @@ fn reconcile_login_item_in(
 
 /// Reconcile at launch and on Settings refresh, so agent edits take effect without restarting.
 pub fn reconcile_login_item() {
+    if option_env!("SCRAWL_PREVIEW_BUILD").is_some() {
+        return;
+    }
     if let Err(error) = reconcile_login_item_in(
         &crate::handoff::default_config_path(), login_item(), login_command_stale(), set_login_item,
     ) {
@@ -574,6 +577,10 @@ mod login {
     unsafe extern "C" {}
 
     fn main_app_service() -> Option<objc2::rc::Retained<objc2::runtime::AnyObject>> {
+        // Shared config preferences cannot register or remove a production login item.
+        if option_env!("SCRAWL_PREVIEW_BUILD").is_some() {
+            return None;
+        }
         use objc2::runtime::{AnyClass, AnyObject};
         let class = AnyClass::get(c"SMAppService")?;
         let exe = std::env::current_exe().ok()?;

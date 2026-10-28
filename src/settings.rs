@@ -73,6 +73,13 @@ impl Shortcuts {
         if migrated && save_shortcut_in(&path, ShortcutKind::Record, &shortcuts.record).is_ok() {
             let _ = std::fs::remove_file(&legacy);
         }
+        #[cfg(target_os = "linux")]
+        if let Some(record) = crate::linux::hyprland::external_record() {
+            return Self {
+                record,
+                ..shortcuts
+            };
+        }
         shortcuts
     }
 
@@ -852,6 +859,8 @@ pub struct ShortcutView {
     pub option: bool,
     pub command: bool,
     pub is_default: bool,
+    /// A live system binding owns this chord; change it in the compositor instead.
+    pub externally_managed: bool,
     /// It can be turned off (paste); `label` is empty while it is.
     pub clearable: bool,
     /// The recorder is waiting for a new combination.
@@ -1056,9 +1065,35 @@ fn shortcut_view(
         option: mods & CARBON_OPTION_KEY != 0,
         command: mods & CARBON_CMD_KEY != 0,
         is_default: cfg.is_default_for(kind),
+        externally_managed: external_record_matches(kind, cfg),
         clearable: kind.can_unset(),
         recording,
         error: error.cloned(),
+    }
+}
+
+fn external_record_matches(kind: ShortcutKind, cfg: &ShortcutConfig) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        kind == ShortcutKind::Record
+            && crate::linux::hyprland::external_record().as_ref() == Some(cfg)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (kind, cfg);
+        false
+    }
+}
+
+pub(crate) fn external_record_owned(kind: ShortcutKind) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        kind == ShortcutKind::Record && crate::linux::hyprland::external_record().is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = kind;
+        false
     }
 }
 
@@ -1193,6 +1228,9 @@ impl Panel {
         match action {
             Action::Set { key, value } => self.set(&key, &value, host),
             Action::RecordShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.error = None;
                 if self.recording.replace(kind).is_none() {
                     host.pause_shortcuts(true);
@@ -1204,6 +1242,9 @@ impl Panel {
                 Effect::None
             }
             Action::Shortcut { kind, pressed } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 if self.recording != Some(kind) {
                     return Effect::None;
                 }
@@ -1224,12 +1265,18 @@ impl Panel {
                 Effect::None
             }
             Action::ResetShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.stop_recording(host);
                 let mut shortcuts = host.shortcuts();
                 self.apply(kind, kind.default_config(), &mut shortcuts, host);
                 Effect::None
             }
             Action::ClearShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.stop_recording(host);
                 if kind.can_unset() {
                     let mut shortcuts = host.shortcuts();
@@ -2314,6 +2361,27 @@ mod tests {
         .unwrap();
         assert!(read_json(&path)["shortcuts"].get("record").is_none());
         assert_eq!(read_json(&path)["ingestToken"], "secret");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn copilot_record_shortcut_from_config_is_the_only_record_shortcut_in_settings() {
+        let dir = TempDir::new("copilot-record");
+        let mut host = fake(&dir);
+        let cfg = ShortcutConfig {
+            key_code: 201,
+            carbon_modifiers: CARBON_CMD_KEY | CARBON_SHIFT_KEY,
+            label: "Super+Shift+Copilot".into(),
+        };
+        save_shortcut_in(&host.path, ShortcutKind::Record, &cfg).unwrap();
+        host.shortcuts = Shortcuts::load_from(&host.path, &dir.0.join("legacy.json")).0;
+        let view = Panel::default().view(&host);
+        let record: Vec<_> = view.shortcuts.iter().filter(|s| s.kind == ShortcutKind::Record).collect();
+        assert_eq!(record.len(), 1);
+        assert_eq!(record[0].label, "Super+Shift+Copilot");
+        assert_eq!(record[0].key, "Copilot");
+        assert!(record[0].command && record[0].shift);
+        assert!(!record[0].is_default);
     }
 
     #[test]

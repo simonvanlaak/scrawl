@@ -4677,6 +4677,8 @@ impl Render for BundleReviewWindow {
 
         let c_keydown = self.coordinator.clone();
         let c_shortcut = self.coordinator.clone();
+        let external_shortcut =
+            crate::settings::external_record_owned(crate::capture::ShortcutKind::Record);
         let c_copy = self.coordinator.clone();
         let c_send = self.coordinator.clone();
         let c_tab_sheet = self.coordinator.clone();
@@ -4911,16 +4913,16 @@ impl Render for BundleReviewWindow {
                             .child(
                                 hint_button(
                                     "btn-shortcut",
-                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    if external_shortcut { "Managed in Hyprland" } else if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
                                     (!recording_shortcut && !compact).then_some(shortcut_label),
                                     false,
                                 )
-                                .on_click(move |_, _, cx| {
+                                .when(!external_shortcut, |button| button.on_click(move |_, _, cx| {
                                     c_shortcut.update(cx, |coord, cx| {
                                         coord.recording_shortcut_key = !coord.recording_shortcut_key;
                                         cx.notify();
                                     });
-                                }),
+                                })),
                             )
                             .child(
                                 action_button(

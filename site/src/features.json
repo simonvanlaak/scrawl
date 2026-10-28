@@ -176,6 +176,16 @@
       "docs": ["README.md#capture-controls"]
     },
     {
+      "id": "agent-capture-control",
+      "group": "record",
+      "name": "Local capture inspection and explicit stop/cancel",
+      "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
+      "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "platforms": ["mac", "linux"],
+      "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
+      "docs": ["docs/capture.md", "docs/linux.md"]
+    },
+    {
       "id": "capsule",
       "group": "record",
       "name": "Capsule",

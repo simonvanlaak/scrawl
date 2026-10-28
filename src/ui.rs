@@ -758,6 +758,10 @@ pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    agent_capture_id: Option<String>,
+    #[cfg(target_os = "linux")]
+    agent_finishing: bool,
     last_live_no_words: bool,
     playback: Option<crate::playback::Guard>,
     picker_metal_overlay: Option<LaserOverlay>,
@@ -865,6 +869,10 @@ impl ApparentCoordinator {
             telemetry,
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            agent_capture_id: None,
+            #[cfg(target_os = "linux")]
+            agent_finishing: false,
             last_live_no_words: false,
             playback: None,
             picker_metal_overlay: None,
@@ -1032,6 +1040,62 @@ impl ApparentCoordinator {
 
     pub fn is_selecting(&self) -> bool {
         matches!(self.island_phase, IslandPhase::Selecting { .. })
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn agent_state(&self) -> crate::agent_capture::State {
+        use crate::agent_capture::{Phase, State};
+        if matches!(
+            self.active_recording.as_ref().map(|recording| &recording.source),
+            Some(CaptureSource::Lab)
+        ) {
+            return State {
+                phase: Phase::Idle,
+                capture_id: None,
+            };
+        }
+        let phase = if let Some(recording) = &self.active_recording {
+            match &recording.source {
+                CaptureSource::Screen { session, .. } if !session.has_frames() => Phase::Starting,
+                CaptureSource::Phone(session) if !session.has_recording() => Phase::Starting,
+                _ => Phase::Recording,
+            }
+        } else {
+            match self.island_phase {
+                IslandPhase::Selecting { .. } => Phase::Selecting,
+                IslandPhase::Processing => Phase::Processing,
+                IslandPhase::Completed { .. } => Phase::Completed,
+                _ => Phase::Idle,
+            }
+        };
+        State {
+            phase,
+            capture_id: self.agent_capture_id.clone(),
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn agent_request(&mut self, request: crate::agent_capture::Request, cx: &mut Context<Self>) {
+        use crate::agent_capture::{Action, Outcome, decide};
+        let before = self.agent_state();
+        let outcome = request
+            .action
+            .as_ref()
+            .map(|(action, id)| decide(&before, *action, id));
+        match (request.action, outcome) {
+            (Some((Action::Stop, _)), Some(Outcome::Stopping)) => {
+                #[cfg(target_os = "linux")]
+                { self.agent_finishing = true; }
+                self.finish_recording(cx)
+            }
+            (Some((Action::Cancel, _)), Some(Outcome::Cancelled)) => self.cancel_recording(cx),
+            _ => {}
+        }
+        let response = match outcome {
+            Some(outcome) => serde_json::json!({"outcome": outcome, "state": self.agent_state()}),
+            None => serde_json::json!({"state": before}),
+        };
+        let _ = request.reply.send(response.to_string());
     }
 
     pub fn open_onboarding(&mut self, flow: crate::onboarding::Flow) {
@@ -1441,6 +1505,8 @@ impl ApparentCoordinator {
     /// its target and overlay.
     fn discard_recording(&mut self) -> Option<(TargetInfo, Option<LaserOverlay>)> {
         let rec = self.active_recording.take()?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        { self.agent_capture_id = None; }
         let _ = self.telemetry.finish_session();
         match rec.source {
             CaptureSource::Screen { session, audio, .. } => {
@@ -2448,6 +2514,15 @@ impl ApparentCoordinator {
             return;
         }
         whiteboard::reset_for_capture(&self.whiteboard);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let Ok(id) = crate::agent_capture::new_id() else {
+                apparent_log("Could not create capture identity; refusing an untracked recording");
+                self.cancel_recording(cx);
+                return;
+            };
+            self.agent_capture_id = Some(id);
+        }
         self.begin_playback();
         let started = Instant::now();
         apparent_log(format!(
@@ -2608,6 +2683,15 @@ impl ApparentCoordinator {
         whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         self.remember_mode(SelectionMode::Iphone);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let Ok(id) = crate::agent_capture::new_id() else {
+                apparent_log("Could not create capture identity; refusing an untracked recording");
+                self.cancel_recording(cx);
+                return;
+            };
+            self.agent_capture_id = Some(id);
+        }
         self.recording_shortcut_key = false;
         self.selection_drag = None;
         self.hovered_window = None;
@@ -2660,6 +2744,8 @@ impl ApparentCoordinator {
                 Ok(session) => session,
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    { self.agent_capture_id = None; }
                     self.telemetry.finish_session();
                     let _ = std::fs::remove_dir_all(&bundle_dir);
                     self.dismiss_island(cx);
@@ -2724,8 +2810,11 @@ impl ApparentCoordinator {
         let Some(rec) = self.active_recording.take() else {
             return;
         };
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        { self.agent_capture_id = None; }
         #[cfg(target_os = "linux")]
-        let auto_active = crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
+        let auto_active = !std::mem::take(&mut self.agent_finishing)
+            && crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
             && crate::linux::hyprland::running()
             && crate::linux::wayland_session()
             && !self.lab
@@ -5713,6 +5802,8 @@ pub fn run_app(
         crate::hex::watch();
         crate::speech_model::ensure();
         let menu_rx = install_status_bar();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let agent_rx = crate::agent_capture::listen().map_err(|error| apparent_log(format!("Agent capture control unavailable: {error:#}"))).ok();
 
         // Onboarding opens on first launch, or for a permission that went away.
         if screenshot_out.is_none() && std::env::var_os("APPARENT_NO_ONBOARDING").is_none() {
@@ -5784,6 +5875,12 @@ pub fn run_app(
                     platform::poll_status_bar();
                     crate::onboarding_window::poll(cx);
                     crate::settings_window::poll(cx);
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if let Some(ref rx) = agent_rx {
+                        while let Ok(request) = rx.try_recv() {
+                            loop_coord.update(cx, |coord, cx| coord.agent_request(request, cx));
+                        }
+                    }
                     if let Some(ref rx) = menu_rx {
                         while let Ok(action) = rx.try_recv() {
                             match action {

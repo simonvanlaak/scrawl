@@ -68,6 +68,14 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Other commands
 
+For a running GUI app on macOS or Linux, `apparent capture state` prints its live phase and
+`capture_id` (only while pending or recording). If you initiated that capture and have retained
+its ID, `apparent capture stop <capture_id>` saves it after frames arrive, while
+`apparent capture cancel <capture_id>` discards it even when the portal is pending. Do not use
+the record shortcut as a stop toggle or act on an ID you did not establish as yours. A wrong ID
+fails; repeating an ended ID does nothing. These commands do not control a separate timed
+`record --duration` invocation and never send a capture to a session.
+
 ```sh
 apparent inspect <bundle>               # summary.md, the text above
 apparent inspect <bundle> --json        # apparent.json

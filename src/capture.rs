@@ -642,6 +642,11 @@ impl ScreenCaptureSession {
         self.started_at.elapsed().as_millis() as u64
     }
 
+    /// A portal or ScreenCaptureKit session is still pending until a real frame arrives.
+    pub fn has_frames(&self) -> bool {
+        !self.frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner).frames.is_empty()
+    }
+
     pub fn stop(mut self) -> ScreenRecording {
         let duration_ms = self.elapsed_ms();
         self.stopping.store(true, Ordering::Release);

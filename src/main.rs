@@ -423,7 +423,7 @@ enum Command {
     },
     /// Export a bundle's recording as one shareable .mp4: H.264 video cropped to the activity
     /// with the ink and click ripples burned in, AAC audio in sync, and optionally Screen
-    /// Studio-style auto-zoom (`--zoom`). Encoding runs in the helper with AVFoundation.
+    /// Studio-style auto-zoom (`--zoom`). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
     Export {
         /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]

@@ -266,18 +266,29 @@ pub fn pointer() -> Option<[f64; 2]> {
     crate::capture::current_mouse_screen().map(|[x, y]| [f64::from(x), f64::from(y)])
 }
 
-/// Every display, the primary first, in global pixels; `id` is its index (`TargetInfo::display_id`).
+/// Every display, the primary first, in global pixels. Linux IDs are RandR output-name atoms;
+/// Windows IDs are list indices (`TargetInfo::display_id`).
 #[cfg(not(target_os = "macos"))]
 pub fn displays() -> Vec<Screen> {
-    #[cfg(target_os = "windows")]
-    use crate::win as os;
     #[cfg(target_os = "linux")]
     use crate::linux as os;
+    #[cfg(target_os = "windows")]
+    use crate::win as os;
     os::monitors()
         .into_iter()
         .enumerate()
         .map(|(i, m)| Screen {
-            id: i as u32,
+            id: {
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = i;
+                    os::monitor_id(&m)
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    i as u32
+                }
+            },
             frame: m.rect,
             visible: m.work,
             scale: m.scale,

@@ -20,7 +20,7 @@ pub use platform::*;
 
 /// Resolve a CLI recording target before creating a bundle or starting any recorder.
 pub fn record_target(window_query: Option<&str>) -> Result<TargetInfo> {
-    resolve_record_target(window_query, list_selectable_windows, || discover_target(None))
+    resolve_record_target(window_query, list_recordable_windows, || discover_target(None))
 }
 
 fn resolve_record_target(
@@ -75,6 +75,16 @@ mod record_target_tests {
         assert!(resolve_record_target(Some("project"), || vec![target(CaptureMode::Display, "Project", "Editor")], || panic!("display capture must not start")).is_err());
         let display = resolve_record_target(None, || panic!("window lookup must not run"), || target(CaptureMode::Display, "", "")).unwrap();
         assert_eq!(display.mode, CaptureMode::Display);
+    }
+
+    #[test]
+    fn long_window_titles_are_matched_and_checked_for_ambiguity() {
+        let title = "A window title longer than the picker label with UNIQUE_SUFFIX";
+        let selected = resolve_record_target(Some("UNIQUE_SUFFIX"), || vec![target(CaptureMode::Window, title, "Browser")], || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_title.as_deref(), Some(title));
+        let other = "A window title longer than the picker label with OTHER_SUFFIX";
+        let result = resolve_record_target(Some("A window title longer"), || vec![target(CaptureMode::Window, title, "Browser"), target(CaptureMode::Window, other, "Browser")], || panic!("display capture must not start"));
+        assert!(result.is_err(), "truncated picker labels must not hide ambiguity");
     }
 }
 

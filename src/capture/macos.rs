@@ -854,6 +854,15 @@ fn display_of(screens: &[crate::screens::Screen], rect: [f64; 4]) -> (u32, f64) 
 
 /// Lists all on-screen normal (`window_layer == 0`) windows in front-to-back order for the Window picker.
 pub fn list_selectable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(true)
+}
+
+/// The same eligible windows, with full names for unambiguous CLI matching.
+pub fn list_recordable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(false)
+}
+
+fn windows_for_selection(picker: bool) -> Vec<TargetInfo> {
     let Ok(content) = SCShareableContent::get() else {
         return Vec::new();
     };
@@ -882,10 +891,10 @@ pub fn list_selectable_windows() -> Vec<TargetInfo> {
                 mode: CaptureMode::Window,
                 app: owner
                     .as_ref()
-                    .map(|a| clean_label(&a.application_name()))
+                    .map(|a| if picker { clean_label(&a.application_name()) } else { a.application_name().trim().to_owned() })
                     .filter(|s| !s.is_empty()),
                 bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
-                window_title: w.title().map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
+                window_title: w.title().map(|t| if picker { clean_label(&t) } else { t.trim().to_owned() }).filter(|t| !t.is_empty()),
                 window_id: Some(w.window_id()),
                 display_id,
                 frame: crate::screens::with_scale(rect, scale),

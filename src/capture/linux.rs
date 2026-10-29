@@ -54,9 +54,9 @@ pub fn log_dir() -> Option<PathBuf> {
     Some(linux::local_dir().join("Logs"))
 }
 
-/// The primary display's index in `linux::monitors()`.
+/// The primary display's stable RandR output-name atom.
 pub fn main_display_id() -> u32 {
-    0
+    linux::monitors().first().map_or(0, linux::monitor_id)
 }
 
 /// The virtual key for `ch`. Keys are bound by keysym (`keysym_for_vk`), so the key that types
@@ -405,31 +405,22 @@ fn app_windows() -> Vec<(linux::WindowInfo, String, String)> {
         .collect()
 }
 
-fn window_target(window: &linux::WindowInfo, app: &str, id: &str) -> TargetInfo {
+fn window_target(window: &linux::WindowInfo, app: &str, id: &str, picker: bool) -> TargetInfo {
     let monitor = linux::monitor_at(
         window.rect[0] + window.rect[2] / 2.0,
         window.rect[1] + window.rect[3] / 2.0,
     );
     TargetInfo {
         mode: CaptureMode::Window,
-        app: Some(clean_label(app)).filter(|s| !s.is_empty()),
+        app: Some(if picker { clean_label(app) } else { app.trim().to_owned() }).filter(|s| !s.is_empty()),
         bundle_id: Some(id.to_owned()),
-        window_title: Some(clean_label(&window.title)).filter(|t| !t.is_empty()),
+        window_title: Some(if picker { clean_label(&window.title) } else { window.title.trim().to_owned() }).filter(|t| !t.is_empty()),
         window_id: Some(window.hwnd as u32),
-        display_id: display_index(monitor.as_ref()),
+        display_id: monitor.as_ref().map_or(0, linux::monitor_id),
         frame: frame_of(window.rect, monitor.map_or(1.0, |m| m.scale)),
     }
 }
 
-fn display_index(monitor: Option<&linux::Monitor>) -> u32 {
-    let Some(monitor) = monitor else {
-        return 0;
-    };
-    linux::monitors()
-        .iter()
-        .position(|m| m.handle == monitor.handle)
-        .unwrap_or(0) as u32
-}
 
 pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
     discover_target_at(window_query, linux::cursor_position().map(|(x, y)| [x, y]))
@@ -456,17 +447,26 @@ pub fn discover_target_at(_window_query: Option<&str>, point: Option<[f64; 2]>) 
         bundle_id: frontmost.and_then(|(_, _, id)| id),
         window_title: title.map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
         window_id: None,
-        display_id: index as u32,
+        display_id: monitors.get(index).map_or(0, linux::monitor_id),
         frame: frame_of(rect, scale),
     }
 }
 
 /// All on-screen app windows at least 80 px each way, front to back, for the Window picker.
 pub fn list_selectable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(true)
+}
+
+/// The same eligible windows, with full names for unambiguous CLI matching.
+pub fn list_recordable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(false)
+}
+
+fn windows_for_selection(picker: bool) -> Vec<TargetInfo> {
     app_windows()
         .into_iter()
         .filter(|(w, _, _)| w.rect[2] >= 80.0 && w.rect[3] >= 80.0)
-        .map(|(w, app, id)| window_target(&w, &app, &id))
+        .map(|(w, app, id)| window_target(&w, &app, &id, picker))
         .collect()
 }
 

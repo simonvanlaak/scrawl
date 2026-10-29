@@ -956,7 +956,10 @@ impl Session {
                         continue;
                     };
                     let action = action.to_owned();
-                    if matches!(action.as_str(), "shortcut" | "cancel-shortcut" | "reset-shortcut") {
+                    if matches!(
+                        action.as_str(),
+                        "shortcut" | "cancel-shortcut" | "reset-shortcut"
+                    ) {
                         let mut value = value;
                         if action == "reset-shortcut" && value.get("kind").is_none() {
                             value["kind"] = "record".into();
@@ -1253,7 +1256,10 @@ mod tests {
         assert_eq!(flow.view().count, 5);
         flow.on(Input::Continue);
         flow.on(Input::Continue);
-        flow.on(Input::Grants { grants: grants(&ALL), now_ms: 0 });
+        flow.on(Input::Grants {
+            grants: grants(&ALL),
+            now_ms: 0,
+        });
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Shortcut);
         assert_eq!(flow.resume_point(), Some(Step::Shortcut));

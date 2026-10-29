@@ -1249,13 +1249,23 @@ impl ApparentCoordinator {
                 .as_mut()
                 .map_or(Effect::None, |session| session.action(&action)),
             Event::Shortcut(action) => {
-                if self.onboarding.as_ref().is_some_and(|session| session.editing_shortcut())
-                    && matches!(action,
-                        crate::settings::Action::Shortcut { kind: crate::capture::ShortcutKind::Record, .. }
-                        | crate::settings::Action::ResetShortcut { kind: crate::capture::ShortcutKind::Record }
-                        | crate::settings::Action::CancelShortcut)
+                if self
+                    .onboarding
+                    .as_ref()
+                    .is_some_and(|session| session.editing_shortcut())
+                    && matches!(
+                        action,
+                        crate::settings::Action::Shortcut {
+                            kind: crate::capture::ShortcutKind::Record,
+                            ..
+                        } | crate::settings::Action::ResetShortcut {
+                            kind: crate::capture::ShortcutKind::Record
+                        } | crate::settings::Action::CancelShortcut
+                    )
                 {
-                    let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
+                    let mut host = crate::settings::AppHost {
+                        telemetry: &self.telemetry,
+                    };
                     self.onboarding_editor.on(action, &mut host);
                     self.sync_onboarding_editor();
                 }
@@ -1269,9 +1279,13 @@ impl ApparentCoordinator {
         };
         match effect {
             Effect::EditShortcut => {
-                let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
+                let mut host = crate::settings::AppHost {
+                    telemetry: &self.telemetry,
+                };
                 self.onboarding_editor.on(
-                    crate::settings::Action::RecordShortcut { kind: crate::capture::ShortcutKind::Record },
+                    crate::settings::Action::RecordShortcut {
+                        kind: crate::capture::ShortcutKind::Record,
+                    },
                     &mut host,
                 );
                 self.sync_onboarding_editor();
@@ -1301,14 +1315,20 @@ impl ApparentCoordinator {
             }
             _ => {}
         }
-        if self.onboarding.as_ref().is_some_and(|session| !session.editing_shortcut()) {
+        if self
+            .onboarding
+            .as_ref()
+            .is_some_and(|session| !session.editing_shortcut())
+        {
             self.cancel_onboarding_editor();
         }
     }
 
     fn sync_onboarding_editor(&mut self) {
         use crate::settings::Host as _;
-        let host = crate::settings::AppHost { telemetry: &self.telemetry };
+        let host = crate::settings::AppHost {
+            telemetry: &self.telemetry,
+        };
         if let Some(session) = self.onboarding.as_mut() {
             session.shortcut_changed(&host.shortcuts().record.label);
             session.shortcut_editor(&self.onboarding_editor.record_shortcut(&host));
@@ -1316,8 +1336,11 @@ impl ApparentCoordinator {
     }
 
     fn cancel_onboarding_editor(&mut self) {
-        let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
-        self.onboarding_editor.on(crate::settings::Action::CancelShortcut, &mut host);
+        let mut host = crate::settings::AppHost {
+            telemetry: &self.telemetry,
+        };
+        self.onboarding_editor
+            .on(crate::settings::Action::CancelShortcut, &mut host);
     }
 
     fn activity(&self) -> crate::shortcut::Activity {

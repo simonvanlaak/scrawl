@@ -288,8 +288,12 @@ fn open(request: Request, cx: &mut App) {
                                 if !window.is_window_active()
                                     && view.editor.as_ref().is_some_and(|editor| editor.recording)
                                 {
-                                    if let Some(editor) = view.editor.as_mut() { editor.recording = false; }
-                                    (view.events)(Event::Shortcut(crate::settings::Action::CancelShortcut));
+                                    if let Some(editor) = view.editor.as_mut() {
+                                        editor.recording = false;
+                                    }
+                                    (view.events)(Event::Shortcut(
+                                        crate::settings::Action::CancelShortcut,
+                                    ));
                                 }
                                 if disconnected {
                                     window.remove_window();
@@ -1209,7 +1213,10 @@ impl Render for OnboardingWindow {
             .id("onboarding-root")
             .when_some(self.focus.as_ref(), |d, focus| d.track_focus(focus))
             .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
-                if !view.state.as_ref().is_some_and(|state| state.shortcut_editing)
+                if !view
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| state.shortcut_editing)
                     || !view.editor.as_ref().is_some_and(|editor| editor.recording)
                 {
                     return;
@@ -1219,16 +1226,25 @@ impl Render for OnboardingWindow {
                     (view.events)(Event::Shortcut(crate::settings::Action::CancelShortcut));
                 } else if let Some(key_code) = crate::settings_window::key_code(key) {
                     let m = event.keystroke.modifiers;
-                    let modifiers = [(m.platform, crate::capture::CARBON_CMD_KEY),
+                    let modifiers = [
+                        (m.platform, crate::capture::CARBON_CMD_KEY),
                         (m.control, crate::capture::CARBON_CONTROL_KEY),
                         (m.alt, crate::capture::CARBON_OPTION_KEY),
-                        (m.shift, crate::capture::CARBON_SHIFT_KEY)]
-                        .into_iter().filter(|(held, _)| *held).fold(0, |bits, (_, bit)| bits | bit);
+                        (m.shift, crate::capture::CARBON_SHIFT_KEY),
+                    ]
+                    .into_iter()
+                    .filter(|(held, _)| *held)
+                    .fold(0, |bits, (_, bit)| bits | bit);
                     (view.events)(Event::Shortcut(crate::settings::Action::Shortcut {
                         kind: crate::capture::ShortcutKind::Record,
                         pressed: crate::settings::Pressed {
-                            key_code, modifiers,
-                            key: if key.chars().count() == 1 { key.clone() } else { String::new() },
+                            key_code,
+                            modifiers,
+                            key: if key.chars().count() == 1 {
+                                key.clone()
+                            } else {
+                                String::new()
+                            },
                             reserved: false,
                         },
                     }));
@@ -1451,7 +1467,10 @@ mod tests {
             }
             flow.on(input);
         }
-        assert!(window.handle(serde_json::json!({"type": "shortcut", "label": "Ctrl+Alt+K"}), None));
+        assert!(window.handle(
+            serde_json::json!({"type": "shortcut", "label": "Ctrl+Alt+K"}),
+            None
+        ));
         assert_eq!(window.shortcut, "Ctrl+Alt+K");
     }
 }

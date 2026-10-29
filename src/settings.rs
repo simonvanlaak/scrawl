@@ -1207,8 +1207,17 @@ impl Panel {
     /// The same Record recorder state for Settings and the onboarding shortcut page.
     pub fn record_shortcut(&self, host: &dyn Host) -> ShortcutView {
         let kind = ShortcutKind::Record;
-        let error = self.error.as_ref().filter(|(k, _)| *k == kind).map(|(_, e)| e);
-        shortcut_view(kind, host.shortcuts().get(kind), self.recording == Some(kind), error)
+        let error = self
+            .error
+            .as_ref()
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, e)| e);
+        shortcut_view(
+            kind,
+            host.shortcuts().get(kind),
+            self.recording == Some(kind),
+            error,
+        )
     }
 
     #[cfg(test)]

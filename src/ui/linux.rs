@@ -612,6 +612,9 @@ impl ksni::Tray for ApparentTray {
         }
         items.push(self.item(record_title(), MenuAction::ToggleCapture));
         items.push(self.item("Choose What to Record…", MenuAction::ChooseTarget));
+        if crate::handoff::experiment("feedbackIssue") {
+            items.push(self.item("Give Feedback…", MenuAction::GiveFeedback));
+        }
         items.push(ksni::MenuItem::Separator);
         items.push(self.item("Open Latest Capture", MenuAction::OpenLatest));
         if crate::handoff::video_export() {

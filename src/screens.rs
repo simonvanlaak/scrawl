@@ -157,6 +157,22 @@ pub fn pill_origin(screen: &Screen, width: f64, panel_y: f64) -> [f64; 2] {
     ]
 }
 
+/// Move a recording capsule without changing the pointer's grab offset or leaving its display.
+/// All coordinates are global top-left points on macOS, pixels on Linux.
+pub fn drag_pill_origin(
+    screen: &Screen,
+    initial_panel: Rect,
+    pointer_down: [f64; 2],
+    pointer_now: [f64; 2],
+) -> [f64; 2] {
+    let [sx, sy, sw, sh] = screen.frame;
+    let [px, py, pw, ph] = initial_panel;
+    [
+        (px + pointer_now[0] - pointer_down[0]).clamp(sx, sx + (sw - pw).max(0.0)),
+        (py + pointer_now[1] - pointer_down[1]).clamp(sy, sy + (sh - ph).max(0.0)),
+    ]
+}
+
 /// The GPUI pill window's rect on `screen` (Windows, global pixels): `w`×`h` points at the
 /// screen's scale, placed as `pill_origin` places the capsule (below a taskbar on top).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -387,6 +403,16 @@ mod tests {
         let right = [1728.0, 0.0, 1920.0, 1080.0];
         assert_eq!(to_local(right, [1828.0, 50.0]), [100.0, 50.0]);
         assert_eq!(to_local(LAPTOP, [864.0, 558.5]), [864.0, 558.5]);
+    }
+
+    #[test]
+    fn recording_capsule_drag_keeps_grab_offset_and_entire_panel_on_original_display() {
+        let s = screen(2, [-1920.0, 37.0, 1920.0, 1080.0], 1.0);
+        let panel = [-1200.0, 50.0, 640.0, 84.0];
+        let grab = [-1150.0, 70.0];
+        assert_eq!(drag_pill_origin(&s, panel, grab, [-1050.0, 270.0]), [-1100.0, 250.0]);
+        assert_eq!(drag_pill_origin(&s, panel, grab, [500.0, -400.0]), [-640.0, 37.0]);
+        assert_eq!(drag_pill_origin(&s, panel, grab, [-9000.0, 9999.0]), [-1920.0, 1033.0]);
     }
 
     #[test]

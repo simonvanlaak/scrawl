@@ -986,6 +986,10 @@ pub fn pause_shortcuts(telemetry: &SharedCaptureTelemetry, paused: bool) {
 
 /// The review window's own recorder: sets and saves the record shortcut.
 pub fn update_global_shortcut(telemetry: &SharedCaptureTelemetry, config: ShortcutConfig) {
+    if crate::settings::external_record_owned(ShortcutKind::Record) {
+        apparent_log("Record shortcut is managed in Hyprland; change its binding there");
+        return;
+    }
     let (_, paste) = telemetry.shortcuts();
     match set_shortcuts(telemetry, config.clone(), paste) {
         Ok(()) => crate::settings::save_shortcut(ShortcutKind::Record, &config),

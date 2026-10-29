@@ -261,7 +261,7 @@ enum Command {
         #[arg(long)]
         clipboard: bool,
     },
-    /// Record a live screen + microphone capture from the terminal for a fixed duration.
+    /// Record for a fixed duration. Timed CLI screen capture does not collect clicks or Shift ink; use the app's recording shortcut for interaction telemetry.
     Record {
         /// Optional window title or app substring to target.
         #[arg(long)]
@@ -751,6 +751,7 @@ pub fn prepare_visuals(
 #[derive(Default)]
 pub struct SourceExtras {
     pub source: Option<String>,
+    pub interaction_telemetry: Option<model::InteractionTelemetry>,
     pub device: Option<DeviceInfo>,
     /// What the recorded app said about itself: values at the start, their changes, and screens.
     pub context: std::collections::BTreeMap<String, String>,
@@ -850,6 +851,7 @@ pub fn finalize_capture_bundle(
     recorded_audio: Option<RecordedAudio>,
     note: Option<String>,
     activity: windows::ActivityLog,
+    interaction_telemetry: Option<model::InteractionTelemetry>,
 ) -> Result<(PathBuf, ApparentBundle, String)> {
     let started_at = activity
         .stop_started
@@ -861,10 +863,17 @@ pub fn finalize_capture_bundle(
         duration_ms,
         video_offset_ms,
     } = recording;
-    anyhow::ensure!(
-        !frames.is_empty(),
-        "No screen frames were captured. Choose a screen in the sharing dialog and try again."
-    );
+    if frames.is_empty() {
+        // The MP4 stream can succeed even when every screenshot fails. Do not turn
+        // it into keyframes here: the sampler drops screenshots while a system
+        // permission prompt is visible, but the movie may still contain it.
+        recover::mark_unsafe_video(bundle_dir)?;
+        let message = "No screen frames were captured. Choose a screen in the sharing dialog and try again.";
+        if let Some(ref video) = video_path {
+            anyhow::bail!("{message} The raw video was kept at {}.", video.display());
+        }
+        anyhow::bail!("{message}");
+    }
     if let Some(ref audio) = recorded_audio {
         let wav_path = bundle_dir.join("audio.wav");
         let _ = std::fs::create_dir_all(bundle_dir);
@@ -884,6 +893,7 @@ pub fn finalize_capture_bundle(
             video_offset_ms,
             strokes: strokes.clone(),
             events: events.clone(),
+            interaction_telemetry,
             note: note.clone(),
             windows: activity.windows.clone(),
             cursor: activity.cursor.clone(),
@@ -961,6 +971,7 @@ pub fn finalize_capture_bundle(
         note,
         SourceExtras {
             activity,
+            interaction_telemetry,
             video_offset_ms,
             autocrop: Some(crop_settings),
             full_frames: video_path
@@ -1043,6 +1054,7 @@ pub fn rebuild_screen_bundle_with(
                 cursor: old.cursor,
                 ..Default::default()
             },
+            interaction_telemetry: old.interaction_telemetry,
             full_frames,
             video_offset_ms: offset,
             autocrop,
@@ -1181,10 +1193,17 @@ pub fn build_bundle_from_parts(
         };
         let selected_at = std::time::Instant::now();
 
-        let crop_settings = match extras.autocrop {
-            Some(settings) => settings,
-            None if target.mode == CaptureMode::Display => autocrop::Settings::configured(),
-            None => None,
+        // A failed or partial MP4 decode leaves only small candidates. Their coarse change
+        // regions can miss the actual activity and make an idle cursor look like the target.
+        // Keep the whole candidate in the agent-facing images until full decode succeeds.
+        let crop_settings = if keyframe_warning.is_some() {
+            None
+        } else {
+            match extras.autocrop {
+                Some(settings) => settings,
+                None if target.mode == CaptureMode::Display => autocrop::Settings::configured(),
+                None => None,
+            }
         };
         let (mut annotated_frames, mut cropped) = autocrop::annotate_and_crop(
             selected,
@@ -1256,6 +1275,7 @@ pub fn build_bundle_from_parts(
         strokes,
         marks,
         events,
+        interaction_telemetry: extras.interaction_telemetry,
         keyframes,
         contact_sheet: "contact-sheet.png".into(),
         image_quality_warning: keyframe_warning,
@@ -1693,11 +1713,16 @@ fn main() -> Result<()> {
             note,
             out,
         } => {
+            #[cfg(target_os = "macos")]
+            anyhow::ensure!(
+                capture::screen_capture_usable(false),
+                "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
+            );
             let target = discover_target(window.as_deref());
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
-            std::fs::create_dir_all(&bundle_dir)?;
+            recover::begin_screen_capture(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
             let playback = playback::Guard::start();
             let audio = AudioRecorder::start().ok();
@@ -1729,6 +1754,7 @@ fn main() -> Result<()> {
                 recorded_audio,
                 note,
                 activity,
+                Some(model::InteractionTelemetry::VideoOnly),
             )?;
             print!("{summary}");
             Ok(())
@@ -1896,6 +1922,7 @@ fn main() -> Result<()> {
                             recorded,
                             iter_note,
                             iter_activity,
+                            old.interaction_telemetry,
                         )?;
                         let _ = handoff::copy_bundle_to_clipboard(&iter_out);
                         runs_ms.push(t0.elapsed().as_secs_f64() * 1_000.0);
@@ -1962,6 +1989,7 @@ fn main() -> Result<()> {
                         video_offset_ms: old.video_offset_ms,
                         strokes: old.strokes,
                         events: old.events,
+                        interaction_telemetry: old.interaction_telemetry,
                         note: old.note,
                         windows: old.windows,
                         cursor: old.cursor,
@@ -2412,8 +2440,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn movie_without_safe_screenshots_is_not_a_bundle() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let movie = dir.join("recording.mp4");
+        std::fs::write(&movie, b"untrusted movie bytes").unwrap();
+        std::fs::write(dir.join("audio.wav"), b"audio bytes").unwrap();
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let error = finalize_capture_bundle(
+            &dir,
+            target,
+            capture::ScreenRecording {
+                frames: Vec::new(),
+                video: Some(movie.clone()),
+                duration_ms: 1_000,
+                video_offset_ms: 0,
+            },
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            windows::ActivityLog::default(),
+            None,
+        )
+        .err()
+        .expect("a movie alone is not a safe screenshot candidate");
+        assert!(error.to_string().contains(&movie.display().to_string()));
+        assert!(movie.exists());
+        assert!(!dir.join("apparent.json").exists());
+        assert!(dir.join(crate::recover::UNSAFE_VIDEO).exists());
+        assert!(!crate::recover::owed(&dir), "a later recovery must not decode unsafe movie frames");
+        assert!(crate::recover::rebuild(&dir, &crate::recover::Media::SYSTEM).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn cli_identifies_as_apparent() {
         assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
+    fn timed_record_help_discloses_missing_interaction_telemetry() {
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let mut help = Vec::new();
+        command.find_subcommand_mut("record").unwrap().write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+        assert!(help.contains("does not collect clicks or Shift ink"), "{help}");
+        assert!(help.contains("app's recording shortcut"), "{help}");
+    }
+
+    #[test]
+    fn video_only_bundle_discloses_telemetry_gap_after_reload() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let dir = root.join("video-only.apparent");
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &dir, target, 1000,
+            vec![RgbaFrame::new(0, 32, 32, vec![128; 32 * 32 * 4])],
+            vec![], vec![], TranscriptData::default(), None, None,
+            SourceExtras {
+                interaction_telemetry: Some(model::InteractionTelemetry::VideoOnly),
+                autocrop: Some(None),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert!(bundle.events.is_empty());
+        assert!(bundle.marks.is_empty());
+        assert!(summary.contains("clicks and Shift ink were not collected"));
+        assert_eq!(std::fs::read_to_string(dir.join("summary.md")).unwrap(), summary);
+        let (_, loaded) = handoff::load_bundle(&dir).unwrap();
+        assert_eq!(loaded.interaction_telemetry, Some(model::InteractionTelemetry::VideoOnly));
+        assert!(sketch::summary_markdown_with(&loaded, &dir, true).contains("clicks and Shift ink were not collected"));
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("apparent.json")).unwrap()).unwrap();
+        assert_eq!(manifest["interactionTelemetry"], "videoOnly");
+        let old: model::ApparentBundle = serde_json::from_value({
+            let mut old = manifest;
+            old.as_object_mut().unwrap().remove("interactionTelemetry");
+            old
+        }).unwrap();
+        assert_eq!(old.interaction_telemetry, None);
+        assert!(!sketch::summary_markdown_with(&old, &dir, false).contains("timed CLI video only"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2556,5 +2680,129 @@ mod tests {
         assert!(regenerated.contains("Image quality: Full-quality keyframes could not be decoded"));
         assert!(regenerated.contains("Note: a later edit"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn decoder_fallback_keeps_moving_target_in_agent_images() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let bundle_dir = root.join("fallback.apparent");
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 480.0, height: 300.0, scale: 1.0 },
+        };
+        let frame = |t, x: usize| {
+            let mut rgba = vec![255; 480 * 300 * 4];
+            for y in 30..110 {
+                for xx in x..x + 80 {
+                    let pixel = (y * 480 + xx) * 4;
+                    rgba[pixel..pixel + 3].copy_from_slice(&[220, 0, 0]);
+                }
+            }
+            RgbaFrame::new(t, 480, 300, rgba)
+        };
+        let frames = vec![frame(0, 20), frame(1_000, 40)];
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &bundle_dir, target, 1_100, frames, vec![], vec![],
+            TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|_| anyhow::bail!("decoder missing"))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                activity: windows::ActivityLog {
+                    cursor: vec![windows::CursorSample(0, 0.9, 0.85), windows::CursorSample(1_100, 0.9, 0.85)],
+                    ..Default::default()
+                },
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(summary.contains("Image quality:"));
+        assert!(!bundle.keyframes.is_empty());
+        assert!(bundle.autocrop.is_none(), "fallback frames must not be cursor-cropped");
+        // The idle pointer is at bottom-right; the moving target is at top-left.
+        for key in &bundle.keyframes {
+            let bytes = std::fs::read(bundle_dir.join(&key.file)).unwrap();
+            let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+            let mut reader = decoder.read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!((info.width, info.height), (480, 300));
+            assert!(pixels[..info.buffer_size()].chunks_exact(4).any(|p| p[0] > 150 && p[1] < 40 && p[2] < 40));
+        }
+        let sheet = std::fs::read(bundle_dir.join("contact-sheet.png")).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(sheet)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert!(pixels[..info.buffer_size()].chunks_exact(4).any(|p| p[0] > 150 && p[1] < 40 && p[2] < 40));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn successful_full_decode_keeps_normal_autocrop() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
+        };
+        let candidate = RgbaFrame::new(0, 320, 200, vec![128; 320 * 200 * 4]);
+        let (_, bundle, _) = build_bundle_from_parts(
+            &root, target, 1_000, vec![candidate], vec![], vec![],
+            TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|times| Ok(times.iter().map(|&t| {
+                    RgbaFrame::new(t, 1280, 800, vec![128; 1280 * 800 * 4])
+                }).collect()))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                activity: windows::ActivityLog {
+                    cursor: vec![windows::CursorSample(0, 0.5, 0.5)],
+                    ..Default::default()
+                },
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(bundle.image_quality_warning.is_none());
+        assert!(bundle.autocrop.is_some(), "normal decode should still autocrop");
+        assert!(root.join("frames-full/frame-01.png").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn partial_full_decode_keeps_both_resolutions_uncropped() {
+        let root = std::env::temp_dir().join(make_bundle_id());
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None, bundle_id: None, window_title: None, window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
+        };
+        let candidate = |t| RgbaFrame::new(t, 480, 300, vec![180; 480 * 300 * 4]);
+        let click = |t| model::InteractionEvent::Click {
+            t, x: 0.1, y: 0.1, button: None, label: None, role: None,
+        };
+        let (_, bundle, summary) = build_bundle_from_parts(
+            &root, target, 10_000, vec![candidate(0), candidate(5_000)],
+            vec![], vec![click(0), click(5_000)], TranscriptData::default(), None, None,
+            SourceExtras {
+                full_frames: Some(Box::new(|times| Ok(vec![RgbaFrame::new(
+                    times[0], 1280, 800, vec![180; 1280 * 800 * 4],
+                )]))),
+                autocrop: Some(Some(autocrop::Settings::default())),
+                ..SourceExtras::default()
+            },
+        ).unwrap();
+        assert!(summary.contains("Image quality:"));
+        assert_eq!(bundle.keyframes.len(), 2, "one decoded and one candidate keyframe");
+        assert!(bundle.autocrop.is_none());
+        let sizes: Vec<_> = bundle.keyframes.iter().map(|key| {
+            let bytes = std::fs::read(root.join(&key.file)).unwrap();
+            let reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+            (reader.info().width, reader.info().height)
+        }).collect();
+        assert!(sizes.contains(&(1280, 800)), "decoded full frame must survive: {sizes:?}");
+        assert!(sizes.contains(&(480, 300)), "fallback candidate must survive: {sizes:?}");
+        assert!(root.join("contact-sheet.png").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

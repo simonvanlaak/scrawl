@@ -16,6 +16,7 @@ on:
         default: false
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -33,7 +34,8 @@ jobs:
           PUBLISH_MAIN: ${{ github.event_name == 'schedule' || inputs.publish_main }}
           TAG: ${{ inputs.tag }}
         run: |
-          if [[ "$PUBLISH_MAIN" == "true" && -z "$TAG" ]] && gh release view "linux-main-$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if [[ "$PUBLISH_MAIN" == "true" && -z "$TAG" ]] && \
+             [[ "$(gh release view "linux-main-$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)" == "false" ]]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -64,7 +66,10 @@ jobs:
           fi
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.sha }}
+      - name: Confirm build identity
+        if: env.TAG == ''
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Install build and packaging dependencies
         run: ./scripts/linux/dependencies.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -145,6 +150,9 @@ jobs:
     needs: linux
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v5
         with:
           pattern: Apparent-*.AppImage
@@ -154,15 +162,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          tag="linux-main-$GITHUB_SHA"
-          # A superseded build must not become the newest published preview.
-          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          if [[ "$head" != "$GITHUB_SHA" ]]; then
-            echo "Main moved to $head; not publishing an older preview"
-            exit 0
-          fi
-          test "$(find dist -name '*.AppImage' | wc -l)" -eq 2
-          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --prerelease --latest=false --title "Linux main ${GITHUB_SHA:0:12}" \
-            --notes "Automatic Linux preview from main; not a stable release."
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          APPARENT_VERSION="$version" python3 scripts/linux/publish-main-preview.py

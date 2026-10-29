@@ -332,14 +332,22 @@ fn offer_image_handoff(
 }
 
 const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
-const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, use the make-it-apparent skill to record a short demonstration with Apparent. Include the recording.mp4 path or video link in your reply, explain what it shows, and note what it does not verify. If the skill is not installed or you cannot record that screen, say so instead of claiming a video exists.";
+const DEMO_VIDEO_REQUEST: &str = "Use make-it-apparent for complex visible changes. Share verified video proof or explain why you can't.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.
 /// Read config on each handoff so file edits take effect without a restart.
 pub(crate) fn clipboard_summary(bundle: &ApparentBundle, directory: &Path) -> String {
+    clipboard_summary_with_demo_video(bundle, directory, experiment(AGENT_DEMO_VIDEO))
+}
+
+fn clipboard_summary_with_demo_video(
+    bundle: &ApparentBundle,
+    directory: &Path,
+    request_video: bool,
+) -> String {
     with_demo_video_request(
         crate::sketch::summary_markdown(bundle, directory),
-        experiment(AGENT_DEMO_VIDEO),
+        request_video,
     )
 }
 
@@ -2805,14 +2813,19 @@ mod tests {
 
     #[test]
     fn demo_video_request_is_only_added_to_enabled_copy_text() {
-        let original = "[apparent 0:03 · Display]\nWhat changed?\n".to_owned();
-        assert_eq!(with_demo_video_request(original.clone(), false), original);
-        let enabled = with_demo_video_request(original.clone(), true);
+        let fixture = Fixture::new();
+        let directory = fixture.bundle("demo-video", 100);
+        let (_, bundle) = load_bundle(&directory).unwrap();
+        let original = clipboard_summary_with_demo_video(&bundle, &directory, false);
+        assert!(original.contains("apparent"));
+        assert!(!original.contains(DEMO_VIDEO_REQUEST));
+        let enabled = clipboard_summary_with_demo_video(&bundle, &directory, true);
         assert!(enabled.starts_with(&original));
-        assert!(enabled.contains("complex change"));
-        assert!(enabled.contains("use the make-it-apparent skill"));
-        assert!(enabled.contains("recording.mp4"));
-        assert!(enabled.contains("If the skill is not installed or you cannot record that screen"));
+        assert!(enabled.contains("complex visible changes"));
+        assert!(enabled.contains("Use make-it-apparent"));
+        assert!(enabled.contains("Share verified video proof"));
+        assert!(enabled.contains("explain why you can't"));
+        assert!(DEMO_VIDEO_REQUEST.len() <= 120);
         assert_eq!(enabled.matches(DEMO_VIDEO_REQUEST).count(), 1);
     }
 

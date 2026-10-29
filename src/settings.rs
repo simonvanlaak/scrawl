@@ -73,6 +73,13 @@ impl Shortcuts {
         if migrated && save_shortcut_in(&path, ShortcutKind::Record, &shortcuts.record).is_ok() {
             let _ = std::fs::remove_file(&legacy);
         }
+        #[cfg(target_os = "linux")]
+        if let Some(record) = crate::linux::hyprland::external_record() {
+            return Self {
+                record,
+                ..shortcuts
+            };
+        }
         shortcuts
     }
 
@@ -740,7 +747,25 @@ pub struct View {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheck {
     pub checking: bool,
-    pub message: Option<String>,
+    pub result: Option<UpdateResult>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateResult {
+    Available,
+    Current,
+    Failed,
+}
+
+impl UpdateResult {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Available => "Update available",
+            Self::Current => "No update available",
+            Self::Failed => "Update check failed",
+        }
+    }
 }
 
 /// The "Command-line tool" row.
@@ -852,6 +877,8 @@ pub struct ShortcutView {
     pub option: bool,
     pub command: bool,
     pub is_default: bool,
+    /// A live system binding owns this chord; change it in the compositor instead.
+    pub externally_managed: bool,
     /// It can be turned off (paste); `label` is empty while it is.
     pub clearable: bool,
     /// The recorder is waiting for a new combination.
@@ -1056,9 +1083,35 @@ fn shortcut_view(
         option: mods & CARBON_OPTION_KEY != 0,
         command: mods & CARBON_CMD_KEY != 0,
         is_default: cfg.is_default_for(kind),
+        externally_managed: external_record_matches(kind, cfg),
         clearable: kind.can_unset(),
         recording,
         error: error.cloned(),
+    }
+}
+
+fn external_record_matches(kind: ShortcutKind, cfg: &ShortcutConfig) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        kind == ShortcutKind::Record
+            && crate::linux::hyprland::external_record().as_ref() == Some(cfg)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (kind, cfg);
+        false
+    }
+}
+
+pub(crate) fn external_record_owned(kind: ShortcutKind) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        kind == ShortcutKind::Record && crate::linux::hyprland::external_record().is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = kind;
+        false
     }
 }
 
@@ -1104,6 +1157,8 @@ pub enum Action {
     ShowCaptures,
     CheckForUpdates,
     DismissUpdateCheck,
+    UpdateNow,
+    UpdateLater,
     /// "Show Welcome Tour" on About.
     Tour,
     /// Link `apparent` into a folder on PATH, or remove that link.
@@ -1123,6 +1178,8 @@ pub enum Effect {
     OpenLoginItems,
     ShowCaptures,
     CheckForUpdates,
+    RelaunchUpdate,
+    QuitForUpdate,
     /// The captures folder may have changed size.
     Measure,
     /// The Apple Speech language changed.
@@ -1180,12 +1237,20 @@ impl Panel {
     #[cfg(target_os = "linux")]
     fn finish_update_check(&mut self, result: Result<&'static str, String>) {
         self.update_check.checking = false;
-        self.update_check.message = Some(match result {
+        self.update_check.result = Some(match result {
+            // The current Linux feed contract checks AND installs. "Available" includes
+            // a newer image already staged for the next launch; this is not discovery-only.
             Ok("installed; restart Apparent to use it") | Ok("already installed; restart Apparent to use it") =>
-                "Update installed. Restart Apparent to use it.".into(),
-            Ok("up to date") => "No new update is available on this channel.".into(),
-            Ok(other) => other.into(),
-            Err(error) => format!("Could not check for updates: {error}"),
+                UpdateResult::Available,
+            Ok("up to date") => UpdateResult::Current,
+            Ok(other) => {
+                crate::capture::apparent_log(format!("Unexpected update check result: {other}"));
+                UpdateResult::Failed
+            }
+            Err(error) => {
+                crate::capture::apparent_log(format!("Could not check for updates: {error}"));
+                UpdateResult::Failed
+            }
         });
     }
 
@@ -1193,6 +1258,9 @@ impl Panel {
         match action {
             Action::Set { key, value } => self.set(&key, &value, host),
             Action::RecordShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.error = None;
                 if self.recording.replace(kind).is_none() {
                     host.pause_shortcuts(true);
@@ -1204,6 +1272,9 @@ impl Panel {
                 Effect::None
             }
             Action::Shortcut { kind, pressed } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 if self.recording != Some(kind) {
                     return Effect::None;
                 }
@@ -1224,12 +1295,18 @@ impl Panel {
                 Effect::None
             }
             Action::ResetShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.stop_recording(host);
                 let mut shortcuts = host.shortcuts();
                 self.apply(kind, kind.default_config(), &mut shortcuts, host);
                 Effect::None
             }
             Action::ClearShortcut { kind } => {
+                if external_record_owned(kind) {
+                    return Effect::None;
+                }
                 self.stop_recording(host);
                 if kind.can_unset() {
                     let mut shortcuts = host.shortcuts();
@@ -1251,13 +1328,24 @@ impl Panel {
                     return Effect::None;
                 }
                 if cfg!(target_os = "linux") {
-                    self.update_check = UpdateCheck { checking: true, message: None };
+                    self.update_check = UpdateCheck { checking: true, result: None };
                 }
                 Effect::CheckForUpdates
             }
             Action::DismissUpdateCheck => {
-                self.update_check.message = None;
+                self.update_check.result = None;
                 Effect::None
+            }
+            Action::UpdateLater => {
+                self.update_check.result = None;
+                Effect::None
+            }
+            Action::UpdateNow => {
+                if cfg!(target_os = "linux") && self.update_check.result == Some(UpdateResult::Available) {
+                    Effect::RelaunchUpdate
+                } else {
+                    Effect::None
+                }
             }
             Action::Tour => Effect::Tour,
             Action::InstallCli => {
@@ -1757,7 +1845,7 @@ impl Session {
         if let Some(serde_json::Value::String(pane)) = pane.map(serde_json::to_value).transpose()? {
             command.args(["--pane", &pane]);
         }
-        let dev_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/app-icon.png");
+        let dev_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/brand/apparent-a.png");
         if Path::new(dev_icon).is_file() {
             command.args(["--icon", dev_icon]);
         }
@@ -1854,6 +1942,19 @@ impl Session {
                 }
                 #[cfg(not(target_os = "linux"))]
                 check_for_updates();
+                Effect::None
+            }
+            Effect::RelaunchUpdate => {
+                #[cfg(target_os = "linux")]
+                {
+                    match crate::linux::update::relaunch_staged() {
+                        Ok(()) => return Effect::QuitForUpdate,
+                        Err(error) => {
+                            crate::capture::apparent_log(format!("Could not relaunch updated AppImage: {error:#}"));
+                            self.panel.update_check.result = Some(UpdateResult::Failed);
+                        }
+                    }
+                }
                 Effect::None
             }
             Effect::Measure => {
@@ -2044,26 +2145,50 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn manual_update_check_shows_progress_immediately() {
-        let dir = TempDir::new("update-progress");
+    fn available_update_accepts_now_and_later_actions() {
+        let dir = TempDir::new("update-choices");
         let mut host = fake(&dir);
         let mut panel = Panel::default();
-        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
-        let view = serde_json::to_value(panel.view(&host)).unwrap();
-        assert_eq!(view["updateCheck"]["checking"], true, "a click must have visible in-progress state");
-        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None, "do not start two checks");
-        panel.finish_update_check(Ok("up to date"));
-        let view = serde_json::to_value(panel.view(&host)).unwrap();
-        assert_eq!(view["updateCheck"]["checking"], false);
-        assert_eq!(view["updateCheck"]["message"], "No new update is available on this channel.");
-        panel.on(Action::DismissUpdateCheck, &mut host);
-        assert!(panel.view(&host).update_check.message.is_none());
-        panel.on(Action::CheckForUpdates, &mut host);
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
+        panel.finish_update_check(Ok("installed; restart Apparent to use it"));
+        assert_eq!(panel.on(serde_json::from_str("{\"action\":\"update-later\"}").unwrap(), &mut host), Effect::None);
+        assert!(panel.view(&host).update_check.result.is_none());
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
         panel.finish_update_check(Ok("already installed; restart Apparent to use it"));
-        assert!(panel.view(&host).update_check.message.unwrap().contains("Restart"));
-        panel.on(Action::CheckForUpdates, &mut host);
-        panel.finish_update_check(Err("feed unavailable".into()));
-        assert!(panel.view(&host).update_check.message.unwrap().contains("feed unavailable"));
+        assert_eq!(panel.on(serde_json::from_str("{\"action\":\"update-now\"}").unwrap(), &mut host), Effect::RelaunchUpdate);
+        panel.finish_update_check(Err("network failure".into()));
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn manual_update_check_serializes_distinct_results_and_preserves_progress() {
+        let dir = TempDir::new("update-results");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        for (response, expected) in [
+            (Ok("up to date"), "current"),
+            (Ok("installed; restart Apparent to use it"), "available"),
+            (Ok("already installed; restart Apparent to use it"), "available"),
+            (Err("feed unavailable: private diagnostic".into()), "failed"),
+            (Ok("unrecognized worker response"), "failed"),
+        ] {
+            assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
+            let progress = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(progress["updateCheck"]["checking"], true);
+            assert!(progress["updateCheck"]["result"].is_null());
+            assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None);
+            panel.finish_update_check(response);
+            let finished = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(finished["updateCheck"], serde_json::json!({
+                "checking": false, "result": expected
+            }), "the public result must identify the outcome without diagnostics or extra copy");
+            assert_eq!(panel.on(Action::DismissUpdateCheck, &mut host), Effect::None);
+            let dismissed = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(dismissed["updateCheck"], serde_json::json!({
+                "checking": false, "result": null
+            }));
+        }
     }
 
     #[test]
@@ -2314,6 +2439,27 @@ mod tests {
         .unwrap();
         assert!(read_json(&path)["shortcuts"].get("record").is_none());
         assert_eq!(read_json(&path)["ingestToken"], "secret");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn copilot_record_shortcut_from_config_is_the_only_record_shortcut_in_settings() {
+        let dir = TempDir::new("copilot-record");
+        let mut host = fake(&dir);
+        let cfg = ShortcutConfig {
+            key_code: 201,
+            carbon_modifiers: CARBON_CMD_KEY | CARBON_SHIFT_KEY,
+            label: "Super+Shift+Copilot".into(),
+        };
+        save_shortcut_in(&host.path, ShortcutKind::Record, &cfg).unwrap();
+        host.shortcuts = Shortcuts::load_from(&host.path, &dir.0.join("legacy.json")).0;
+        let view = Panel::default().view(&host);
+        let record: Vec<_> = view.shortcuts.iter().filter(|s| s.kind == ShortcutKind::Record).collect();
+        assert_eq!(record.len(), 1);
+        assert_eq!(record[0].label, "Super+Shift+Copilot");
+        assert_eq!(record[0].key, "Copilot");
+        assert!(record[0].command && record[0].shift);
+        assert!(!record[0].is_default);
     }
 
     #[test]

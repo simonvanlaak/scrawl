@@ -95,8 +95,84 @@ pub(super) fn hud_pill_origin(display: gpui::Bounds<gpui::Pixels>) -> gpui::Poin
     )
 }
 
-/// The GPUI pill (`APPARENT_NATIVE_PILL=0`) stays where it opened on macOS.
-pub(super) fn place_hud_pill(_point: [f64; 2]) {}
+struct RecordingPillDrag {
+    window_number: isize,
+    panel: crate::screens::Rect,
+    pointer_down: [f64; 2],
+    display: crate::screens::Screen,
+}
+
+// The GPUI fallback shares the native renderer's recording-only grab policy.
+// Keep window objects out of the static; AppKit windows are main-thread-only.
+static RECORDING_PILL_DRAG: std::sync::Mutex<Option<RecordingPillDrag>> =
+    std::sync::Mutex::new(None);
+
+fn top_left_pointer(primary_height: f64) -> Option<[f64; 2]> {
+    let cls = objc2::runtime::AnyClass::get(c"NSEvent")?;
+    let pt: objc2_foundation::NSPoint = unsafe { msg_send![cls, mouseLocation] };
+    Some([pt.x, primary_height - pt.y])
+}
+
+fn primary_height() -> Option<f64> {
+    let mtm = MainThreadMarker::new()?;
+    Some(objc2_app_kit::NSScreen::screens(mtm).firstObject()?.frame().size.height)
+}
+
+pub(super) fn place_hud_pill(point: [f64; 2]) {
+    let Some(win) = find_hud_pill_ns_window() else { return };
+    let screens = crate::screens::current();
+    let Some(screen) = crate::screens::index_at(&screens, point).map(|i| &screens[i]) else {
+        return;
+    };
+    let [x, y] = crate::screens::pill_origin(screen, f64::from(PILL_WINDOW_W), f64::from(PILL_TOP));
+    move_window_to_screen(&win, [x, y, f64::from(PILL_WINDOW_W), f64::from(PILL_WINDOW_H)]);
+}
+
+pub(super) fn begin_pill_drag() {
+    if !crate::handoff::experiment("movableRecordingControls") { return; }
+    let (Some(win), Some(height)) = (find_hud_pill_ns_window(), primary_height()) else {
+        return;
+    };
+    let frame = win.frame();
+    let panel = [frame.origin.x, height - frame.origin.y - frame.size.height,
+        frame.size.width, frame.size.height];
+    let screens = crate::screens::current();
+    let centre = [panel[0] + panel[2] / 2.0, panel[1] + panel[3] / 2.0];
+    let Some(display) = crate::screens::index_at(&screens, centre).map(|i| screens[i]) else {
+        return;
+    };
+    let Some(pointer_down) = top_left_pointer(height) else { return };
+    *RECORDING_PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(RecordingPillDrag {
+            window_number: win.windowNumber(), panel, pointer_down, display,
+        });
+}
+
+pub(super) fn tick_pill_drag() {
+    let mut drag = RECORDING_PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(state) = drag.as_ref() else { return };
+    let Some(cls) = objc2::runtime::AnyClass::get(c"NSEvent") else { return };
+    let pressed: usize = unsafe { msg_send![cls, pressedMouseButtons] };
+    if pressed & 1 == 0 {
+        *drag = None;
+        return;
+    }
+    let (Some(height), Some(win)) = (primary_height(), find_hud_pill_ns_window()) else {
+        *drag = None;
+        return;
+    };
+    if win.windowNumber() != state.window_number {
+        *drag = None;
+        return;
+    }
+    let Some(pointer) = top_left_pointer(height) else { return };
+    let [x, y] = crate::screens::drag_pill_origin(&state.display, state.panel, state.pointer_down, pointer);
+    move_window_to_screen(&win, [x, y, state.panel[2], state.panel[3]]);
+}
+
+pub(super) fn cancel_pill_drag() {
+    *RECORDING_PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
 
 /// Dragging a region moves its window.
 pub(super) fn window_drag_region(region: Div) -> Div {
@@ -178,6 +254,9 @@ pub(super) fn take_keys(cx: &mut App) {
     cx.activate(true);
 }
 
+/// A normal titled AppKit window is already movable and resizable.
+pub(super) fn float_whiteboard(_cx: &mut App) {}
+
 /// Run (deferred) after any window closes: once neither a picker nor a review window is left,
 /// the app that was in front before gets the keys back. `NSApp.deactivate()` isn't enough: a
 /// menu bar (accessory) app stays frontmost with no windows, and keys go nowhere. Deferred, a
@@ -241,6 +320,11 @@ pub(super) fn configure_picker_window(
         ns_win.makeKeyAndOrderFront(None);
     }
     let num = ns_win.windowNumber().max(0) as u32;
+    (num > 0).then_some(num)
+}
+
+pub(super) fn picker_window_number() -> Option<u32> {
+    let num = find_picker_ns_window()?.windowNumber().max(0) as u32;
     (num > 0).then_some(num)
 }
 
@@ -413,6 +497,11 @@ objc2::define_class!(
             let _ = self.ivars().sender.try_send(MenuAction::ChooseTarget);
         }
 
+        #[unsafe(method(giveFeedback:))]
+        fn give_feedback(&self, _sender: &AnyObject) {
+            let _ = self.ivars().sender.try_send(MenuAction::GiveFeedback);
+        }
+
         #[unsafe(method(openLatest:))]
         fn open_latest(&self, _sender: &AnyObject) {
             let _ = self.ivars().sender.try_send(MenuAction::OpenLatest);
@@ -460,6 +549,9 @@ objc2::define_class!(
             if let Some(item) = menu.itemWithTag(EXPORT_VIDEO_MENU_TAG) {
                 item.setHidden(!crate::handoff::video_export());
             }
+            if let Some(item) = menu.itemWithTag(FEEDBACK_MENU_TAG) {
+                item.setHidden(!crate::handoff::experiment("feedbackIssue"));
+            }
         }
     }
 );
@@ -470,6 +562,7 @@ const INBOX_MENU_TAG: isize = 0x5c4a;
 const EXPORT_VIDEO_MENU_TAG: isize = 0x5c4e;
 /// Tag on **Record Screen**, whose title carries the record shortcut.
 const RECORD_MENU_TAG: isize = 0x5c4d;
+const FEEDBACK_MENU_TAG: isize = 0x5c4f;
 
 /// "Record Screen" with the record shortcut as it is now (Settings can change it).
 fn record_menu_title() -> String {
@@ -622,6 +715,11 @@ pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
         item.setTag(RECORD_MENU_TAG);
     }
     add("Choose What to Record…", sel!(chooseTarget:));
+    add("Give Feedback…", sel!(giveFeedback:));
+    if let Some(item) = menu.itemAtIndex(menu.numberOfItems() - 1) {
+        item.setTag(FEEDBACK_MENU_TAG);
+        item.setHidden(!crate::handoff::experiment("feedbackIssue"));
+    }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     add("Open Latest Capture", sel!(openLatest:));
     add("Export Last Capture as Video…", sel!(exportVideo:));
@@ -710,6 +808,9 @@ fn find_picker_ns_window() -> Option<Retained<NSWindow>> {
     let app = NSApplication::sharedApplication(mtm);
     for win in app.windows() {
         if win.ignoresMouseEvents() {
+            continue;
+        }
+        if win.title().to_string() == "Apparent Whiteboard" {
             continue;
         }
         let size = win.frame().size;

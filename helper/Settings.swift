@@ -1153,6 +1153,26 @@ struct SettingsView: View {
       if !state.updates {
         SettingsCaption(text: "Updates work in the installed Apparent.app.")
       }
+      Color.clear.frame(height: 14)
+      SettingsGroup {
+        VStack(alignment: .leading, spacing: 0) {
+          Text("Enjoying Apparent?")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(theme.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 11)
+          SettingsRow(title: "Support the project") {
+            SettingsButton(title: "Star on GitHub") {
+              NSWorkspace.shared.open(URL(string: "https://github.com/tryapparent/apparent")!)
+            }
+          }
+          Text("A GitHub star won’t fix your bugs, but it will make our day.")
+            .font(.system(size: 12))
+            .foregroundStyle(theme.secondary)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 11)
+        }
+      }
       SettingsHeader("Links")
       SettingsGroup {
         link("Website", "app.tryapparent.com", "https://app.tryapparent.com")
@@ -1331,7 +1351,9 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
       CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
     }
     let pane = option("--pane", in: arguments).flatMap(SettingsPane.init(rawValue:)) ?? .general
-    let model = SettingsModel(pane: pane, icon: Onboarding.loadIcon(option("--icon", in: arguments)))
+    let icon = option("--icon", in: arguments).flatMap(NSImage.init(contentsOfFile:))
+      ?? Bundle.main.url(forResource: "apparent-a", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+    let model = SettingsModel(pane: pane, icon: icon)
     if let dir = option("--render", in: arguments) {
       MainActor.assumeIsolated {
         if arguments.contains("--shortcut-clip") {

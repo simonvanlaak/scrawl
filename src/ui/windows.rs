@@ -123,6 +123,9 @@ pub(super) fn move_picker_window(frame: [f64; 4], cx: &mut App) {
 /// The picker takes the keys itself (`configure_picker_window`); the review window opens in front.
 pub(super) fn take_keys(_cx: &mut App) {}
 
+/// A normal titled Win32 window already has native move and resize controls.
+pub(super) fn float_whiteboard(_cx: &mut App) {}
+
 /// Windows activates the window below when Apparent's closes.
 pub(super) fn hand_back_keys(_cx: &mut App) {}
 

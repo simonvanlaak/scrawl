@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-#[cfg(target_os = "linux")]
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
@@ -18,7 +17,6 @@ use gpui::{
 #[cfg_attr(target_os = "windows", path = "ui/windows.rs")]
 #[cfg_attr(target_os = "linux", path = "ui/linux.rs")]
 mod platform;
-#[cfg(target_os = "linux")]
 mod whiteboard;
 #[cfg(target_os = "linux")]
 pub(crate) use platform::set_app_icon;
@@ -348,7 +346,7 @@ fn recording_trail_widths(window: &Window, chips: bool, iphone: bool) -> Vec<f32
 }
 
 fn whiteboard_enabled() -> bool {
-    cfg!(target_os = "linux")
+    true
 }
 
 /// Trace names for a Recording capsule's trailing group, with each item's opacity.
@@ -510,6 +508,7 @@ fn island_content_width(
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum MenuAction {
     ToggleCapture,
+    GiveFeedback,
     ChooseTarget,
     OpenLatest,
     OpenInbox(PathBuf),
@@ -519,9 +518,35 @@ enum MenuAction {
     Quit,
 }
 
+/// A public issue form, never a URL containing a capture, transcript or local path.
+fn feedback_issue_url() -> String {
+    "https://github.com/tryapparent/apparent/issues/new?template=bug_report.yml".into()
+}
+
 /// Text beside the menu bar icon while a video export runs (`None` goes back to the inbox count).
 static EXPORT_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Remains visible beside the menu icon until the next recording; a failed capture has no paper tile.
+static CAPTURE_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static EXPORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn status_bar_text(export: Option<String>, capture: Option<String>) -> Option<String> {
+    export.or(capture)
+}
+
+fn current_status_bar_text() -> Option<String> {
+    status_bar_text(
+        EXPORT_STATUS.lock().ok().and_then(|status| status.clone()),
+        CAPTURE_STATUS.lock().ok().and_then(|status| status.clone()),
+    )
+}
+
+fn refresh_status_bar(inbox_count: usize) {
+    if let Some(text) = current_status_bar_text() {
+        set_status_text(&text);
+    } else {
+        set_status_inbox_count(inbox_count);
+    }
+}
 
 /// Exports the newest bundle to `~/Movies/Apparent/<name>.mp4` off the main thread, reporting
 /// through `EXPORT_STATUS`, then reveals the file in Finder.
@@ -758,7 +783,6 @@ impl ActiveRecording {
 /// Shared coordinator owned by the GPUI app.
 pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
-    #[cfg(target_os = "linux")]
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
     last_live_no_words: bool,
@@ -819,6 +843,8 @@ pub struct ApparentCoordinator {
     /// Read the WAV once when selecting a bundle, never on the capsule's animation tick.
     review_audio_issue: Option<CompletedAudioIssue>,
     review_status: Option<String>,
+    feedback_capture: bool,
+    review_feedback: bool,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
     /// A cabled iPhone, refreshed each time the picker opens.
@@ -866,7 +892,6 @@ impl ApparentCoordinator {
         crate::playback::warm_up();
         Self {
             telemetry,
-            #[cfg(target_os = "linux")]
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
             last_live_no_words: false,
@@ -913,6 +938,8 @@ impl ApparentCoordinator {
                 .and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
+            feedback_capture: false,
+            review_feedback: false,
             selected_tab: ReviewTab::Keyframes,
             selected_keyframe: 0,
             iphone: None,
@@ -943,7 +970,7 @@ impl ApparentCoordinator {
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
     fn mark_handled(&mut self, dir: &std::path::Path) {
         if self.inbox.remove(dir) {
-            set_status_inbox_count(self.inbox.len());
+            refresh_status_bar(self.inbox.len());
         }
     }
 
@@ -1092,6 +1119,10 @@ impl ApparentCoordinator {
             Effect::Relaunch => {
                 self.settings = None;
                 crate::onboarding::relaunch();
+                cx.quit();
+            }
+            Effect::QuitForUpdate => {
+                self.settings = None;
                 cx.quit();
             }
             _ => {}
@@ -1330,8 +1361,18 @@ impl ApparentCoordinator {
         }
     }
 
+    /// The feedback entry point records immediately, then opens a local review.
+    pub fn record_feedback(&mut self, cx: &mut Context<Self>) {
+        if self.is_recording() || self.is_selecting() || self.is_processing() {
+            return;
+        }
+        self.record_screen_now(cx);
+        self.feedback_capture = self.is_recording();
+    }
+
     /// Records the display under the cursor straight away (no picker), auto-cropped.
     pub fn record_screen_now(&mut self, cx: &mut Context<Self>) {
+        self.feedback_capture = false;
         let target = if self.lab {
             lab::target()
         } else {
@@ -1477,6 +1518,7 @@ impl ApparentCoordinator {
         self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
+        self.review_feedback = false;
         self.selected_tab = ReviewTab::Keyframes;
         self.selected_keyframe = 0;
     }
@@ -1963,13 +2005,10 @@ impl ApparentCoordinator {
         }
         match crate::native::pill::NativePill::open() {
             Ok(pill) => {
-                let num = pill.window_number();
-                if num > 0 {
-                    self.telemetry
-                        .excluded_window_ids
-                        .lock()
+                if !crate::handoff::experiment("movableRecordingControls") {
+                    self.telemetry.excluded_window_ids.lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(num);
+                        .push(pill.window_number());
                 }
                 self.native_pill = Some(pill);
             }
@@ -2063,6 +2102,10 @@ impl ApparentCoordinator {
             PillAction::SwitchRecording(mode) => self.switch_recording(mode, cx),
             PillAction::RecordSelected => self.record_selected_mode(cx),
             PillAction::Cancel => self.cancel_recording(cx),
+            PillAction::Whiteboard => {
+                let coord = cx.entity().clone();
+                cx.defer(move |cx| whiteboard::open(&coord, cx));
+            }
             PillAction::Finish => self.finish_recording(cx),
             PillAction::Paste(target) => self.paste_completed_bundle(target, cx),
             PillAction::Inspect => self.inspect_completed_bundle(cx),
@@ -2151,6 +2194,10 @@ impl ApparentCoordinator {
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
     pub fn island_tick(&mut self, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if matches!(self.island_phase, IslandPhase::Recording) {
+            platform::tick_pill_drag();
+        }
         let live_no_words = self.recording_has_no_words();
         if live_no_words != self.last_live_no_words {
             self.last_live_no_words = live_no_words;
@@ -2315,6 +2362,7 @@ impl ApparentCoordinator {
     /// The menu bar's picker, opening on the mode the last recording used.
     pub fn begin_target_selection(&mut self, cx: &mut Context<Self>) {
         if self.ready_to_record() {
+            self.feedback_capture = false;
             self.open_picker(None, cx);
         }
     }
@@ -2478,9 +2526,11 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
-        #[cfg(target_os = "linux")]
-        self.whiteboard.borrow_mut().clear();
+        whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
+        }
         let started = Instant::now();
         apparent_log(format!(
             "start_recording_with_target invoked: mode={:?} frame={:?}",
@@ -2505,11 +2555,26 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
-        let _ = std::fs::create_dir_all(&bundle_dir);
+        if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
+            apparent_log(format!("Capture could not protect raw video: {error:#}"));
+            self.cancel_recording(cx);
+            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                *status = Some("Capture failed — could not protect raw video".into());
+            }
+            return;
+        }
         let video_path = bundle_dir.join("recording.mp4");
 
         self.telemetry.set_capture_mode(target.mode);
         self.telemetry.reset_for_session(target.frame);
+        // The picker stays open until present_recording_island defers its close.
+        // Keep it out of the first ScreenCaptureKit frames after the session reset.
+        #[cfg(target_os = "macos")]
+        restore_picker_exclusion(
+            &mut self.telemetry.excluded_window_ids.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            platform::picker_window_number(),
+        );
         let stage = Instant::now();
         // Reuse the continuous 120Hz Metal overlay opened in `begin_target_selection` so the
         // cutout and border never swap windows or jump a single pixel when recording starts.
@@ -2524,8 +2589,25 @@ impl ApparentCoordinator {
         if let Some(ref pill) = self.native_pill {
             pill.place_on([f.x + f.width / 2.0, f.y + f.height / 2.0]);
         }
+        #[cfg(target_os = "macos")]
+        {
+            platform::cancel_pill_drag();
+            if self.native_pill.is_none() {
+                platform::place_hud_pill([f.x + f.width / 2.0, f.y + f.height / 2.0]);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            platform::cancel_pill_drag();
+            platform::place_hud_pill([f.x + f.width / 2.0, f.y + f.height / 2.0]);
+        }
         let metal_overlay = self.picker_metal_overlay.take().map(|mut overlay| {
             overlay.move_to(target_rect);
+            // reset_for_session cleared the picker's exclusion. Reusing its window
+            // must not turn the ink layer into captured screen content on macOS.
+            self.telemetry.excluded_window_ids.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(overlay.window_number());
             overlay
         });
         let metal_overlay = metal_overlay.or_else(|| {
@@ -2608,6 +2690,7 @@ impl ApparentCoordinator {
     /// `apparent lab pill`: a pretend recording with no capture, microphone, files or overlay, so
     /// the capsule goes through exactly the states a real one does.
     fn start_lab_recording(&mut self, target: TargetInfo, cx: &mut Context<Self>) {
+        whiteboard::reset_for_capture(&self.whiteboard);
         if let IslandPhase::Selecting { mode } = self.island_phase {
             motion::trace_event(format!("record:{}", mode.label()));
         }
@@ -2632,6 +2715,9 @@ impl ApparentCoordinator {
         if self.is_recording() || self.is_processing() {
             return;
         }
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
+        }
         apparent_log("start_recording_iphone invoked");
         if self.lab {
             self.start_lab_recording(crate::phone::phone_target("iPhone", None, None, 0, 0), cx);
@@ -2641,6 +2727,7 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
+        whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         self.remember_mode(SelectionMode::Iphone);
         self.recording_shortcut_key = false;
@@ -2748,7 +2835,9 @@ impl ApparentCoordinator {
     pub fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.playback.take();
         apparent_log("cancel_recording invoked");
+        self.feedback_capture = false;
         self.discard_recording();
+        cx.defer(whiteboard::close);
         self.dismiss_island(cx);
     }
 
@@ -2758,11 +2847,13 @@ impl ApparentCoordinator {
         let Some(rec) = self.active_recording.take() else {
             return;
         };
+        let feedback_capture = std::mem::take(&mut self.feedback_capture);
         #[cfg(target_os = "linux")]
         let auto_active = crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
             && crate::linux::hyprland::running()
             && crate::linux::wayland_session()
             && !self.lab
+            && !feedback_capture
             && matches!(&rec.source, CaptureSource::Screen { .. });
         #[cfg(not(target_os = "linux"))]
         let auto_active = false;
@@ -2778,6 +2869,7 @@ impl ApparentCoordinator {
         self.completed_note = None;
         cx.notify();
         if matches!(source, CaptureSource::Lab) {
+            cx.defer(whiteboard::close);
             let duration_ms = rec.started.elapsed().as_millis() as u64;
             let wait = Duration::from_secs_f32(lab::PROCESSING_S / motion::time_scale());
             cx.spawn(async move |entity, cx| {
@@ -2796,10 +2888,7 @@ impl ApparentCoordinator {
             return;
         }
 
-        let screen = matches!(source, CaptureSource::Screen { .. });
-        #[cfg(target_os = "linux")]
-        let final_whiteboard =
-            screen.then(|| whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx)));
+        let final_whiteboard = whiteboard::finish_snapshot(&self.whiteboard, || whiteboard::close(cx));
 
         cx.spawn(async move |entity, cx| {
             let result = cx
@@ -2820,6 +2909,11 @@ impl ApparentCoordinator {
                                     strokes,
                                     None,
                                 )
+                            }).map(|(dir, bundle, summary)| {
+                                let (bundle, summary) = whiteboard::finish_handoff(
+                                    &dir, bundle, summary, &final_whiteboard,
+                                );
+                                (dir, bundle, summary)
                             });
                             if let Err(error) = &finalized {
                                 apparent_log(format!("iPhone capture failed: {error:#}"));
@@ -2859,13 +2953,12 @@ impl ApparentCoordinator {
                         recorded_audio,
                         None,
                         activity,
+                        None,
                     )
                     .map(|(dir, bundle, summary)| {
-                        #[cfg(target_os = "linux")]
-                        let (bundle, summary) = match &final_whiteboard {
-                            Some(board) => whiteboard::finish_handoff(&dir, bundle, summary, board),
-                            None => (bundle, summary),
-                        };
+                        let (bundle, summary) = whiteboard::finish_handoff(
+                            &dir, bundle, summary, &final_whiteboard,
+                        );
                         (dir, bundle, summary)
                     });
                     (finalized, duration_ms)
@@ -2882,12 +2975,22 @@ impl ApparentCoordinator {
                             apparent_log(format!("Capture failed: {error:#}"));
                             #[cfg(target_os = "linux")]
                             crate::linux::shell::notify("Capture failed", &error.to_string());
+                            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                                *status = Some(if error.to_string().starts_with("No screen frames were captured") {
+                                    "Capture failed — no screen frames".into()
+                                } else {
+                                    "Capture failed".into()
+                                });
+                            }
                             coord.set_island_phase(IslandPhase::Dismissing);
                             cx.notify();
                             return;
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                        *status = None;
+                    }
                     #[cfg(target_os = "linux")]
                     if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
                         if summary.contains("Image quality: ") {
@@ -2897,10 +3000,11 @@ impl ApparentCoordinator {
                             );
                         }
                     }
-                    // Leave the summary for manual Ctrl+V even if automatic paste fails.
-                    let clipboard_ready = crate::handoff::copy_bundle_to_clipboard(&dir)
-                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
-                        .is_ok();
+                    // Feedback stays local until the user explicitly copies or attaches it.
+                    let clipboard_ready = !feedback_capture
+                        && crate::handoff::copy_bundle_to_clipboard(&dir)
+                            .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                            .is_ok();
                     #[cfg(target_os = "linux")]
                     if auto_active && clipboard_ready {
                         let handoff_dir = dir.clone();
@@ -2918,12 +3022,27 @@ impl ApparentCoordinator {
                     }
                     coord.completed_dir = Some(dir.clone());
                     coord.last_local_capture_ms = crate::now_epoch_ms();
-                    if auto_active {
+                    if feedback_capture {
+                        // No automatic clipboard write: the completed pill must not claim
+                        // that this private capture was copied.
+                        coord.completed_note = Some("Saved · review".into());
+                    } else if auto_active {
                         // A dispatched shortcut is not proof that the editor accepted either
                         // paste. Keep the paper tile and give the user the final say.
                         coord.completed_note = Some("Saved · check draft".into());
                     }
                     coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
+                    if feedback_capture {
+                        coord.review_feedback = true;
+                        coord.review_status = Some("Review before sharing publicly. Nothing is uploaded automatically.".into());
+                        let entity = entity.clone();
+                        cx.defer(move |cx| {
+                            close_capture_windows(cx);
+                            if let Some(entity) = entity.upgrade() {
+                                open_review_window(&entity, cx);
+                            }
+                        });
+                    }
                     coord.set_island_phase(IslandPhase::Completed {
                         finished_at: Instant::now(),
                         frame_count,
@@ -3482,6 +3601,11 @@ impl Render for HudPillWindow {
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 );
+                let lead = island_lead_base();
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                let lead = lead.on_mouse_down(MouseButton::Left, |_, _, _| {
+                    platform::begin_pill_drag();
+                });
                 traced(
                     row,
                     vec![
@@ -3491,7 +3615,7 @@ impl Render for HudPillWindow {
                     ],
                 )
                 .child(
-                    island_lead()
+                    lead
                         .child(
                             div()
                                 .size(px(CHIP_H))
@@ -3830,7 +3954,6 @@ impl HudPillWindow {
                     })
                 }),
         );
-        #[cfg(target_os = "linux")]
         let group = group.when(whiteboard_enabled(), |group| {
             let c_board = self.coordinator.clone();
             group.child(
@@ -3859,13 +3982,16 @@ impl HudPillWindow {
 /// Leading status cluster: a 32px slot concentric with the capsule's left cap, then text.
 /// Also acts as the drag handle for the floating island.
 fn island_lead() -> Div {
+    island_lead_base().map(platform::window_drag_region)
+}
+
+fn island_lead_base() -> Div {
     div()
         .flex()
         .flex_none()
         .items_center()
         .pr(px(LEAD_TRAIL))
         .whitespace_nowrap()
-        .map(platform::window_drag_region)
 }
 
 fn island_divider(theme: PillTheme) -> Div {
@@ -4399,9 +4525,13 @@ fn review_neighbor<'a>(
     }
 }
 
-fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<String> {
+fn review_notice(
+    history_error: Option<&str>,
+    status: Option<&str>,
+    feedback: bool,
+) -> Option<String> {
     status
-        .filter(|message| message.starts_with("Could not open capture:"))
+        .filter(|message| feedback || message.starts_with("Could not open capture:"))
         .map(str::to_owned)
         .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
 }
@@ -4568,6 +4698,7 @@ impl Render for BundleReviewWindow {
         let state = coord_read.review_bundle.clone();
         let audio_issue = coord_read.review_audio_issue;
         let status = coord_read.review_status.clone();
+        let feedback = coord_read.review_feedback;
         let tab = coord_read.selected_tab;
         let selected_kf = coord_read.selected_keyframe;
         let shortcut_label = coord_read.shortcut_label();
@@ -4693,7 +4824,8 @@ impl Render for BundleReviewWindow {
             .iter()
             .map(|kf| kf.said.as_deref())
             .collect::<Vec<_>>();
-        let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
+        let review_notice =
+            review_notice(self.history_error.as_deref(), status.as_deref(), feedback);
         let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
         let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
         let missing_reason = if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) {
@@ -4725,7 +4857,10 @@ impl Render for BundleReviewWindow {
 
         let c_keydown = self.coordinator.clone();
         let c_shortcut = self.coordinator.clone();
+        let external_shortcut =
+            crate::settings::external_record_owned(crate::capture::ShortcutKind::Record);
         let c_copy = self.coordinator.clone();
+        let c_feedback = self.coordinator.clone();
         let c_send = self.coordinator.clone();
         let c_tab_sheet = self.coordinator.clone();
         let c_tab_frames = self.coordinator.clone();
@@ -4907,7 +5042,20 @@ impl Render for BundleReviewWindow {
                                         cx.notify();
                                     });
                                 }),
-                            ),
+                            )
+                            .when(feedback, |actions| actions.child(
+                                action_button("btn-github-issue", "Open GitHub issue…", false)
+                                    .on_click(move |_, _, cx| {
+                                        let result = crate::handoff::open_path(std::path::Path::new(&feedback_issue_url()));
+                                        c_feedback.update(cx, |coord, cx| {
+                                            coord.review_status = Some(match result {
+                                                Ok(()) => "Asked your browser to open GitHub. Attach only media you choose to share.".into(),
+                                                Err(error) => format!("Could not open GitHub: {error}"),
+                                            });
+                                            cx.notify();
+                                        });
+                                    }),
+                            )),
                     )
                     .children(platform::caption_buttons()),
             )
@@ -4959,16 +5107,16 @@ impl Render for BundleReviewWindow {
                             .child(
                                 hint_button(
                                     "btn-shortcut",
-                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    if external_shortcut { "Managed in Hyprland" } else if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
                                     (!recording_shortcut && !compact).then_some(shortcut_label),
                                     false,
                                 )
-                                .on_click(move |_, _, cx| {
+                                .when(!external_shortcut, |button| button.on_click(move |_, _, cx| {
                                     c_shortcut.update(cx, |coord, cx| {
                                         coord.recording_shortcut_key = !coord.recording_shortcut_key;
                                         cx.notify();
                                     });
-                                }),
+                                })),
                             )
                             .child(
                                 action_button(
@@ -5369,6 +5517,15 @@ fn hint_button(
         })
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn restore_picker_exclusion(ids: &mut Vec<u32>, picker: Option<u32>) {
+    if let Some(id) = picker.filter(|id| *id > 0)
+        && !ids.contains(&id)
+    {
+        ids.push(id);
+    }
+}
+
 fn open_picker_windows(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) {
     close_picker_window(cx);
     let screen = coord_entity.read(cx).display_rect;
@@ -5464,16 +5621,22 @@ fn ensure_hud_pill_open(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App
     restack_soon(cx);
     for handle in cx.windows() {
         if let Some(pill) = handle.downcast::<HudPillWindow>() {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             let telemetry = Arc::clone(&coord_entity.read(cx).telemetry);
             let _ = pill.update(cx, |view, _, cx| {
                 view.chrome.raise();
-                // A new session cleared the excluded windows; the open pill is still on screen.
+                // Linux's exclusion is candidate-only; Mac includes the pill in this experiment.
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 if let Some(num) = view.chrome.window_number() {
+                    #[cfg(target_os = "macos")]
+                    let exclude = !crate::handoff::experiment("movableRecordingControls");
+                    #[cfg(target_os = "linux")]
+                    let exclude = true;
                     let mut ids = telemetry
                         .excluded_window_ids
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if !ids.contains(&num) {
+                    if exclude && !ids.contains(&num) {
                         ids.push(num);
                     }
                 }
@@ -5527,14 +5690,17 @@ fn ensure_hud_pill_open(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App
         },
         move |window, cx| {
             let chrome = PillChrome::open(window, cx);
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             if let Some(num) = chrome.window_number() {
-                pill_coord
-                    .read(cx)
-                    .telemetry
-                    .excluded_window_ids
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(num);
+                #[cfg(target_os = "macos")]
+                let exclude = !crate::handoff::experiment("movableRecordingControls");
+                #[cfg(target_os = "linux")]
+                let exclude = true;
+                if exclude {
+                    pill_coord.read(cx).telemetry.excluded_window_ids.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(num);
+                }
             }
             let focus = cx.focus_handle();
             window.focus(&focus);
@@ -5775,6 +5941,10 @@ pub fn run_app(
         let has_initial = initial_bundle.is_some();
         let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, initial_bundle));
         set_status_inbox_count(coordinator.read(cx).inbox.len());
+        #[cfg(target_os = "linux")]
+        if let Err(error) = crate::linux::update::mark_relaunch_ready() {
+            apparent_log(format!("Linux update relaunch readiness: {error:#}"));
+        }
 
         if has_initial {
             open_review_window(&coordinator, cx);
@@ -5821,12 +5991,9 @@ pub fn run_app(
                         crate::settings::reconcile_login_item();
                         last_login_check = std::time::Instant::now();
                     }
-                    let status = EXPORT_STATUS.lock().ok().and_then(|s| s.clone());
+                    let status = current_status_bar_text();
                     if status != shown_status {
-                        match &status {
-                            Some(text) => set_status_text(text),
-                            None => set_status_inbox_count(loop_coord.read(cx).inbox.len()),
-                        }
+                        refresh_status_bar(loop_coord.read(cx).inbox.len());
                         shown_status = status;
                     }
                     platform::poll_status_bar();
@@ -5837,6 +6004,12 @@ pub fn run_app(
                             match action {
                                 MenuAction::ToggleCapture => {
                                     loop_coord.update(cx, |coord, cx| coord.record_or_finish(cx));
+                                }
+                                MenuAction::GiveFeedback => {
+                                    if crate::handoff::experiment("feedbackIssue") {
+                                        loop_coord
+                                            .update(cx, |coord, cx| coord.record_feedback(cx));
+                                    }
                                 }
                                 MenuAction::ChooseTarget => {
                                     loop_coord.update(cx, |coord, cx| {
@@ -5942,6 +6115,32 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_issue_url_opens_a_public_template_without_capture_data() {
+        assert_eq!(
+            feedback_issue_url(),
+            "https://github.com/tryapparent/apparent/issues/new?template=bug_report.yml"
+        );
+    }
+
+    #[test]
+    fn capture_failure_status_survives_inbox_changes() {
+        let failure = Some("Capture failed — no screen frames".to_owned());
+        assert_eq!(status_bar_text(None, failure.clone()), failure);
+        assert_eq!(status_bar_text(Some("Exporting…".into()), failure), Some("Exporting…".into()));
+    }
+
+    #[test]
+    fn picker_exclusion_survives_session_reset_until_deferred_close() {
+        // reset_for_session clears the prior session's IDs before the initial
+        // ScreenCaptureKit filter is built, while the picker is still open.
+        let mut excluded = Vec::new();
+        restore_picker_exclusion(&mut excluded, Some(41));
+        restore_picker_exclusion(&mut excluded, Some(41));
+        restore_picker_exclusion(&mut excluded, None);
+        assert_eq!(excluded, vec![41]);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -6049,12 +6248,30 @@ mod tests {
     #[test]
     fn review_navigation_failure_takes_priority_over_history_scan_failure() {
         assert_eq!(
-            review_notice(Some("scan failed"), Some("Could not open capture: removed")),
+            review_notice(
+                Some("scan failed"),
+                Some("Could not open capture: removed"),
+                false,
+            ),
             Some("Could not open capture: removed".to_owned())
         );
         assert_eq!(
-            review_notice(Some("scan failed"), Some("Ready")),
+            review_notice(Some("scan failed"), Some("Ready"), false),
             Some("Could not read captures: scan failed".to_owned())
+        );
+    }
+
+    #[test]
+    fn feedback_review_displays_privacy_notice_and_browser_errors() {
+        let warning = "Review before sharing publicly. Nothing is uploaded automatically.";
+        assert_eq!(
+            review_notice(None, Some(warning), true).as_deref(),
+            Some(warning)
+        );
+        let error = "Could not open GitHub: browser unavailable";
+        assert_eq!(
+            review_notice(None, Some(error), true).as_deref(),
+            Some(error)
         );
     }
 
@@ -6087,14 +6304,14 @@ mod tests {
     }
 
     #[test]
-    fn recording_controls_offer_whiteboard_by_default_on_linux() {
-        assert_eq!(whiteboard_enabled(), cfg!(target_os = "linux"));
+    fn recording_controls_offer_whiteboard_on_every_desktop() {
+        assert!(whiteboard_enabled());
         let controls = trail_keys(false, false, &[], "hud-");
         assert_eq!(
             controls.iter().any(|item| item
                 .as_ref()
                 .is_some_and(|(name, _)| name == "hud-whiteboard")),
-            cfg!(target_os = "linux")
+            true
         );
     }
 
@@ -6427,5 +6644,13 @@ mod tests {
             "Sent to APPARENT · No words"
         );
         assert_eq!(completed_status_label(0, None, None), "Copied");
+        assert_eq!(
+            completed_status_label(
+                0,
+                Some("Saved · review"),
+                Some(CompletedAudioIssue::NoAudio)
+            ),
+            "Saved · review · No audio"
+        );
     }
 }

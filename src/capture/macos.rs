@@ -1048,7 +1048,6 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
-    let mut phase = 0_u32;
     let mut last_excluded = initial_excluded.clone();
     let mut prompts = SystemPrompts::new(&sampler_target);
     while !thread_stopping.load(Ordering::Acquire) {
@@ -1070,8 +1069,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             if let Some((new_filter, _)) =
                 build_sck_filter_and_config(&sampler_target, &cur_excluded)
             {
-                // The recording must hide the same windows as the candidates, or
-                // keyframes decoded from it could show Apparent's own overlays.
+                // Keep explicit privacy exclusions consistent in movie and candidates.
                 if let Some(ref stream) = stream
                     && let Err(error) = stream.update_content_filter(&new_filter)
                 {
@@ -1094,20 +1092,16 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         if urgent || last_sample.elapsed() >= interval {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            if urgent {
-                phase = phase.saturating_add(1);
-            }
-            let frame = if let Some((ref filter, ref config)) = filter_and_config {
-                capture_sck_frame(filter, config, t_ms).unwrap_or_else(|| {
-                    crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-                })
-            } else {
-                crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-            };
-            thread_frames
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(frame, urgent);
+            let frame = filter_and_config
+                .as_ref()
+                .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
+            push_sck_candidate(
+                &mut thread_frames
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                frame,
+                urgent,
+            );
         }
         thread::park_timeout(Duration::from_millis(30));
     }
@@ -1118,6 +1112,16 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
     }
     video_path
+}
+
+fn push_sck_candidate(
+    buffer: &mut crate::capture::CandidateBuffer,
+    frame: Option<RgbaFrame>,
+    urgent: bool,
+) {
+    if let Some(frame) = frame {
+        buffer.push(frame, urgent);
+    }
 }
 
 fn build_sck_filter_and_config(
@@ -1135,8 +1139,6 @@ fn build_sck_filter_and_config(
             return None;
         }
     };
-    let our_pid = std::process::id() as i32;
-
     let filter = if let Some(window_id) = target.window_id
         && let Some(window) = content
             .windows()
@@ -1150,17 +1152,17 @@ fn build_sck_filter_and_config(
         .find(|d| d.display_id() == target.display_id)
         .or_else(|| content.displays().into_iter().next())
     {
-        // Exclude Apparent's floating HUD pill and Metal overlay windows by explicit window ID
-        // (and any non-layer-0 Apparent panels), while keeping Apparent's normal Review window visible.
+        // With this experiment on, only explicit picker/ink overlays and system prompts are
+        // excluded; the capsule remains in the movie and decoded full-quality keyframes.
         let excluded_overlays: Vec<SCWindow> = content
             .windows()
             .into_iter()
             .filter(|w| {
                 excluded_window_ids.contains(&w.window_id())
-                    || (w
-                        .owning_application()
-                        .as_ref()
-                        .is_some_and(|a| a.process_id() == our_pid)
+                    || (!crate::handoff::experiment("movableRecordingControls")
+                        && w.owning_application().as_ref().is_some_and(|a| {
+                            a.process_id() == std::process::id() as i32
+                        })
                         && w.window_layer() != 0)
             })
             .collect();
@@ -1262,6 +1264,12 @@ fn capture_sck_frame(
     config: &SCStreamConfiguration,
     t_ms: u64,
 ) -> Option<RgbaFrame> {
+    // Development-only fault injection: keep the movie recording, but force the
+    // privacy-filtered screenshot path to fail for an end-to-end GUI check.
+    #[cfg(debug_assertions)]
+    if std::env::var("APPARENT_TEST_DROP_SCK_FRAMES").as_deref() == Ok("1") {
+        return None;
+    }
     let image = SCScreenshotManager::capture_image(filter, config).ok()?;
     let width = u32::try_from(image.width()).ok()?;
     let height = u32::try_from(image.height()).ok()?;
@@ -1861,6 +1869,18 @@ mod tests {
     use super::*;
     use crate::model::TargetFrame;
 
+    #[test]
+    fn failed_sck_screenshot_does_not_insert_demo_pixels() {
+        let mut candidates = crate::capture::CandidateBuffer::new(1 << 20);
+        push_sck_candidate(&mut candidates, None, true);
+        assert_eq!(candidates.len(), 0);
+        push_sck_candidate(
+            &mut candidates,
+            Some(RgbaFrame::new(220, 4, 4, vec![0; 64])),
+            false,
+        );
+        assert_eq!(candidates.len(), 1);
+    }
     #[test]
     fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {
         // Dvorak puts B where QWERTY has N (45) and T where QWERTY has K (40).

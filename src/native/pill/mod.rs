@@ -333,7 +333,14 @@ struct PillRuntimeState {
     was_mouse_down: bool,
     press_down_elem: Option<ElemId>,
     paste_drag_start_screen: Option<[f32; 2]>,
+    drag: Option<PillDrag>,
     action_tx: flume::Sender<PillAction>,
+}
+
+struct PillDrag {
+    panel: crate::screens::Rect,
+    pointer_down: [f64; 2],
+    display: crate::screens::Screen,
 }
 
 // Accessed only on the main thread (guarded by `MainThreadMarker::new()` in `tick_main`).
@@ -450,6 +457,7 @@ impl NativePill {
                 was_mouse_down: false,
                 press_down_elem: None,
                 paste_drag_start_screen: None,
+                drag: None,
                 action_tx,
             }),
             tick_queued: AtomicBool::new(false),
@@ -509,6 +517,7 @@ impl NativePill {
             return;
         }
         st.screen_origin_top_left = origin;
+        st.drag = None;
         st.window
             .setFrame_display(panel_appkit_rect(mtm, origin), true);
         // On a 1x screen AppKit resets the layer's contentsScale; keep the scale it's drawn at.
@@ -809,12 +818,51 @@ impl PillRuntimeState {
         if mouse_down && !self.was_mouse_down {
             let hit = pos_opt.and_then(|[x, y]| self.model.hit_element(x, y));
             self.press_down_elem = hit;
+            if hit == Some(ElemId::Lead)
+                && matches!(self.model.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. })
+                && crate::handoff::experiment("movableRecordingControls")
+            {
+                let screens = crate::screens::current();
+                let centre = [
+                    f64::from(self.screen_origin_top_left[0] + PANEL_W / 2.0),
+                    f64::from(self.screen_origin_top_left[1] + PANEL_H / 2.0),
+                ];
+                self.drag = crate::screens::index_at(&screens, centre).map(|i| PillDrag {
+                    panel: [
+                        f64::from(self.screen_origin_top_left[0]),
+                        f64::from(self.screen_origin_top_left[1]),
+                        f64::from(PANEL_W),
+                        f64::from(PANEL_H),
+                    ],
+                    pointer_down: screen_pt.map(f64::from),
+                    display: screens[i],
+                });
+            }
             if hit == Some(ElemId::Paste) {
                 self.paste_drag_start_screen = Some(screen_pt);
             } else {
                 self.paste_drag_start_screen = None;
             }
+        } else if mouse_down {
+            if let Some(drag) = &self.drag {
+                let origin = crate::screens::drag_pill_origin(
+                    &drag.display,
+                    drag.panel,
+                    drag.pointer_down,
+                    screen_pt.map(f64::from),
+                ).map(|v| v as f32);
+                if (origin[0] - self.screen_origin_top_left[0]).abs() >= 0.5
+                    || (origin[1] - self.screen_origin_top_left[1]).abs() >= 0.5
+                {
+                    self.screen_origin_top_left = origin;
+                    if let Some(mtm) = MainThreadMarker::new() {
+                        self.window.setFrame_display(panel_appkit_rect(mtm, origin), true);
+                    }
+                    self.dirty = true;
+                }
+            }
         } else if !mouse_down && self.was_mouse_down {
+            self.drag = None;
             if let Some(down_elem) = self.press_down_elem.take() {
                 let up_elem = pos_opt.and_then(|[x, y]| self.model.hit_element(x, y));
                 if down_elem == ElemId::Paste {
@@ -868,6 +916,7 @@ impl PillRuntimeState {
             }
             ElemId::Record => PillAction::RecordSelected,
             ElemId::Cancel => PillAction::Cancel,
+            ElemId::Whiteboard => PillAction::Whiteboard,
             ElemId::Finish => PillAction::Finish,
             ElemId::Close => {
                 if matches!(self.model.pres, Pres::Completed { .. }) {
@@ -1419,11 +1468,11 @@ fn emit_elem_prims(
             };
             push_sprite(out, center_text(tx), tx.uv, color(theme.text(), fg));
         }
-        ElemId::Cancel | ElemId::Inspect => {
-            let label = if elem.id == ElemId::Cancel {
-                "Cancel"
-            } else {
-                "Inspect"
+        ElemId::Cancel | ElemId::Whiteboard | ElemId::Inspect => {
+            let label = match elem.id {
+                ElemId::Cancel => "Cancel",
+                ElemId::Whiteboard => "Whiteboard",
+                _ => "Inspect",
             };
             if is_glass {
                 let smoke_a = 0.20 + 0.12 * elem.hover + 0.06 * elem.press;

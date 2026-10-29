@@ -54,7 +54,7 @@ const SAYS: Record<string, string> = {
   inspect: "print summary.md, or apparent.json with --json",
   frames: "plain PNGs of a time range; prints their paths",
   copy: "copy the capture to the clipboard",
-  export: "one .mp4 with the ink and clicks burned in and the audio in sync",
+  export: "macOS only: one .mp4 with the ink and clicks burned in and the audio in sync (not available on Linux)",
   skill: "print the agent skill without installing anything",
 }
 
@@ -92,6 +92,7 @@ ${version ? `- [Download for Mac](${SITE}/releases/Apparent-latest-arm64.dmg): v
 ## Agents
 
 - [Agent skill](${SITE}/skill.md): install it with \`bunx skills add tryapparent/apparent\`. With it, an agent that gets an Apparent paste reads the contact sheet and transcript, opens the keyframes the narration points at, and uses the \`apparent\` command to look closer.
+- [Make it apparent](${REPO}/blob/main/skills/make-it-apparent/SKILL.md): a separate video walkthrough skill; install it explicitly with \`bunx skills add tryapparent/apparent --skill make-it-apparent\`. The capture-reading skill install does not guarantee it is present.
 - [SKILL.md on GitHub](${RAW_SKILL}): the same skill, raw, from the main branch.
 - [Full text](${SITE}/llms-full.txt): this file plus the install notes, capture controls, CLI and the whole skill in one document.
 

@@ -54,6 +54,10 @@ impl Board {
     }
 }
 
+pub(super) fn reset_for_capture(board: &Rc<RefCell<Board>>) {
+    board.borrow_mut().clear();
+}
+
 fn on_paper([x, y]: [f32; 2]) -> bool {
     (0.0..PAPER_WIDTH).contains(&x) && (0.0..PAPER_HEIGHT).contains(&y)
 }
@@ -209,6 +213,9 @@ impl Render for WhiteboardWindow {
 }
 
 pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
+    if !coord.read(cx).is_recording() {
+        return;
+    }
     for handle in cx.windows() {
         if let Some(board) = handle.downcast::<WhiteboardWindow>() {
             let _ = board.update(cx, |_, window, _| window.activate_window());
@@ -218,7 +225,7 @@ pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
     let shared = coord.read(cx).whiteboard.clone();
     let coordinator = coord.clone();
     let bounds = Bounds::centered(None, size(px(720.0), px(540.0)), cx);
-    let _ = cx.open_window(
+    let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
@@ -240,23 +247,10 @@ pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
             cx.new(|_| WhiteboardWindow { board: shared, coordinator, focus })
         },
     );
-    if crate::linux::hyprland::running() {
-        // Hyprland tiles ordinary GPUI windows. Wait for the XWayland window to map before
-        // making just this window float; the compositor then supplies native move/resize.
-        cx.spawn(async move |cx| {
-            let mut last_error = None;
-            for _ in 0..8 {
-                cx.background_executor().timer(Duration::from_millis(120)).await;
-                match crate::linux::hyprland::float_whiteboard() {
-                    Ok(()) => return,
-                    Err(error) => last_error = Some(error),
-                }
-            }
-            crate::capture::apparent_log(&format!("Whiteboard: could not float Hyprland window: {last_error:?}"));
-        })
-        .detach();
+    if opened.is_ok() {
+        platform::float_whiteboard(cx);
+        platform::take_keys(cx);
     }
-    platform::take_keys(cx);
 }
 
 /// Snapshot the paper at Stop before the UI is dismissed; the bundle worker uses this copy.
@@ -505,6 +499,19 @@ mod tests {
         board.borrow_mut().clear();
         assert_eq!(snapshot.strokes.len(), 1, "export must survive the next session");
     }
+
+    #[test]
+    fn the_next_capture_starts_with_empty_paper() {
+        let board = Rc::new(RefCell::new(Board::default()));
+        board.borrow_mut().start([12.0, 18.0]);
+        board.borrow_mut().finish();
+        let first = finish_snapshot(&board, || {});
+        reset_for_capture(&board);
+        let next = finish_snapshot(&board, || {});
+        assert_eq!(first.strokes.len(), 1);
+        assert!(next.strokes.is_empty(), "the previous recording must not leak into the next");
+    }
+
     use crate::model::KeyframeReason;
 
     #[test]

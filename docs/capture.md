@@ -1,5 +1,9 @@
 # Capture: shortcuts, Mac recording, displays
 
+## Give Feedback (experiment)
+
+Set `"experiments": {"feedbackIssue": true}` in `~/.config/apparent/config.json` and restart Apparent. The menu's **Give Feedback…** starts a screen capture on the pointer's display. Finish it normally; Apparent opens the local capture review. **Open GitHub issue…** opens the public feedback form in your browser. It does not create or submit an issue. Describe the problem there; optionally attach only screenshots or video that you have reviewed for private information. No transcript, recording, or local path goes into the browser URL or gets uploaded by Apparent. The regular **Copy** button copies the local handoff to your clipboard; review its contents before pasting them into a public issue.
+
 Read this before changing `src/shortcut.rs`, `src/capture.rs`, `src/screens.rs` or the picker and capsule placement in `src/ui.rs`.
 
 ## Shortcuts (`src/shortcut.rs`, `is_capture_shortcut` in `src/capture.rs`)
@@ -10,11 +14,25 @@ Recording starts on the release rather than the press so nothing is captured whi
 
 During a screen recording, the capsule shows **Mic unavailable** if the input cannot open, **Mic stopped** if samples stop after a startup grace period, or **Mic very quiet** after sustained near-silent captured samples. Quiet input does not prove broken hardware. The warning is inline beside the timer; the red screen-recording cue and the recording controls remain in place, and the screen capture continues. Finish stays visible when the normal controls are shown; during the existing 3.5-second switch-chip reveal, Cancel is shown instead. The warning clears after sustained input recovery or when recording ends. Phone and simulated captures have no microphone warning, and an audio animation does not determine input health.
 
+The recording controls also open a floating **Whiteboard**. Its drawing survives closing and reopening the window during the same capture. Finish closes the window and adds the final drawing as a separate paper frame in the bundle; the next capture starts with an empty board.
+
+With the off-by-default `movableRecordingControls` experiment enabled, drag the recording capsule by its clock/status cluster to uncover the screen beneath it. The whole panel stays on its original display, holds its dropped position for that capture and resets to the top centre for the next capture. The capsule remains in the Mac ScreenCaptureKit movie and in decoded full-quality keyframes; Linux already records it and only masks the small keyframe-selection candidates. The picker/ink overlay and macOS system prompts keep their separate privacy exclusions. See [interaction rationale and test matrix](recording-capsule-drag.md).
+
 Carbon hotkeys and the key event tap report presses through `emit_capture_shortcut` (deduplicated within 90 ms); while a press waits for its release the UI loop polls the modifiers and takes Esc from the key tap (`tick_shortcut`, `take_escape`), so the release is seen whichever window has focus. Esc from the key tap also closes an open picker when another app has the keys.
 
 ## Mac captures (`src/capture.rs`)
 
+### Timed CLI recording versus the app shortcut
+
+`apparent record --duration N` starts a separate, timed screen-and-microphone recorder. It does **not** start the app's global input tap or ink overlay. A click may be visible in `recording.mp4`, but no click or Shift mark is collected for `events`, `marks`, click keyframes or ripples. New timed screen bundles say `"interactionTelemetry": "videoOnly"` in `apparent.json` and explain this in `summary.md` (including after reprocessing or journal-backed recovery). An absent field on an older bundle or orphaned movie says nothing about its collection mode. Window/cursor samples and scene-change keyframes are still possible; “video only” describes *interaction telemetry*, not a lack of audio or all other context.
+
+For interaction-aware agent captures, use the already-running app's recording shortcut (`apparent shortcut record` on Linux, or the configured shortcut on Mac) to start and finish. This follows the same permission rules as an ordinary app recording: macOS Accessibility for click/ink collection; Linux input-device access on supported Wayland sessions, or the X server on X11. It must not silently install a global input hook from the CLI, bypass consent, or forward a bundle to a chat. CLI `--iphone` is a separate native video/mirror path, not the timed screen path.
+
 The sampler keeps only small candidates (480 px long edge, in a `CandidateBuffer` capped at 384 MB that thins evenly and halves its sampling rate when full, never dropping the start or click/stroke frames). At finish the chosen keyframes are decoded from `recording.mp4` at native size (2560 px Screen, 1280 px Window/Region, never above the display's own scale, so a 1x 1920 pt display records 1920 px), shifted by `videoOffsetMs` (when the movie started on the capture clock); if decoding fails the candidates are used. macOS prompts over a Screen or Area capture (`windows::system_prompts_over`: UserNotificationCenter, SecurityAgent; ScreenCaptureKit's "bypass the system private window picker" alert comes back every 30 days) are left out of the recording through the content filter when ScreenCaptureKit lists them, frames that may show one are dropped from the candidates (`CandidateBuffer::drop_since`), and clicks on them aren't recorded. `apparent capture-sim` drives this headless for memory and timing checks.
+
+Before a screen movie starts, `.unsafe-video` marks its empty output directory as unsafe to recover. A directory with existing capture files is refused rather than reused while an old recovery could be running. A successfully built bundle removes the marker; an interrupted build remains unrecoverable from the raw movie. If every safe screenshot fails, finalization leaves the raw movie in place but creates no bundle. The marker prevents both automatic orphan recovery and `apparent recover` from converting that movie into keyframes: the movie may contain a system prompt excluded by the screenshot sampler. Treat the retained movie as private raw media, not as safe material to paste or reprocess.
+
+On a disposable Mac, a debug build launched with `APPARENT_TEST_DROP_SCK_FRAMES=1` can exercise this failure path without changing the movie recorder or revoking TCC permissions. The flag affects only `capture_sck_frame`; remove it from the launch environment and restart the installed app before a healthy-capture check. Do not use it on Kit's Mac.
 
 ## More than one display (`src/screens.rs`)
 

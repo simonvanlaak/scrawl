@@ -1,4 +1,6 @@
 mod agent_context;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod agent_capture;
 mod audio;
 mod autocrop;
 // Windows looks elements up through UI Automation (`win/uia.rs`); other systems have no lookup.
@@ -232,6 +234,9 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect or explicitly end a GUI capture. Same user and machine only; never toggles or sends.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Capture { #[command(subcommand)] command: CaptureCommand },
     /// Launch the GPUI menu-bar and review application.
     App {
         /// Start a capture session immediately on launch.
@@ -560,6 +565,17 @@ enum Command {
     },
     /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add tryapparent/apparent` installs it).
     Skill,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Subcommand)]
+enum CaptureCommand {
+    /// Read the running GUI's phase and opaque capture identity as JSON.
+    State,
+    /// Finish only a matching, already-active capture.
+    Stop { capture_id: String },
+    /// Discard only a matching pending or active capture.
+    Cancel { capture_id: String },
 }
 
 /// `skills/apparent/SKILL.md`, the same text `bunx skills add tryapparent/apparent` installs.
@@ -1615,6 +1631,20 @@ fn main() -> Result<()> {
         },
     };
     match command {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Capture { command } => {
+            let action = match &command {
+                CaptureCommand::State => None,
+                CaptureCommand::Stop { capture_id } => Some((agent_capture::Action::Stop, capture_id.as_str())),
+                CaptureCommand::Cancel { capture_id } => Some((agent_capture::Action::Cancel, capture_id.as_str())),
+            };
+            let response = agent_capture::command(action)?;
+            println!("{response}");
+            let value: serde_json::Value = serde_json::from_str(&response)?;
+            ensure!(value.get("error").is_none(), "GUI capture control: {response}");
+            ensure!(!matches!(value["outcome"].as_str(), Some("wrong_capture" | "not_ready")), "GUI capture control: {response}");
+            Ok(())
+        }
         Command::App { record, iphone } => {
             #[cfg(target_os = "windows")]
             {

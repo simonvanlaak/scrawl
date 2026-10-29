@@ -383,10 +383,10 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     enqueue_parser = sub.add_parser("enqueue")
     enqueue_parser.add_argument("ticket")
-    enqueue_parser.add_argument("--deadline-hours", type=float, default=24)
+    enqueue_parser.add_argument("--deadline-hours", type=float, default=1)
     waiter = sub.add_parser("wait")
     waiter.add_argument("ticket")
-    waiter.add_argument("--deadline-hours", type=float, default=24)
+    waiter.add_argument("--deadline-hours", type=float, default=1)
     waiter.add_argument("--poll", type=float, default=300)
     waiter.add_argument("--slice", type=float, default=400)
     waiter.add_argument("--max-duration", type=int, default=1800)
@@ -411,9 +411,9 @@ def main():
     args = parser.parse_args()
     try:
         if args.command in ("wait", "enqueue") and not (
-            math.isfinite(args.deadline_hours) and 0 < args.deadline_hours <= 24
+            math.isfinite(args.deadline_hours) and 1 <= args.deadline_hours <= 24
         ):
-            raise Refused("deadline must be finite and between 0 and 24 hours")
+            raise Refused("deadline must be finite and between 1 and 24 hours")
         if args.command == "wait":
             if not 0 <= args.slice <= 400 or args.poll <= 0:
                 raise Refused("slice must be 0–400 seconds and poll must be positive")

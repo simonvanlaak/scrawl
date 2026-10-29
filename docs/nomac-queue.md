@@ -11,17 +11,19 @@ python3 -m unittest discover -s scripts/tests -p 'test_nomac_wait.py'
 From the original Git checkout root, inspect the candidate and intended test phase offline. Check the PR's live head/base and prior proof ledger too. A queue ticket is not approval to rent for whatever happens to be in that folder.
 
 ```sh
-nomac-wait enqueue task-unique-ticket --deadline-hours 4
+nomac-wait enqueue task-unique-ticket
 nomac-wait candidate
 # Review and record that fingerprint, the exact remote base SHA, and test plan.
 nomac-wait pin task-unique-ticket \
   --candidate <reviewed-64-character-fingerprint> \
   --base-sha <reviewed-full-base-commit-sha> --phase final
-nomac-wait wait task-unique-ticket --slice 400 --poll 300 \
+nomac-wait wait task-unique-ticket --slice 400 --poll 15 \
   --max-duration 1800 --idle-timeout 300 --max-cost 0.5
 ```
 
 `pin` requires explicit full values; it never silently approves the current tree. Use `--phase diagnostic` for an authorized baseline investigation, not a final production-candidate test. The default base is `origin` / `refs/heads/main`; another configured remote name and full branch ref can be selected with `--remote` and `--base-ref` on `pin`.
+
+New tickets wait **one hour by default**; both `enqueue` and implicit ticket creation by `wait` refuse `--deadline-hours` below 1. An explicit longer deadline is allowed up to 24 hours. Repeating `wait` on an existing ticket keeps its original deadline; it does not reset the hour, and legacy tickets with shorter recorded deadlines are not silently extended or discarded. `--slice 400` is only one foreground tool-call slice (terminal timeout 590 seconds), not a shorter queue timeout. In T3, keep one foreground waiter active in the original thread and retry exit 75 with the same ticket inside the same turn when the candidate remains eligible; do not detach the command or create a scheduled retry merely to display Waiting. This shows **Working**, not Waiting. Inspect an expiry or safety error rather than opening a new ticket blindly.
 
 The fingerprint includes HEAD, all tracked working-tree files (including deletions), all non-ignored untracked files, executable bits, and symlink targets. This accepts an exact uncommitted candidate, including staged/unstaged changes and new files. It hashes local bytes without saving or printing a diff, file names, or file contents. Ignored build products, external symlink contents, toolchains and other dependencies are **not** source identity. Submodules and non-file entries are refused. Do not use ignored files as candidate source. Keep the checkout frozen through transfer and verify the same reviewed bytes on the Mac before testing.
 

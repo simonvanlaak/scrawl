@@ -79,7 +79,7 @@ class NoMacWaitTest(unittest.TestCase):
         # Queue-contract fixtures approve a candidate once, not on every wait.
         # Gate and migration tests use raw_cli without automatic approval.
         if args[0] in ("enqueue", "wait") and not (self.state / (args[1] + ".json")).exists():
-            deadline = args[args.index("--deadline-hours") + 1] if "--deadline-hours" in args else "24"
+            deadline = args[args.index("--deadline-hours") + 1] if "--deadline-hours" in args else "1"
             result = self.raw_cli("enqueue", args[1], "--deadline-hours", deadline)
             if result.returncode:
                 return result
@@ -213,7 +213,7 @@ class NoMacWaitTest(unittest.TestCase):
         self.assertEqual(self.raw_cli("finish", "ticket-a", "--session-id", "ses_test").returncode, 0)
 
     def test_deadline_must_be_finite_and_bounded_before_ticket_creation(self):
-        for value in ("nan", "inf", "-inf", "25", "1e308", "0"):
+        for value in ("nan", "inf", "-inf", "25", "1e308", "0", "0.5", "0.999"):
             with self.subTest(value=value):
                 result = self.run_cli("enqueue", "ticket-a", "--deadline-hours", value)
                 self.assertEqual(result.returncode, 2, result.stderr)
@@ -221,6 +221,37 @@ class NoMacWaitTest(unittest.TestCase):
                 result = self.run_cli("wait", "ticket-a", "--deadline-hours", value, "--slice", "0")
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertFalse((self.state / "ticket-a.json").exists())
+
+    def test_default_ticket_waits_at_least_one_hour_on_both_entry_points(self):
+        for command in ("enqueue", "wait"):
+            with self.subTest(command=command):
+                ticket = f"default-{command}"
+                args = ("--slice", "0") if command == "wait" else ()
+                result = self.raw_cli(command, ticket, *args)
+                self.assertEqual(result.returncode, 75 if command == "wait" else 0, result.stderr)
+                record = json.loads((self.state / f"{ticket}.json").read_text())
+                self.assertAlmostEqual(record["deadline"] - record["created"], 3600, delta=1)
+
+    def test_hour_is_minimum_but_longer_explicit_deadline_is_allowed(self):
+        for value in ("1", "8", "24"):
+            with self.subTest(value=value):
+                ticket = f"hour-{value}"
+                result = self.raw_cli("enqueue", ticket, "--deadline-hours", value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                record = json.loads(result.stdout)
+                self.assertAlmostEqual(record["deadline"] - record["created"], int(value) * 3600, delta=1)
+
+    def test_wait_preserves_existing_deadline_including_a_legacy_short_ticket(self):
+        self.assertEqual(self.raw_cli("enqueue", "ahead").returncode, 0)
+        ticket = self.raw_cli("enqueue", "legacy-short", "--deadline-hours", "8")
+        self.assertEqual(ticket.returncode, 0, ticket.stderr)
+        path = self.state / "legacy-short.json"
+        record = json.loads(path.read_text())
+        record["deadline"] = record["created"] + 1800  # Pre-existing ticket, not a new request.
+        path.write_text(json.dumps(record))
+        result = self.raw_cli("wait", "legacy-short", "--slice", "0")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertEqual(json.loads(path.read_text())["deadline"], record["deadline"])
 
     def test_legacy_invalid_queued_deadline_does_not_block_next_ticket(self):
         for index, invalid in enumerate((float("nan"), float("inf"), 1e308)):

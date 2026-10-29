@@ -321,6 +321,11 @@ impl OnboardingWindow {
     /// Applies one message from the session; `false` when the window should close.
     fn handle(&mut self, message: serde_json::Value, window: Option<&mut Window>) -> bool {
         match message["type"].as_str().unwrap_or_default() {
+            "shortcut" => {
+                if let Some(label) = message["label"].as_str() {
+                    self.shortcut = label.to_owned();
+                }
+            }
             "state" => {
                 let Ok(next) = serde_json::from_value::<ViewState>(message).inspect_err(|error| {
                     crate::capture::apparent_log(format!(
@@ -1064,6 +1069,7 @@ impl OnboardingWindow {
                 "continue",
                 state.ready,
             )),
+            Step::Shortcut => Some(("Continue", "continue", true)),
             Step::Done => Some(("Done", "continue", true)),
             Step::TryIt => None,
         };
@@ -1221,6 +1227,26 @@ impl Render for OnboardingWindow {
                 .into_any_element(),
             Step::HowItWorks => self.how_it_works().into_any_element(),
             Step::Permissions => self.permissions(&state, phase, cx).into_any_element(),
+            Step::Shortcut => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(self.centered(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(keycaps(&self.shortcut, true, 52.0))
+                        .into_any_element(),
+                    200.0,
+                    "Choose your shortcut",
+                    format!("Record with {s}. You can change it now, or keep it and move on."),
+                ))
+                .child(
+                    quiet_button("onboarding-change-shortcut", "Change shortcut")
+                        .on_click(cx.listener(|view, _, _, _| view.act("change-shortcut"))),
+                )
+                .into_any_element(),
             Step::TryIt => self
                 .centered(
                     self.try_art(phase),
@@ -1304,6 +1330,7 @@ mod tests {
                 },
             ),
             (Step::Permissions, true, Input::Continue),
+            (Step::Shortcut, true, Input::Continue),
             (Step::TryIt, true, Input::CaptureEnded { completed: true }),
             (Step::Done, true, Input::Continue),
         ] {
@@ -1330,5 +1357,7 @@ mod tests {
             }
             flow.on(input);
         }
+        assert!(window.handle(serde_json::json!({"type": "shortcut", "label": "Ctrl+Alt+K"}), None));
+        assert_eq!(window.shortcut, "Ctrl+Alt+K");
     }
 }

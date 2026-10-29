@@ -1079,7 +1079,12 @@ impl ApparentCoordinator {
         let mut host = crate::settings::AppHost {
             telemetry: &self.telemetry,
         };
-        match session.event(event, &mut host) {
+        let effect = session.event(event, &mut host);
+        let shortcut = self.shortcut_label();
+        if let Some(onboarding) = self.onboarding.as_mut() {
+            onboarding.shortcut_changed(&shortcut);
+        }
+        match effect {
             Effect::Close => self.settings = None,
             Effect::Tour => self.open_onboarding(crate::onboarding::Flow::tour(
                 crate::onboarding::Step::Welcome,
@@ -1215,6 +1220,7 @@ impl ApparentCoordinator {
             }
         };
         match effect {
+            Effect::EditShortcut => self.open_settings(Some(crate::settings::Pane::General)),
             Effect::Close | Effect::Settings => {
                 if effect == Effect::Settings {
                     self.open_settings(None);

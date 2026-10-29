@@ -162,13 +162,13 @@ struct OnboardingState: Decodable, Equatable {
   }
 }
 
-let stepOrder = ["welcome", "how-it-works", "permissions", "try-it", "done"]
+let stepOrder = ["welcome", "how-it-works", "permissions", "shortcut", "try-it", "done"]
 
 final class OnboardingModel: ObservableObject {
   @Published var state = OnboardingState()
   /// The last step change went forward, so pages slide in from the trailing edge.
   @Published var forward = true
-  let shortcut: String
+  @Published var shortcut: String
   let paste: String
   let icon: NSImage?
   var send: (String) -> Void = { _ in }
@@ -591,6 +591,7 @@ struct OnboardingView: View {
     let (title, body): (String, String) = switch state.step {
     case "try-it": ("Make your first capture", "Tap \(s) now. Talk, point at something, then tap \(s) again.")
     case "done": ("It's on your clipboard", "Press ⌘V in your agent. apparent stays in the menu bar; tap \(s) whenever you want to show something.")
+    case "shortcut": ("Choose your shortcut", "Record with \(s). You can change it now, or keep it and move on.")
     default: ("Welcome to apparent", "Record your screen and voice. Mark what matters, then paste the capture into your agent.")
     }
     return VStack(spacing: 0) {
@@ -598,6 +599,7 @@ struct OnboardingView: View {
       Group {
         switch state.step {
         case "try-it": TryArt(shortcut: s)
+        case "shortcut": Keycaps(shortcut: s, litMods: true, size: 52)
         case "done": DoneArt()
         default: brandWordmark
         }
@@ -616,6 +618,10 @@ struct OnboardingView: View {
         .frame(maxWidth: 440)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, 10)
+      if state.step == "shortcut" {
+        QuietButton(title: "Change shortcut") { model.send("change-shortcut") }
+          .padding(.top, 18)
+      }
       if state.step == "try-it" {
         if state.pickerNote {
           note(pickerNoteText).padding(.top, 12)
@@ -747,6 +753,7 @@ struct OnboardingView: View {
     case "how-it-works": return state.tutorialSeen ? ("Continue", "continue", true) : ("Skip", "skip", true)
     case "permissions":
       return (state.fix ? "Done" : "Continue", "continue", state.ready)
+    case "shortcut": return ("Continue", "continue", true)
     case "done": return ("Done", "continue", true)
     default: return nil
     }
@@ -985,6 +992,8 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
           case "open-settings":
             self.followUp?.invalidate()
             Permissions.openSettings(permission, from: self.screenFrame(of: permission))
+          case "shortcut":
+            if let label = object["label"] as? String { self.model.shortcut = label }
           case "hide": self.window?.orderOut(nil)
           case "show": self.present()
           case "close":
@@ -1110,9 +1119,10 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
       ("permissions-macos15", OnboardingState(step: "permissions", index: 2, rows: sequoia, speech: SpeechStatus(state: "needsPermission", engine: "SFSpeechRecognizer", locale: "en_US")), 0),
       ("permissions-macos15-picker-note", OnboardingState(step: "permissions", index: 2, rows: sequoia, pickerNote: true, speech: SpeechStatus(state: "needsPermission", engine: "SFSpeechRecognizer", locale: "en_US")), 0),
       ("permissions-macos15-no-dictation", OnboardingState(step: "permissions", index: 2, rows: sequoiaNoDictation, ready: true, speech: noDictation), 0),
-      ("try-it", OnboardingState(step: "try-it", index: 2, count: 3), 0.3),
-      ("try-it-downloading", OnboardingState(step: "try-it", index: 2, count: 3, pickerNote: true, speech: SpeechStatus(state: "downloading", locale: "en_US", progress: 0.42)), 0.3),
-      ("done", OnboardingState(step: "done", index: 3), 0),
+      ("shortcut", OnboardingState(step: "shortcut", index: 3, count: 5), 0),
+      ("try-it", OnboardingState(step: "try-it", index: 4, count: 5), 0.3),
+      ("try-it-downloading", OnboardingState(step: "try-it", index: 4, count: 5, pickerNote: true, speech: SpeechStatus(state: "downloading", locale: "en_US", progress: 0.42)), 0.3),
+      ("done", OnboardingState(step: "done", index: 5, count: 5), 0),
       ("fix-required", OnboardingState(step: "permissions", index: 0, count: 1, rows: lost, fix: true), 0),
       ("fix-screen-reopening", OnboardingState(step: "permissions", index: 0, count: 1, rows: reopening, fix: true), 0.3),
       ("fix-camera", OnboardingState(step: "permissions", index: 0, count: 1, rows: [row("camera", requested: true)], fix: true), 0.3),

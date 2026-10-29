@@ -1026,11 +1026,13 @@ impl Ctx<'_> {
         if !deliberate
             && let Some(win) = self.frontmost(t)
             && area(clip01(win.rect)) > 0.0
-            && area(intersect(crop.rect, clip01(win.rect))) <= 0.0
+            && (area(intersect(crop.rect, clip01(win.rect))) <= 0.0
+                || (!contains(crop.rect, clip01(win.rect))
+                    && !(crop.kind == CropKind::Focus && crop.snapped.contains(&win.id))))
         {
             crop.rect = FULL;
             crop.kind = CropKind::Full;
-            crop.reason = "whole screen: passive activity misses the active window".into();
+            crop.reason = "whole screen: passive activity does not retain the active window".into();
             crop.apps.clear();
             crop.snapped.clear();
             crop.within = None;
@@ -2110,6 +2112,57 @@ mod tests {
         );
         let sheet = crate::render::render_contact_sheet_for_duration(197_481, &frames);
         assert!(has_target(&sheet), "contact sheet lost target pixels");
+    }
+
+    #[test]
+    fn passive_crop_cannot_keep_only_a_blank_sliver_of_the_active_window() {
+        let frame = TargetFrame {
+            width: 1280.0,
+            height: 800.0,
+            ..FRAME
+        };
+        let windows = [WindowSnapshot {
+            t: 73,
+            windows: vec![window(1, "Editor", [320, 203, 640, 420], true)],
+        }];
+        let cursor = [
+            CursorSample(73, 0.5, 0.5),
+            CursorSample(1_306, 0.9492, 0.0488),
+        ];
+        let changes = [vec![
+            [0.25, 0.0, 1.0, 0.225],
+            [0.25, 0.75, 0.765625, 0.825],
+            [0.3125, 0.475, 0.609375, 0.575],
+            [0.3125, 0.375, 0.578125, 0.45],
+            [0.3125, 0.6, 0.6875, 0.65],
+            [0.84375, 0.075, 0.875, 0.1],
+        ]];
+        let active = [0.25, 203.0 / 800.0, 0.75, 623.0 / 800.0];
+        let input = Input::new(
+            frame,
+            13_207,
+            &[6_734],
+            &[],
+            &[],
+            &windows,
+            &cursor,
+            &changes,
+        );
+        let settings = Settings::default();
+        let mut crop = compute(&input, &settings).remove(0);
+        // The final content-trimmed geometry observed in the normal-decoder GUI capture.
+        // It intersects blank window chrome, but excludes every word in the editor.
+        crop.rect = [869.0 / 1280.0, 0.0, 1.0, 306.0 / 800.0];
+        crop.kind = CropKind::Activity;
+        let ctx = Ctx {
+            input: &input,
+            s: &settings,
+            sw: 1280.0,
+            sh: 800.0,
+        };
+        assert!(area(intersect(crop.rect, active)) > 0.0);
+        ctx.keep_frontmost(&mut crop, 6_734);
+        assert!(contains(crop.rect, active), "{crop:?}");
     }
 
     #[test]

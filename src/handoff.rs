@@ -332,7 +332,7 @@ fn offer_image_handoff(
 }
 
 const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
-const DEMO_VIDEO_REQUEST: &str = "If this is a complex change and you can access the screen showing the result, use the make-it-apparent skill to record a short demonstration with Apparent. Inspect the finished video, then embed or link the playable recording where the viewer can access it; a local path alone only works on a shared filesystem. State the exact build and OS, what the video shows, and what it does not verify. If the skill is not installed or you cannot record that screen or deliver the video here, report the blocker and do not call the walkthrough done.";
+const DEMO_VIDEO_REQUEST: &str = "Use make-it-apparent for complex visible changes. Share verified video proof or explain why you can't.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.
 /// Read config on each handoff so file edits take effect without a restart.
@@ -2821,13 +2821,11 @@ mod tests {
         assert!(!original.contains(DEMO_VIDEO_REQUEST));
         let enabled = clipboard_summary_with_demo_video(&bundle, &directory, true);
         assert!(enabled.starts_with(&original));
-        assert!(enabled.contains("complex change"));
-        assert!(enabled.contains("use the make-it-apparent skill"));
-        assert!(enabled.contains("playable recording"));
-        assert!(enabled.contains("Inspect the finished video"));
-        assert!(enabled.contains("viewer can access"));
-        assert!(enabled.contains("do not call the walkthrough done"));
-        assert!(enabled.contains("If the skill is not installed or you cannot record that screen or deliver the video here"));
+        assert!(enabled.contains("complex visible changes"));
+        assert!(enabled.contains("Use make-it-apparent"));
+        assert!(enabled.contains("Share verified video proof"));
+        assert!(enabled.contains("explain why you can't"));
+        assert!(DEMO_VIDEO_REQUEST.len() <= 120);
         assert_eq!(enabled.matches(DEMO_VIDEO_REQUEST).count(), 1);
     }
 

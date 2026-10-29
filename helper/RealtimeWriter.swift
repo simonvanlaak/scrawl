@@ -235,6 +235,12 @@ private final class RealtimeWriter {
     lock.unlock()
     // Caller must first stop/drain SCK callbacks. sync is the sample/final ordering barrier.
     return queue.sync {
+      // With sparse window frames, AVAssetWriter can give the last packet the
+      // preceding multi-second gap as its duration. Bound the session to the
+      // actual final image instead of exporting a movie that runs long.
+      if lastWrittenMs >= 0 {
+        writer.endSession(atSourceTime: CMTime(value: lastWrittenMs + 17, timescale: 1000))
+      }
       input.markAsFinished()
       let done = DispatchSemaphore(value: 0)
       writer.finishWriting { done.signal() }
@@ -324,6 +330,10 @@ private func validateTail(_ path: String, _ rgba: UnsafeRawPointer,
         reader.cancelReading()
         return ok
       }
+      // AVAssetReader can emit a timing-only marker before the first coded
+      // picture. It has no packet DTS or bytes to validate.
+      if settings == nil && CMSampleBufferGetNumSamples(sample) == 0 &&
+          CMSampleBufferGetTotalSampleSize(sample) == 0 { continue }
       count += 1
       if !check(sample) { reader.cancelReading(); return false }
     }
@@ -343,12 +353,17 @@ private func validateTail(_ path: String, _ rgba: UnsafeRawPointer,
   }
   // A static SCK window may produce only an initial packet and the explicit
   // stop packet. Reading the last two seconds alone would see just one packet.
-  // Check an early bounded slice too, so monotonic DTS is proved across both.
+  // Check an early bounded slice too. Each reader proves its own packet order;
+  // the compressed tail reader may replay packets from an earlier keyframe.
   if stop > 3 {
     let early = CMTimeRange(start: .zero,
       duration: CMTime(seconds: min(2, start - 0.1), preferredTimescale: 1000))
     guard read(nil, early, checkPacket) else { return false }
   }
+  // A compressed AVAssetReader tail seek starts decoding at an earlier keyframe,
+  // so its first packet can precede packets already read in the early slice.
+  // Each reader's own packet order must still increase strictly.
+  lastDts = -.infinity
   guard read(nil, range, checkPacket), packets >= 2,
     abs(lastDts - stop) <= 0.35 else { return false }
 

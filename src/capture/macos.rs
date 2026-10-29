@@ -1241,7 +1241,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         state.writer.take().map(|writer| (writer, state.last_ms))
     });
-    if let (Some((mut writer, last_ms)), Some(ref original)) = (candidate, &video_path) {
+    if let (Some((mut writer, last_ms)), Some(original)) = (candidate, &video_path) {
         prompts.checked = None;
         if prompts.check(started_at) {
             candidate_poisoned = true;

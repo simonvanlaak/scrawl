@@ -1812,6 +1812,10 @@ mod tests {
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
             video_offset_ms: Arc::new(AtomicU64::new(120)),
+            #[cfg(target_os = "macos")]
+            unsafe_video: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            stop_requested_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: Some(worker),
             _recording: crate::retention::Recording::start(),
         };

@@ -58,9 +58,8 @@ impl InkOverlay {
         // clicks to the focused app when a full-screen notification window sits above them.
         // Keep it mapped only while drawing, so the sharing dialog, the pill and the app
         // underneath stay usable. The bundle still contains the complete ink.
-        let hide_between_strokes = (super::kde() || super::hyprland())
-            && super::wayland_session()
-            && telemetry.active.load(Ordering::Acquire);
+        let hide_between_strokes =
+            hide_between_strokes(super::kde(), super::hyprland(), super::wayland_session());
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -181,8 +180,20 @@ fn visible_after_move(hide_between_strokes: bool, pointer_taken: bool) -> bool {
     !hide_between_strokes || pointer_taken
 }
 
+fn hide_between_strokes(kde: bool, hyprland: bool, wayland: bool) -> bool {
+    (kde || hyprland) && wayland
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picker_overlay_stays_unmapped_when_carried_into_recording() {
+        // The picker creates the same overlay before telemetry.active becomes true.
+        assert!(super::hide_between_strokes(false, true, true));
+        assert!(super::hide_between_strokes(true, false, true));
+        assert!(!super::hide_between_strokes(false, true, false));
+    }
+
     #[test]
     fn moving_a_hyprland_overlay_does_not_unhide_it_between_strokes() {
         assert!(!super::visible_after_move(true, false));

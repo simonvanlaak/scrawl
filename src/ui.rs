@@ -508,6 +508,7 @@ fn island_content_width(
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum MenuAction {
     ToggleCapture,
+    GiveFeedback,
     ChooseTarget,
     OpenLatest,
     OpenInbox(PathBuf),
@@ -515,6 +516,11 @@ enum MenuAction {
     Settings,
     CheckForUpdates,
     Quit,
+}
+
+/// A public issue form, never a URL containing a capture, transcript or local path.
+fn feedback_issue_url() -> String {
+    "https://github.com/tryapparent/apparent/issues/new?template=bug_report.yml".into()
 }
 
 /// Text beside the menu bar icon while a video export runs (`None` goes back to the inbox count).
@@ -837,6 +843,8 @@ pub struct ApparentCoordinator {
     /// Read the WAV once when selecting a bundle, never on the capsule's animation tick.
     review_audio_issue: Option<CompletedAudioIssue>,
     review_status: Option<String>,
+    feedback_capture: bool,
+    review_feedback: bool,
     selected_tab: ReviewTab,
     selected_keyframe: usize,
     /// A cabled iPhone, refreshed each time the picker opens.
@@ -930,6 +938,8 @@ impl ApparentCoordinator {
                 .and_then(|(dir, bundle)| bundle_audio_issue(dir, bundle)),
             review_bundle: initial_bundle,
             review_status: None,
+            feedback_capture: false,
+            review_feedback: false,
             selected_tab: ReviewTab::Keyframes,
             selected_keyframe: 0,
             iphone: None,
@@ -1351,8 +1361,18 @@ impl ApparentCoordinator {
         }
     }
 
+    /// The feedback entry point records immediately, then opens a local review.
+    pub fn record_feedback(&mut self, cx: &mut Context<Self>) {
+        if self.is_recording() || self.is_selecting() || self.is_processing() {
+            return;
+        }
+        self.record_screen_now(cx);
+        self.feedback_capture = self.is_recording();
+    }
+
     /// Records the display under the cursor straight away (no picker), auto-cropped.
     pub fn record_screen_now(&mut self, cx: &mut Context<Self>) {
+        self.feedback_capture = false;
         let target = if self.lab {
             lab::target()
         } else {
@@ -1498,6 +1518,7 @@ impl ApparentCoordinator {
         self.review_audio_issue = bundle_audio_issue(&bundle.0, &bundle.1);
         self.review_bundle = Some(bundle);
         self.review_status = status;
+        self.review_feedback = false;
         self.selected_tab = ReviewTab::Keyframes;
         self.selected_keyframe = 0;
     }
@@ -2310,6 +2331,7 @@ impl ApparentCoordinator {
     /// The menu bar's picker, opening on the mode the last recording used.
     pub fn begin_target_selection(&mut self, cx: &mut Context<Self>) {
         if self.ready_to_record() {
+            self.feedback_capture = false;
             self.open_picker(None, cx);
         }
     }
@@ -2777,6 +2799,7 @@ impl ApparentCoordinator {
     pub fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.playback.take();
         apparent_log("cancel_recording invoked");
+        self.feedback_capture = false;
         self.discard_recording();
         cx.defer(whiteboard::close);
         self.dismiss_island(cx);
@@ -2788,11 +2811,13 @@ impl ApparentCoordinator {
         let Some(rec) = self.active_recording.take() else {
             return;
         };
+        let feedback_capture = std::mem::take(&mut self.feedback_capture);
         #[cfg(target_os = "linux")]
         let auto_active = crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
             && crate::linux::hyprland::running()
             && crate::linux::wayland_session()
             && !self.lab
+            && !feedback_capture
             && matches!(&rec.source, CaptureSource::Screen { .. });
         #[cfg(not(target_os = "linux"))]
         let auto_active = false;
@@ -2939,10 +2964,11 @@ impl ApparentCoordinator {
                             );
                         }
                     }
-                    // Leave the summary for manual Ctrl+V even if automatic paste fails.
-                    let clipboard_ready = crate::handoff::copy_bundle_to_clipboard(&dir)
-                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
-                        .is_ok();
+                    // Feedback stays local until the user explicitly copies or attaches it.
+                    let clipboard_ready = !feedback_capture
+                        && crate::handoff::copy_bundle_to_clipboard(&dir)
+                            .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                            .is_ok();
                     #[cfg(target_os = "linux")]
                     if auto_active && clipboard_ready {
                         let handoff_dir = dir.clone();
@@ -2960,12 +2986,27 @@ impl ApparentCoordinator {
                     }
                     coord.completed_dir = Some(dir.clone());
                     coord.last_local_capture_ms = crate::now_epoch_ms();
-                    if auto_active {
+                    if feedback_capture {
+                        // No automatic clipboard write: the completed pill must not claim
+                        // that this private capture was copied.
+                        coord.completed_note = Some("Saved · review".into());
+                    } else if auto_active {
                         // A dispatched shortcut is not proof that the editor accepted either
                         // paste. Keep the paper tile and give the user the final say.
                         coord.completed_note = Some("Saved · check draft".into());
                     }
                     coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
+                    if feedback_capture {
+                        coord.review_feedback = true;
+                        coord.review_status = Some("Review before sharing publicly. Nothing is uploaded automatically.".into());
+                        let entity = entity.clone();
+                        cx.defer(move |cx| {
+                            close_capture_windows(cx);
+                            if let Some(entity) = entity.upgrade() {
+                                open_review_window(&entity, cx);
+                            }
+                        });
+                    }
                     coord.set_island_phase(IslandPhase::Completed {
                         finished_at: Instant::now(),
                         frame_count,
@@ -4448,9 +4489,13 @@ fn review_neighbor<'a>(
     }
 }
 
-fn review_notice(history_error: Option<&str>, status: Option<&str>) -> Option<String> {
+fn review_notice(
+    history_error: Option<&str>,
+    status: Option<&str>,
+    feedback: bool,
+) -> Option<String> {
     status
-        .filter(|message| message.starts_with("Could not open capture:"))
+        .filter(|message| feedback || message.starts_with("Could not open capture:"))
         .map(str::to_owned)
         .or_else(|| history_error.map(|error| format!("Could not read captures: {error}")))
 }
@@ -4603,6 +4648,7 @@ impl Render for BundleReviewWindow {
         let state = coord_read.review_bundle.clone();
         let audio_issue = coord_read.review_audio_issue;
         let status = coord_read.review_status.clone();
+        let feedback = coord_read.review_feedback;
         let tab = coord_read.selected_tab;
         let selected_kf = coord_read.selected_keyframe;
         let shortcut_label = coord_read.shortcut_label();
@@ -4728,7 +4774,8 @@ impl Render for BundleReviewWindow {
             .iter()
             .map(|kf| kf.said.as_deref())
             .collect::<Vec<_>>();
-        let review_notice = review_notice(self.history_error.as_deref(), status.as_deref());
+        let review_notice =
+            review_notice(self.history_error.as_deref(), status.as_deref(), feedback);
         let no_words = audio_issue == Some(CompletedAudioIssue::NoWords);
         let no_audio = audio_issue == Some(CompletedAudioIssue::NoAudio);
         let missing_reason = if audio_issue == Some(CompletedAudioIssue::TranscriptionUnavailable) {
@@ -4763,6 +4810,7 @@ impl Render for BundleReviewWindow {
         let external_shortcut =
             crate::settings::external_record_owned(crate::capture::ShortcutKind::Record);
         let c_copy = self.coordinator.clone();
+        let c_feedback = self.coordinator.clone();
         let c_send = self.coordinator.clone();
         let c_tab_sheet = self.coordinator.clone();
         let c_tab_frames = self.coordinator.clone();
@@ -4944,7 +4992,20 @@ impl Render for BundleReviewWindow {
                                         cx.notify();
                                     });
                                 }),
-                            ),
+                            )
+                            .when(feedback, |actions| actions.child(
+                                action_button("btn-github-issue", "Open GitHub issue…", false)
+                                    .on_click(move |_, _, cx| {
+                                        let result = crate::handoff::open_path(std::path::Path::new(&feedback_issue_url()));
+                                        c_feedback.update(cx, |coord, cx| {
+                                            coord.review_status = Some(match result {
+                                                Ok(()) => "Asked your browser to open GitHub. Attach only media you choose to share.".into(),
+                                                Err(error) => format!("Could not open GitHub: {error}"),
+                                            });
+                                            cx.notify();
+                                        });
+                                    }),
+                            )),
                     )
                     .children(platform::caption_buttons()),
             )
@@ -5894,6 +5955,12 @@ pub fn run_app(
                                 MenuAction::ToggleCapture => {
                                     loop_coord.update(cx, |coord, cx| coord.record_or_finish(cx));
                                 }
+                                MenuAction::GiveFeedback => {
+                                    if crate::handoff::experiment("feedbackIssue") {
+                                        loop_coord
+                                            .update(cx, |coord, cx| coord.record_feedback(cx));
+                                    }
+                                }
                                 MenuAction::ChooseTarget => {
                                     loop_coord.update(cx, |coord, cx| {
                                         if !coord.is_recording()
@@ -5998,6 +6065,14 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_issue_url_opens_a_public_template_without_capture_data() {
+        assert_eq!(
+            feedback_issue_url(),
+            "https://github.com/tryapparent/apparent/issues/new?template=bug_report.yml"
+        );
+    }
 
     #[test]
     fn capture_failure_status_survives_inbox_changes() {
@@ -6123,12 +6198,30 @@ mod tests {
     #[test]
     fn review_navigation_failure_takes_priority_over_history_scan_failure() {
         assert_eq!(
-            review_notice(Some("scan failed"), Some("Could not open capture: removed")),
+            review_notice(
+                Some("scan failed"),
+                Some("Could not open capture: removed"),
+                false,
+            ),
             Some("Could not open capture: removed".to_owned())
         );
         assert_eq!(
-            review_notice(Some("scan failed"), Some("Ready")),
+            review_notice(Some("scan failed"), Some("Ready"), false),
             Some("Could not read captures: scan failed".to_owned())
+        );
+    }
+
+    #[test]
+    fn feedback_review_displays_privacy_notice_and_browser_errors() {
+        let warning = "Review before sharing publicly. Nothing is uploaded automatically.";
+        assert_eq!(
+            review_notice(None, Some(warning), true).as_deref(),
+            Some(warning)
+        );
+        let error = "Could not open GitHub: browser unavailable";
+        assert_eq!(
+            review_notice(None, Some(error), true).as_deref(),
+            Some(error)
         );
     }
 
@@ -6457,5 +6550,13 @@ mod tests {
             "Sent to APPARENT · No words"
         );
         assert_eq!(completed_status_label(0, None, None), "Copied");
+        assert_eq!(
+            completed_status_label(
+                0,
+                Some("Saved · review"),
+                Some(CompletedAudioIssue::NoAudio)
+            ),
+            "Saved · review · No audio"
+        );
     }
 }

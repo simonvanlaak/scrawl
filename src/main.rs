@@ -74,7 +74,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 
 use crate::audio::{AudioRecorder, RecordedAudio};
-use crate::capture::{ScreenCaptureSession, discover_target, write_bundle_artifacts};
+use crate::capture::{ScreenCaptureSession, discover_target, record_target, write_bundle_artifacts};
 use crate::keyframes::select_keyframes;
 use crate::model::{
     CaptureMode, DeviceInfo, InteractionEvent, Mark, RgbaFrame, SCALE, ApparentBundle, Shape, Stroke,
@@ -1718,7 +1718,7 @@ fn main() -> Result<()> {
                 capture::screen_capture_usable(false),
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
-            let target = discover_target(window.as_deref());
+            let target = record_target(window.as_deref())?;
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });

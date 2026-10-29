@@ -903,7 +903,7 @@
       "id": "linux-appimage-updates",
       "group": "install",
       "name": "Linux AppImage update channels",
-      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or nightly published main previews, a manual check, and live version status.",
+      "says": "Installed AppImages check hourly and stage a verified update for the next launch. Settings and CLI offer stable releases or nightly published main previews, a manual check with three frog result states, and live version status.",
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["linux"],

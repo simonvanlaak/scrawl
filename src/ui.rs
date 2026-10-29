@@ -1111,6 +1111,10 @@ impl ApparentCoordinator {
                 crate::onboarding::relaunch();
                 cx.quit();
             }
+            Effect::QuitForUpdate => {
+                self.settings = None;
+                cx.quit();
+            }
             _ => {}
         }
     }
@@ -5767,6 +5771,10 @@ pub fn run_app(
         let has_initial = initial_bundle.is_some();
         let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, initial_bundle));
         set_status_inbox_count(coordinator.read(cx).inbox.len());
+        #[cfg(target_os = "linux")]
+        if let Err(error) = crate::linux::update::mark_relaunch_ready() {
+            apparent_log(format!("Linux update relaunch readiness: {error:#}"));
+        }
 
         if has_initial {
             open_review_window(&coordinator, cx);

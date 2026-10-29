@@ -420,7 +420,7 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
-    /// Export a bundle's recording as one shareable .mp4: H.264 video cropped to the activity
+    /// Export a bundle's recording as one shareable .mp4: H.264 video opening on the full capture
     /// with ink and click ripples burned in, AAC audio in sync, and smooth activity zoom by
     /// default (`--no-zoom` opts out). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
     Export {
@@ -432,7 +432,7 @@ enum Command {
         out: Option<PathBuf>,
         /// `full`, `auto` (the activity region), or `x,y,w,h` as fractions of the capture (all
         /// ≤ 1) or pixels of the recording.
-        #[arg(long, default_value = "auto")]
+        #[arg(long, default_value = "full")]
         crop: export::crop::CropArg,
         /// Longest side of the output in pixels; it is never scaled up.
         #[arg(long, default_value_t = export::crop::DEFAULT_LONG_EDGE)]
@@ -2523,10 +2523,11 @@ mod tests {
             (vec!["apparent", "export", "capture.apparent", "--no-zoom"], false),
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
-            let Some(Command::Export { zoom, .. }) = cli.command else {
+            let Some(Command::Export { zoom, crop, .. }) = cli.command else {
                 panic!("expected export command");
             };
             assert_eq!(zoom, expected);
+            assert_eq!(crop, export::crop::CropArg::Full);
         }
         assert!(Cli::try_parse_from(["apparent", "export", "capture.apparent", "--zoom"]).is_err());
         use clap::CommandFactory;

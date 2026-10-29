@@ -341,8 +341,8 @@ video when you need them.
 ## Export as video
 
 `apparent export` turns a bundle into one shareable `.mp4`: H.264 (`--hevc` for HEVC) with AAC audio in
-sync, the red ink, pins, laser and click ripples burned in at the times they happened, cropped to
-where the activity was, with smooth zoom toward clicks and marks enabled by default. On macOS it
+sync, the red ink, pins, laser and click ripples burned in at the times they happened. It opens on
+the whole capture for half a second, then smoothly zooms toward activity by default. On macOS it
 runs in `apparent-helper` on AVFoundation (hardware decode and encode, Core Image for the crop,
 Core Graphics for the ink), without FFmpeg. Linux uses the same camera and annotation plan with
 `ffmpeg` and `ffprobe` (H.264/AAC support required). Original bundle recordings stay unchanged.
@@ -354,10 +354,11 @@ apparent export latest --no-zoom --crop full --size 1280  # fixed whole capture,
 apparent export latest --crop 0.1,0.2,0.6,0.5       # x,y,w,h as fractions, or pixels of the video
 ```
 
-- **Crop** (`--crop auto|full|x,y,w,h`): `auto`, the default, is auto-crop's whole-recording crop for
-  Screen captures and everything for window, area and iPhone captures. The output keeps the crop's
+- **Crop** (`--crop full|auto|x,y,w,h`): `full`, the default, opens on the whole recorded screen,
+  window, area or iPhone. Explicit `auto` uses the activity region for Screen captures; explicit
+  rectangles are respected, including at the opening. The output keeps the crop's
   aspect with even sides, is capped at `--size` (1920) on its long edge, and is never scaled up.
-- **Zoom** (on by default; `--no-zoom` opts out): the camera eases to ~1.5–1.8× toward clicks, drags, marks and laser points,
+- **Zoom** (on by default; `--no-zoom` opts out): after a 0.5 s whole-view opening, the camera eases to ~1.5–1.8× toward clicks, drags, marks and laser points,
   holds while activity stays nearby (2.5 s after the last), follows the cursor once it leaves a
   central safe zone, and eases back out. It never starts a zoom while the cursor is travelling fast.
   The path is a pure function of the bundle (`src/export/camera.rs`, critically damped springs,

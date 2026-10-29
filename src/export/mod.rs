@@ -2,7 +2,7 @@
 //!
 //! Rust decides everything about the picture and the helper (`helper/Export.swift`) renders it:
 //!
-//! - `crop`: the part of the recording kept (`--crop`, default the activity region);
+//! - `crop`: the part of the recording kept (`--crop`, default the whole recording);
 //! - `camera`: unless `--no-zoom`, a camera rectangle per frame from the bundle's events, so the
 //!   helper only interpolates and draws;
 //! - `ink`: the bundle's strokes, pins, laser and click ripples as a time-stamped vector plan,
@@ -51,7 +51,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             out: None,
-            crop: CropArg::Auto,
+            crop: CropArg::Full,
             size: crop::DEFAULT_LONG_EDGE,
             zoom: true,
             ink: true,
@@ -455,6 +455,7 @@ mod tests {
     #[test]
     fn default_export_enables_zoom_for_menu_and_other_callers() {
         let options = Options::default();
+        assert_eq!(options.crop, CropArg::Full, "exports open on the whole recording");
         assert!(
             options.zoom,
             "menu and other default exports must enable auto-zoom"
@@ -580,6 +581,13 @@ mod tests {
             assert!(decoded.status.success());
             crate::model::RgbaFrame::new(0, output.width, output.height, decoded.stdout)
         };
+        let opening = frame_at(&output.path, "0.0");
+        let plain_opening = frame_at(&plain.path, "0.0");
+        // Separate lossy encodes need not produce byte-identical decoded colors.
+        let opening_error: u64 = opening.rgba.iter().zip(&plain_opening.rgba)
+            .map(|(a, b)| a.abs_diff(*b) as u64).sum();
+        assert!(opening_error < opening.rgba.len() as u64 / 10,
+            "first frame matches the whole view within codec noise: {opening_error}");
         let frame = frame_at(&output.path, "0.5");
         let plain_frame = frame_at(&plain.path, "0.5");
         // The camera can reframe the click away from the original screen centre.
@@ -595,8 +603,8 @@ mod tests {
             "static export keeps the click ring"
         );
         assert!(
-            blue_pixels(&frame) > blue_pixels(&plain_frame),
-            "default zoom visibly enlarges the click ring"
+            blue_pixels(&frame) > 0,
+            "opening keeps the click ring before zooming"
         );
         let green_pixels = |frame: &crate::model::RgbaFrame| {
             frame.rgba.chunks_exact(4).filter(|px| {
@@ -604,6 +612,8 @@ mod tests {
             }).count()
         };
         assert!(green_pixels(&plain_frame) > 0, "source marker is visible");
+        let frame = frame_at(&output.path, "0.9");
+        let plain_frame = frame_at(&plain.path, "0.9");
         assert!(
             green_pixels(&frame) > green_pixels(&plain_frame),
             "default camera enlarges source pixels, not only annotations"

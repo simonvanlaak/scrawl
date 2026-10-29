@@ -293,9 +293,6 @@ impl Theme {
     fn accent(self) -> Rgba {
         rgb(0x7a58c7)
     }
-    fn update_focus(self) -> Rgba {
-        if self.dark { self.accent() } else { rgb(0x0000f2) }
-    }
     fn positive(self) -> Rgba {
         rgb(if self.dark { 0x77d6a5 } else { 0x146b43 })
     }
@@ -813,7 +810,7 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
 /// rather than the compact pill buttons used by Settings rows.
 fn update_choice_button(theme: Theme, id: &'static str, title: &str, primary: bool, focus: &FocusHandle, selected: bool) -> Stateful<Div> {
     let paper = rgb(0xf5f0e8);
-    let signal = rgb(0x0000f2);
+    let signal = theme.accent();
     div()
         .id(id)
         .track_focus(focus)
@@ -824,7 +821,7 @@ fn update_choice_button(theme: Theme, id: &'static str, title: &str, primary: bo
         .flex().items_center().justify_center()
         .bg(if primary { signal } else { theme.window() })
         .border_2()
-        .border_color(if selected { if primary { theme.text() } else { theme.update_focus() } } else if primary { signal } else { theme.text() })
+        .border_color(if selected { if primary { theme.text() } else { signal } } else if primary { signal } else { theme.text() })
         .text_size(px(18.0))
         .font_weight(FontWeight::MEDIUM)
         .text_color(if primary { paper } else { theme.text() })
@@ -2297,6 +2294,7 @@ mod tests {
         }
         for dark in [false, true] {
             let theme = Theme { dark };
+            assert_eq!(theme.accent(), rgb(crate::ui::pill_theme::SIGNAL));
             for (surface, text) in [
                 (theme.hover(), theme.text()),
                 (theme.window(), theme.text()),
@@ -2309,9 +2307,12 @@ mod tests {
                 assert!(contrast >= 4.5, "Settings text must remain readable in {dark:?} mode: {contrast}");
             }
             let a = luminance(theme.window());
-            let b = luminance(theme.update_focus());
+            let b = luminance(theme.accent());
             let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
             assert!(contrast >= 3.0, "Update later focus border must be visible in {dark:?} mode: {contrast}");
+            let paper = luminance(rgb(0xf5f0e8));
+            let contrast = (paper.max(b) + 0.05) / (paper.min(b) + 0.05);
+            assert!(contrast >= 4.5, "Paper text on Signal update action must remain readable: {contrast}");
         }
     }
 }

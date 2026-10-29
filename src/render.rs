@@ -10,6 +10,180 @@ const WHITE: Color = [255, 255, 255, 255];
 const TEXT: Color = [242, 242, 242, 255];
 const MUTED: Color = [150, 150, 150, 255];
 
+/// Paint the shared export timeline after the Linux decoder has applied the camera.
+#[cfg(target_os = "linux")]
+pub(crate) fn draw_export_annotations(
+    frame: &mut RgbaFrame,
+    ms: f64,
+    camera: [f32; 4],
+    source: (u32, u32),
+    ink: &crate::export::ink::InkPlan,
+) {
+    let (out_w, out_h) = (frame.width as f32, frame.height as f32);
+    let map = |x: f32, y: f32| {
+        [
+            (x - camera[0]) / (camera[2] - camera[0]) * out_w,
+            (y - camera[1]) / (camera[3] - camera[1]) * out_h,
+        ]
+    };
+    let unit = ink.k
+        * (out_w / ((camera[2] - camera[0]) * source.0 as f32)
+            + out_h / ((camera[3] - camera[1]) * source.1 as f32))
+        * 0.5;
+    let fade = |at: u64, over: u64| {
+        let u = ((ms - at as f64) / over.max(1) as f64).clamp(0.0, 1.0) as f32;
+        1.0 - u * u * (3.0 - 2.0 * u)
+    };
+    for stroke in &ink.strokes {
+        let Some(first) = stroke.snaps.first() else {
+            continue;
+        };
+        if ms < first.t as f64 {
+            continue;
+        }
+        let alpha = fade(stroke.fade_at, stroke.fade_ms);
+        if alpha <= 0.002 {
+            continue;
+        }
+        let index = stroke
+            .snaps
+            .partition_point(|s| s.t as f64 <= ms)
+            .saturating_sub(1);
+        let pts: Vec<_> = stroke.snaps[index]
+            .poly
+            .chunks_exact(2)
+            .map(|p| map(p[0], p[1]))
+            .collect();
+        polygon(frame, &pts, opacity(RED, alpha));
+    }
+    for pin in &ink.pins {
+        if ms < pin.t as f64 {
+            continue;
+        }
+        let alpha = fade(pin.fade_at, pin.fade_ms);
+        if alpha <= 0.002 {
+            continue;
+        }
+        let growth =
+            (1.0 - (1.0 - ((ms - pin.t as f64) / 160.0).clamp(0.0, 1.0) as f32).powi(3)).max(0.0);
+        let scale = ink.pin_scale * unit / ink.k.max(0.01) * (0.6 + 0.4 * growth);
+        let center = map(pin.x, pin.y);
+        circle(frame, center, 15.5 * scale, opacity(WHITE, alpha * growth));
+        circle(frame, center, 13.0 * scale, opacity(RED, alpha * growth));
+        let label = pin.n.to_string();
+        let size = 16.0 * scale;
+        draw_text(
+            frame,
+            &label,
+            center[0] - text_width(&label, size, true) * 0.5,
+            center[1] - size * 0.58,
+            size,
+            opacity(WHITE, alpha * growth),
+            true,
+        );
+    }
+    for laser in &ink.lasers {
+        let (Some(first), Some(last)) = (laser.frames.first(), laser.frames.last()) else {
+            continue;
+        };
+        if ms < first.t as f64 || ms > last.t as f64 {
+            continue;
+        }
+        let index = laser
+            .frames
+            .partition_point(|f| f.t as f64 <= ms)
+            .saturating_sub(1);
+        let points: Vec<_> = laser.frames[index]
+            .pts
+            .chunks_exact(3)
+            .map(|p| (map(p[0], p[1]), p[2]))
+            .collect();
+        for (radius, alpha, color) in [
+            (7.5, 0.08, [255, 22, 38, 255]),
+            (4.2, 0.22, [255, 36, 48, 255]),
+            (2.1, 0.78, RED),
+            (0.95, 0.92, WHITE),
+        ] {
+            if points.len() == 1 {
+                circle(
+                    frame,
+                    points[0].0,
+                    radius * unit,
+                    opacity(color, alpha * points[0].1),
+                );
+            }
+            for pair in points.windows(2) {
+                line(
+                    frame,
+                    pair[0].0,
+                    pair[1].0,
+                    radius * unit * pair[0].1,
+                    radius * unit * pair[1].1,
+                    opacity(color, alpha * (pair[0].1 + pair[1].1) * 0.5),
+                );
+            }
+        }
+    }
+    for ripple in &ink.ripples {
+        let age = ms - ripple.t as f64;
+        if !(0.0..350.0).contains(&age) {
+            continue;
+        }
+        let p = (age / 350.0) as f32;
+        let r = (4.0 + 10.0 * (1.0 - (1.0 - p).powi(3))) * unit;
+        let alpha = (1.0 - p).powi(2);
+        let center = map(ripple.x, ripple.y);
+        ring(
+            frame,
+            center,
+            r + 1.1 * unit,
+            0.9 * unit,
+            opacity(WHITE, 0.35 * alpha),
+        );
+        ring(
+            frame,
+            center,
+            r,
+            1.3 * unit,
+            opacity(CLICK_BLUE, 0.75 * alpha),
+        );
+    }
+    for trail in &ink.trails {
+        if ms < trail.t as f64 {
+            continue;
+        }
+        let alpha = fade(trail.t1 + 100, 250);
+        if alpha <= 0.002 {
+            continue;
+        }
+        let all: Vec<_> = trail.pts.chunks_exact(2).map(|p| map(p[0], p[1])).collect();
+        if all.len() < 2 {
+            continue;
+        }
+        let progress = ((ms - trail.t as f64) / (trail.t1.saturating_sub(trail.t).max(1) as f64))
+            .clamp(0.0, 1.0);
+        let upto = progress * (all.len() - 1) as f64;
+        let whole = upto as usize;
+        let mut shown = all[..=whole].to_vec();
+        if whole + 1 < all.len() {
+            let f = (upto - whole as f64) as f32;
+            shown.push([
+                all[whole][0] + (all[whole + 1][0] - all[whole][0]) * f,
+                all[whole][1] + (all[whole + 1][1] - all[whole][1]) * f,
+            ]);
+        }
+        polyline(frame, &shown, 1.5 * unit, opacity(WHITE, 0.22 * alpha));
+        polyline(frame, &shown, 0.8 * unit, opacity(CLICK_BLUE, 0.7 * alpha));
+        circle(frame, shown[0], 1.3 * unit, opacity(CLICK_BLUE, alpha));
+        circle(
+            frame,
+            *shown.last().unwrap(),
+            2.0 * unit,
+            opacity(CLICK_BLUE, alpha),
+        );
+    }
+}
+
 pub fn encode_png(frame: &RgbaFrame) -> anyhow::Result<Vec<u8>> {
     anyhow::ensure!(
         frame.width > 0 && frame.height > 0,
@@ -515,7 +689,11 @@ fn draw_keyframe_badge(
     let dodge = dodge_top_left || keyframe.cursor.is_some_and(|[x, y]| x < 0.30 && y < 0.18);
     let x = rx + inset;
     // Never jump to the top-right: a captured app's Copy/action button often lives there.
-    let y = if dodge { (ry + rh - h - inset).max(ry + inset) } else { ry + inset };
+    let y = if dodge {
+        (ry + rh - h - inset).max(ry + inset)
+    } else {
+        ry + inset
+    };
     rounded(
         dst,
         [x - ring, y - ring, w + 2.0 * ring, h + 2.0 * ring],
@@ -1585,9 +1763,17 @@ mod native_text {
     #[cfg(target_os = "linux")]
     fn load(bold: bool) -> Option<FontVec> {
         let (liberation, dejavu, noto) = if bold {
-            ("LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf")
+            (
+                "LiberationSans-Bold.ttf",
+                "DejaVuSans-Bold.ttf",
+                "NotoSans-Bold.ttf",
+            )
         } else {
-            ("LiberationSans-Regular.ttf", "DejaVuSans.ttf", "NotoSans-Regular.ttf")
+            (
+                "LiberationSans-Regular.ttf",
+                "DejaVuSans.ttf",
+                "NotoSans-Regular.ttf",
+            )
         };
         let candidates = [
             format!("/usr/share/fonts/truetype/liberation/{liberation}"),
@@ -1602,7 +1788,11 @@ mod native_text {
             format!("/usr/share/fonts/google-noto/{noto}"),
         ];
         let fc_match = || {
-            let pattern = if bold { "sans-serif:bold" } else { "sans-serif" };
+            let pattern = if bold {
+                "sans-serif:bold"
+            } else {
+                "sans-serif"
+            };
             let out = std::process::Command::new("fc-match")
                 .args(["-f", "%{file}", pattern])
                 .output()

@@ -12,7 +12,7 @@ HowItWorks is a silent 11 s loop (`helper/OnboardingDemo.swift`): a pretend chec
 
 Input Monitoring is never asked for or read (macOS wants a relaunch after it; the enum variant stays only so 0.3.x configs load, and `input_monitoring_is_never_requested` greps the sources): clicks come from an `NSEvent` global mouse monitor (no permission), ⇧ and held modifiers from `CGEventSourceFlagsState` (no permission), keys from an active `kCGEventTapOptionDefault` tap (Accessibility), which the HID poller makes or stops every 500 ms as `AXIsProcessTrusted` changes (`check_key_tap`; live, no relaunch). Never poll key codes (`CGEventSourceKeyState`) or make a listen-only tap.
 
-Grants are re-read every 0.5 s from a fresh `apparent-helper permissions`; the coordinator caches them (`ApparentCoordinator::grants`).
+Grants are re-read every 0.5 s from a fresh `apparent-helper permissions`; the coordinator caches them (`ApparentCoordinator::grants`). On macOS the separately signed helper can disagree with the app: Accessibility's effective status comes from `AXIsProcessTrusted` in the recording process, matching the key tap and recording gate. Screen Recording still uses the fresh helper to detect new grants and revoked grants; a cached positive preflight in the running app must not override a fresh denial.
 
 macOS shows "Quit & Reopen / Later" the moment Screen Recording is granted, and a running process may not see the grant (`CGPreflightScreenCaptureAccess` caches). So once the helper says granted, `read_grants` tries a one-frame ScreenCaptureKit capture in this process (`capture::screen_capture_usable(true)`); if it fails, `Flow::tick` shows "Reopening Apparent" for `RELAUNCH_AFTER_MS` and returns `Effect::Relaunch`, and the coordinator saves `Progress::relaunching` (tour `resume` = Permissions, or `reopenFix`) and `onboarding::relaunch()` reopens the app (without `-n`) after this pid exits. Quit & Reopen lands in the same place through the saved `resume`; a tour resumed on Permissions stays there. `relaunchedAt` stops a second automatic relaunch within `RELAUNCH_GUARD_MS`; the row then offers Reopen Apparent. `apparent sck-probe [--watch S]` / `apparent-helper sck-probe` test whether a grant reaches a running process.
 
@@ -55,7 +55,7 @@ The current Linux `check_cli` feed contract checks **and installs**: “Update a
 covers an image already installed for the next launch. It does not mean a discovery-only check.
 That result offers **Update now** (quit and launch the staged AppImage after exit) and
 **Update later** (dismiss, leaving it for the next launch). The primary Update now action
-uses brand Signal blue with Paper text; Update later uses the theme field and contrasting text and border.
+uses brand Signal violet with Paper text; Update later uses the theme field and contrasting text and border.
 Both use the brand's square geometry, 18px control type, and 44px hit height rather than
 the compact pill buttons in Settings rows. The result panel has a square theme-colored field,
 contrasting rule, 18px native status, and 8px-based spacing; failure text uses the semantic

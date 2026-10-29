@@ -621,7 +621,7 @@ struct OnboardingView: View {
         default: brandWordmark
         }
       }
-      .frame(height: 200)
+      .frame(height: state.step == "shortcut" && state.shortcutEditing ? 160 : 200)
       Text(title)
         .font(.custom("HostGrotesk_700wght", size: 36))
         .foregroundStyle(TourBrand.carbon)
@@ -657,8 +657,10 @@ struct OnboardingView: View {
           }
           .padding(.top, 12)
         }
-        QuietButton(title: "Change shortcut") { model.send("change-shortcut") }
-          .padding(.top, 18)
+        if !state.shortcutEditing || model.shortcutEditor?.recording == false {
+          QuietButton(title: "Change shortcut") { model.send("change-shortcut") }
+            .padding(.top, 18)
+        }
       }
       if state.step == "try-it" {
         if state.pickerNote {

@@ -27,6 +27,7 @@
       "name": "Give Feedback…",
       "says": "Start a capture from the menu, review it locally, then open a GitHub feedback form. No capture data is added to the URL or uploaded automatically.",
       "status": "experiment:feedbackIssue",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "docs": ["docs/capture.md"]
     },
@@ -102,6 +103,7 @@
       "name": "Output-bound Region on Hyprland",
       "says": "A multi-output Hyprland capture checks that the sharing portal selected the chosen output, and a Region is cropped within its stream.",
       "status": "main",
+      "added": "2026-10-28",
       "platforms": ["linux"],
       "note": "Mixed-scale Region and separate Cancel/Finish actions after output crossings were verified on an Omarchy VM and X1. A Region selected on the VM's 1.25x output also saved visible content in its movie and keyframe. The earlier X1 synthetic Cancel-to-Finish misdispatch did not recur; other Wayland portal backends and mirrored layouts are unverified.",
       "docs": ["docs/linux.md", "docs/capture.md"]
@@ -891,6 +893,7 @@
       "name": "apparent export on Linux",
       "says": "The CLI burns ink, pins and click ripples into an MP4, with optional auto-zoom and aligned WAV audio, using FFmpeg and ffprobe.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["linux"],
       "note": "The menu export experiment remains Mac-only. Requires FFmpeg with H.264/AAC encoders; the timed CLI recorder does not collect click or ink telemetry.",
       "docs": ["docs/export-and-retention.md", "docs/linux.md"]

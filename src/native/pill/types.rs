@@ -66,6 +66,8 @@ pub struct PillSnapshot {
     pub pres: Pres,
     pub clock: String,
     pub mic_warning: Option<crate::audio::InputWarning>,
+    /// Read-only PCM sample count and recent level; neither certifies intelligible speech.
+    pub input_activity: Option<(usize, f32)>,
     pub reduced_motion: bool,
     pub style: PillStyle,
 }

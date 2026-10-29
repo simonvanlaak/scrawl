@@ -150,7 +150,6 @@ enum InputStream {
 
 impl AudioRecorder {
     /// A read-only view of recorded samples. A repeated count means no new input arrived.
-    #[cfg(target_os = "linux")]
     pub fn input_activity(&self) -> Option<(usize, f32)> {
         let samples = self.samples.lock().ok()?;
         Some((samples.len(), input_level(&samples)))
@@ -638,6 +637,25 @@ mod tests {
         samples.extend(vec![0.0; 1280]);
         assert_eq!(input_level(&samples), 0.0, "old sound must leave the window");
         assert!(input_level(&vec![0.2; 1280]) > 0.0);
+    }
+    #[test]
+    fn recorder_activity_reports_recent_pcm_without_draining_samples() {
+        let samples = Arc::new(Mutex::new(vec![0.5; 1280]));
+        let recorder = AudioRecorder {
+            worker: None,
+            stop_sender: None,
+            samples: Arc::clone(&samples),
+            error: Arc::new(Mutex::new(None)),
+            health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
+            live: None,
+            word_probe: None,
+            #[cfg(target_os = "linux")]
+            pause: None,
+        };
+        assert_eq!(recorder.input_activity(), Some((1280, 1.0)));
+        samples.lock().unwrap().extend([0.0; 1280]);
+        assert_eq!(recorder.input_activity(), Some((2560, 0.0)));
+        assert_eq!(samples.lock().unwrap().len(), 2560);
     }
     use std::time::Duration;
 

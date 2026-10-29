@@ -158,12 +158,12 @@
       "id": "audio-equalizer",
       "group": "record",
       "name": "Microphone input equalizer",
-      "says": "Five smooth bars respond to captured microphone samples in the Linux recording capsule; this does not assess speech or transcription quality.",
+      "says": "Five bars respond to captured microphone samples in the recording capsule; this does not assess speech or transcription quality.",
       "status": "main",
       "added": "2026-10-28",
-      "platforms": ["linux"],
-      "note": "On by default on Linux. The recording cue, Finish, and warning text remain separate.",
-      "docs": ["docs/linux.md"]
+      "platforms": ["mac", "linux"],
+      "note": "On by default on Linux. Mac native Metal candidate awaits an offscreen render and live recording check before release. The recording cue, Finish, and warning text remain separate.",
+      "docs": ["docs/capture.md", "docs/linux.md", "docs/motion.md"]
     },
     {
       "id": "pins",

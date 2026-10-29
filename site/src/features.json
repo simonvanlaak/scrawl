@@ -222,11 +222,20 @@
       "id": "hidden-windows",
       "group": "record",
       "name": "Own windows left out",
-      "says": "Apparent's capsule, picker and overlay, and macOS prompts over a Screen or Area capture, stay out of the recording.",
+      "says": "The picker, ink overlay and macOS prompts stay out of Screen and Area captures. The capsule is excluded unless movableRecordingControls is on.",
       "status": "stable@0.3.6",
       "platforms": ["mac"],
-      "note": "Prompts are a macOS case. The Linux preview records its own windows and masks the capsule from keyframe picking.",
+      "note": "Prompts are a macOS case. Linux records its own windows and masks the capsule only in small keyframe-picking candidates.",
       "docs": ["docs/capture.md"]
+    },
+    {
+      "id": "movable-recording-controls",
+      "group": "record",
+      "name": "Move recording controls while recording",
+      "says": "Drag the recording capsule by its clock to expose the screen beneath it. The capsule stays visible in the captured movie and delivered full-quality keyframes.",
+      "status": "experiment:movableRecordingControls",
+      "platforms": ["mac", "linux"],
+      "docs": ["docs/recording-capsule-drag.md", "docs/capture.md"]
     },
     {
       "id": "lower-playback",

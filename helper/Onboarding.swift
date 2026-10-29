@@ -1043,7 +1043,10 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
           switch type {
           case "state":
             guard let state else { return }
-            if state.step != "shortcut" || !state.shortcutEditing { self.listenForShortcut(false) }
+            if state.step != "shortcut" || !state.shortcutEditing {
+              self.listenForShortcut(false)
+              self.model.shortcutEditor = nil
+            }
             if !self.presented {
               self.model.state = state
               self.window?.setContentSize(NSSize(width: 620, height: state.height))

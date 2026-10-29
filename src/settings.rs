@@ -1083,23 +1083,10 @@ fn shortcut_view(
         option: mods & CARBON_OPTION_KEY != 0,
         command: mods & CARBON_CMD_KEY != 0,
         is_default: cfg.is_default_for(kind),
-        externally_managed: external_record_matches(kind, cfg),
+        externally_managed: external_record_owned(kind),
         clearable: kind.can_unset(),
         recording,
         error: error.cloned(),
-    }
-}
-
-fn external_record_matches(kind: ShortcutKind, cfg: &ShortcutConfig) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        kind == ShortcutKind::Record
-            && crate::linux::hyprland::external_record().as_ref() == Some(cfg)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (kind, cfg);
-        false
     }
 }
 
@@ -1217,6 +1204,22 @@ pub struct Panel {
 }
 
 impl Panel {
+    /// The same Record recorder state for Settings and the onboarding shortcut page.
+    pub fn record_shortcut(&self, host: &dyn Host) -> ShortcutView {
+        let kind = ShortcutKind::Record;
+        let error = self
+            .error
+            .as_ref()
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, e)| e);
+        shortcut_view(
+            kind,
+            host.shortcuts().get(kind),
+            self.recording == Some(kind),
+            error,
+        )
+    }
+
     #[cfg(test)]
     pub fn recording(&self) -> Option<ShortcutKind> {
         self.recording

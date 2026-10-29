@@ -82,6 +82,8 @@ function Primary({ platform }: { platform: Platform }) {
       return <Unavailable icon={<Apple />} label="Download for Mac" />
     case "windows":
       return <Unavailable icon={<Windows />} label="Windows: unsupported" />
+    case "other":
+      return <Unavailable icon={null} label="This platform: unsupported" />
     case "linux":
       return LINUX_DOWNLOAD ? (
         <a className="btn-primary" href={LINUX_DOWNLOAD}>Download for Linux</a>
@@ -102,6 +104,8 @@ function meta(platform: Platform): string {
       return `Needs a Mac with Apple silicon and macOS ${RELEASE.macos} or later.`
     case "windows":
       return "Apparent no longer supports Windows. It runs on Mac and Linux."
+    case "other":
+      return "Apparent runs on Mac and Linux."
     case "linux":
       return LINUX_DOWNLOAD ? `Preview ${RELEASE.version} · x86_64 AppImage · Ubuntu 24.04+ · X11 or GNOME/KDE Wayland` : "Linux is on the way."
     case "mobile":

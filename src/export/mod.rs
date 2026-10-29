@@ -3,7 +3,7 @@
 //! Rust decides everything about the picture and the helper (`helper/Export.swift`) renders it:
 //!
 //! - `crop`: the part of the recording kept (`--crop`, default the activity region);
-//! - `camera`: with `--zoom`, a camera rectangle per frame from the bundle's events, so the
+//! - `camera`: unless `--no-zoom`, a camera rectangle per frame from the bundle's events, so the
 //!   helper only interpolates and draws;
 //! - `ink`: the bundle's strokes, pins, laser and click ripples as a time-stamped vector plan,
 //!   drawn in the recording's own clock;
@@ -53,7 +53,7 @@ impl Default for Options {
             out: None,
             crop: CropArg::Auto,
             size: crop::DEFAULT_LONG_EDGE,
-            zoom: false,
+            zoom: true,
             ink: true,
             clicks: true,
             hevc: false,
@@ -452,6 +452,15 @@ pub fn describe(exported: &Exported) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn default_export_enables_zoom_for_menu_and_other_callers() {
+        let options = Options::default();
+        assert!(
+            options.zoom,
+            "menu and other default exports must enable auto-zoom"
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_exports_a_real_movie_with_annotated_pixels_and_audio() {
@@ -478,6 +487,8 @@ mod tests {
                 "lavfi",
                 "-i",
                 "color=c=white:s=320x180:r=10:d=2",
+                "-vf",
+                "drawbox=x=156:y=86:w=8:h=8:color=green:t=fill",
                 "-c:v",
                 "libx264",
                 "-pix_fmt",
@@ -505,6 +516,8 @@ mod tests {
             writer.write_sample(sample).unwrap();
         }
         writer.finalize().unwrap();
+        let original_video = std::fs::read(&movie).unwrap();
+        let original_audio = std::fs::read(&wav).unwrap();
         let mut b = bundle();
         b.video = Some("recording.mp4".into());
         b.audio = Some("audio.wav".into());
@@ -533,10 +546,26 @@ mod tests {
         let output = export(&root, &b, &options, &mut |_| {}).unwrap();
         assert!(output.audio);
         assert!(output.bytes > 0);
-        let frame_at = |time: &str| {
+        assert!(
+            output.camera_moves,
+            "default exports render the smooth camera path"
+        );
+        let plain = export(
+            &root,
+            &b,
+            &Options {
+                out: Some(root.join("plain.mp4")),
+                zoom: false,
+                ..options.clone()
+            },
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(!plain.camera_moves, "opting out leaves a static camera");
+        let frame_at = |path: &Path, time: &str| {
             let decoded = Command::new("ffmpeg")
                 .args(["-v", "error", "-ss", time, "-i"])
-                .arg(&output.path)
+                .arg(path)
                 .args([
                     "-frames:v",
                     "1",
@@ -551,15 +580,35 @@ mod tests {
             assert!(decoded.status.success());
             crate::model::RgbaFrame::new(0, output.width, output.height, decoded.stdout)
         };
-        let frame = frame_at("0.5");
-        let marked = ((frame.height / 2 - 14)..(frame.height / 2 + 14)).any(|y| {
-            ((frame.width / 2 - 14)..(frame.width / 2 + 14)).any(|x| {
-                let pixel = ((y * frame.width + x) * 4) as usize;
-                frame.rgba[pixel..pixel + 3].iter().any(|&v| v < 200)
-            })
-        });
-        assert!(marked, "click ring is visible on white");
-        let late = frame_at("1.1");
+        let frame = frame_at(&output.path, "0.5");
+        let plain_frame = frame_at(&plain.path, "0.5");
+        // The camera can reframe the click away from the original screen centre.
+        let blue_pixels = |frame: &crate::model::RgbaFrame| {
+            frame
+                .rgba
+                .chunks_exact(4)
+                .filter(|px| px[2] > px[0].saturating_add(40) && px[2] > px[1].saturating_add(20))
+                .count()
+        };
+        assert!(
+            blue_pixels(&plain_frame) > 0,
+            "static export keeps the click ring"
+        );
+        assert!(
+            blue_pixels(&frame) > blue_pixels(&plain_frame),
+            "default zoom visibly enlarges the click ring"
+        );
+        let green_pixels = |frame: &crate::model::RgbaFrame| {
+            frame.rgba.chunks_exact(4).filter(|px| {
+                px[1] > px[0].saturating_add(40) && px[1] > px[2].saturating_add(40)
+            }).count()
+        };
+        assert!(green_pixels(&plain_frame) > 0, "source marker is visible");
+        assert!(
+            green_pixels(&frame) > green_pixels(&plain_frame),
+            "default camera enlarges source pixels, not only annotations"
+        );
+        let late = frame_at(&output.path, "1.1");
         let colored = late
             .rgba
             .chunks_exact(4)
@@ -588,8 +637,8 @@ mod tests {
             audio_at("0.2") < audio_at("0.8") / 5,
             "audio follows the video offset"
         );
-        let original_video = std::fs::read(&movie).unwrap();
-        let original_audio = std::fs::read(&wav).unwrap();
+        assert_eq!(std::fs::read(&movie).unwrap(), original_video);
+        assert_eq!(std::fs::read(&wav).unwrap(), original_audio);
         options.out = Some(root.join("./recording.mp4"));
         assert!(export(&root, &b, &options, &mut |_| {}).is_err());
         options.out = Some(root.join("./audio.wav"));

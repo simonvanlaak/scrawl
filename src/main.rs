@@ -421,8 +421,8 @@ enum Command {
         full: bool,
     },
     /// Export a bundle's recording as one shareable .mp4: H.264 video cropped to the activity
-    /// with the ink and click ripples burned in, AAC audio in sync, and optionally Screen
-    /// Studio-style auto-zoom (`--zoom`). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
+    /// with ink and click ripples burned in, AAC audio in sync, and smooth activity zoom by
+    /// default (`--no-zoom` opts out). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
     Export {
         /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
@@ -437,9 +437,8 @@ enum Command {
         /// Longest side of the output in pixels; it is never scaled up.
         #[arg(long, default_value_t = export::crop::DEFAULT_LONG_EDGE)]
         size: u32,
-        /// Ease in toward clicks, drags, marks and laser points, hold while activity stays
-        /// nearby, and ease back out.
-        #[arg(long)]
+        /// Disable the default smooth camera zoom toward clicks, drags and marks.
+        #[arg(long = "no-zoom", action = clap::ArgAction::SetFalse, default_value_t = true)]
         zoom: bool,
         /// Leave out the red ink, pins and laser.
         #[arg(long)]
@@ -2515,6 +2514,26 @@ mod tests {
     #[test]
     fn cli_identifies_as_apparent() {
         assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
+    fn export_cli_zooms_by_default_and_no_zoom_opts_out() {
+        for (args, expected) in [
+            (vec!["apparent", "export", "capture.apparent"], true),
+            (vec!["apparent", "export", "capture.apparent", "--no-zoom"], false),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Export { zoom, .. }) = cli.command else {
+                panic!("expected export command");
+            };
+            assert_eq!(zoom, expected);
+        }
+        assert!(Cli::try_parse_from(["apparent", "export", "capture.apparent", "--zoom"]).is_err());
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let help = command.find_subcommand_mut("export").unwrap().render_long_help().to_string();
+        assert!(help.contains("--no-zoom"));
+        assert!(!help.contains("--zoom"), "retired flag must not appear in help: {help}");
     }
 
     #[test]

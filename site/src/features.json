@@ -234,6 +234,7 @@
       "name": "Move recording controls while recording",
       "says": "Drag the recording capsule by its clock to expose the screen beneath it. The capsule stays visible in the captured movie and delivered full-quality keyframes.",
       "status": "experiment:movableRecordingControls",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "docs": ["docs/recording-capsule-drag.md", "docs/capture.md"]
     },
@@ -881,7 +882,7 @@
       "id": "agent-install-prompt",
       "group": "install",
       "name": "Copy an agent install prompt",
-      "says": "The landing page and README offer a one-sentence prompt asking an agent to install and launch the supported desktop app from official releases.",
+      "says": "The README offers a one-sentence prompt asking an agent to install and launch the supported desktop app from official releases.",
       "status": "main",
       "platforms": ["mac", "linux"],
       "added": "2026-10-28",
@@ -904,6 +905,7 @@
       "name": "Platform-aware site download",
       "says": "The homepage looks up the newest published GitHub installer for the visitor's supported OS and starts its download. On lookup failure it opens the release list instead.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "note": "Mac is Apple silicon only; if the browser cannot identify the chip or Linux architecture, the button opens the release list instead. Windows has no supported installer.",
       "docs": ["docs/release.md"]

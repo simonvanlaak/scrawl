@@ -4055,14 +4055,21 @@ kbd {
 
 /* Paper is the reading surface; the dark captured UI stays inside the demo. */
 .story-hero {
-  min-height: calc(100svh - 72px);
+  min-height: 580px;
   padding: 70px 24px 64px;
   border-bottom: 1px solid #020102;
 }
-.story-intro { display: flex; flex-direction: column; align-items: center; max-width: 800px; }
-.story-hero h1 { max-width: 760px; margin: 0; font-size: clamp(52px, 7vw, 92px); letter-spacing: -.07em; }
-.story-intro > p:not(.release-note) { max-width: 540px; margin: 24px 0 0; font-size: 21px; line-height: 1.35; }
-.story-intro .btn-primary { min-height: 48px; margin-top: 32px; border-radius: 0; }
+.story-intro { display: flex; flex-direction: column; align-items: center; max-width: 1200px; }
+.story-hero h1 { max-width: 1200px; margin: 0; font-size: 64px; line-height: 1.13; letter-spacing: -.055em; text-wrap: balance; }
+.story-hero .word-highlight { position: relative; isolation: isolate; white-space: nowrap; color: #020102; }
+.story-hero .brush-highlight { position: absolute; z-index: -1; pointer-events: none; width: calc(100% + .16em); height: .96em; left: -.08em; top: .06em; overflow: visible; animation: brush-in .7s .2s both ease-out; }
+@keyframes brush-in { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+@media (prefers-reduced-motion: reduce) { .story-hero .brush-highlight { animation: none; } }
+.story-intro > p:not(.release-note) { max-width: 700px; margin: 28px 0 0; font-size: 24px; line-height: 1.4; text-wrap: pretty; }
+.story-intro > p:not(.release-note):first-of-type { font-size: 32px; }
+.story-intro > p:not(.release-note) + p:not(.release-note) { margin-top: 14px; }
+.story-intro .inline-wordmark { display: inline-block; width: 112px; height: auto; vertical-align: -0.26em; }
+.story-intro .btn-primary { min-height: 48px; margin-top: 32px; border-radius: 0; text-align: left; }
 .agent-install { width: min(100%, 700px); margin-top: 24px; text-align: left; }
 .agent-install-label { display: block; margin-bottom: 8px; color: #524a55; font-size: 13px; font-weight: 650; }
 .agent-install-prompt { display: flex; align-items: center; gap: 16px; padding: 15px 16px; border: 1px solid #b7a5d8; background: #f5f0e8; }
@@ -4070,15 +4077,20 @@ kbd {
 .agent-install-prompt .copy { flex: none; min-width: 64px; height: 36px; border: 1px solid #7a58c7; border-radius: 0; background: #fff; color: #342d40; }
 .agent-install-prompt .copy:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
 .agent-install-prompt .copy:hover { background: #e7e0ee; }
-.story-intro .release-note { margin: 12px 0 0; color: #524a55; font-size: 13px; line-height: 1.4; }
 .nav .nav-dl { border-radius: 0; }
+.nav .nav-dl[aria-disabled="true"], .nav .nav-dl[aria-disabled="true"]:hover,
+.story-intro .btn-primary[aria-disabled="true"], .story-intro .btn-primary[aria-disabled="true"]:hover {
+  color: #524a55; background: #e7e0ee; cursor: default; transform: none;
+}
 .nav a:focus-visible, .story-hero a:focus-visible, .foot a:focus-visible { outline: 3px solid #7a58c7; outline-offset: 3px; }
 .demo-section { max-width: none; padding: 0 max(24px, calc((100vw - 1200px)/2)) 64px; }
 #demo { scroll-margin-top: 72px; }
 
 @media (max-width: 760px) {
-  .story-hero { min-height: calc(100svh - 62px); padding: 62px 20px; }
-  .story-hero h1 { font-size: clamp(48px, 11vw, 72px); }
-  .story-intro > p:not(.release-note) { font-size: 18px; }
+  .story-hero { min-height: 560px; padding: 62px 20px; }
+  .story-hero h1 { font-size: 42px; line-height: 1.12; }
+  .story-intro > p:not(.release-note) { font-size: 16px; }
+  .story-intro > p:not(.release-note):first-of-type { font-size: 21px; }
+  .story-intro .inline-wordmark { width: 80px; }
   .agent-install-prompt { align-items: flex-start; flex-direction: column; gap: 12px; }
 }

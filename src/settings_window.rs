@@ -619,7 +619,7 @@ impl SettingsWindow {
 }
 
 /// The platform key code for a key GPUI names (`r`, `f5`, `space`), as the hotkeys register it.
-fn key_code(key: &str) -> Option<u32> {
+pub(crate) fn key_code(key: &str) -> Option<u32> {
     #[cfg(not(target_os = "macos"))]
     let named: &[(&str, u32)] = &[
         ("space", 0x20),

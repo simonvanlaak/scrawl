@@ -306,6 +306,9 @@ pub struct TargetInfo {
     pub window_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_id: Option<u32>,
+    /// Selection-time process identity; saved bundles cannot pin a live PID.
+    #[serde(skip)]
+    pub window_owner_pid: Option<i32>,
     pub display_id: u32,
     pub frame: TargetFrame,
 }
@@ -635,6 +638,24 @@ impl RgbaFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_owner_pid_is_runtime_only_and_old_bundles_remain_readable() {
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: Some("Finder".into()),
+            bundle_id: Some("com.apple.finder".into()),
+            window_title: None,
+            window_id: Some(7),
+            window_owner_pid: Some(81),
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 10.0, height: 10.0, scale: 1.0 },
+        };
+        let json = serde_json::to_value(&target).unwrap();
+        assert!(json.get("windowOwnerPid").is_none());
+        let loaded: TargetInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.window_owner_pid, None);
+    }
 
     fn span(t0: u64, t1: u64, name: &str) -> ScreenSpan {
         ScreenSpan {

@@ -1,0 +1,27 @@
+# Issue 99: window-only Mac writer candidate (not Mac-verified)
+
+This checkout contains an implementation candidate, not a verified capture fix. The scope is a six-second Finder `--window` recording's movie cadence. No Mac SDK compile or native recording has been run on this Linux host. Do not ship or install it as a verified recording fix.
+
+## Scope and privacy boundary
+
+Only `CaptureMode::Window` creates `helper/RealtimeWriter.swift`'s app-local writer and SCK image callback. Display and Region keep the existing `SCRecordingOutput` setup, midpoint clock, content-filter exclusions, region source rectangle, screenshot sampler and teardown. They never create a candidate, convert a raw movie through the new writer, or enter its 26-second finish budget. Their filter selection retains main's display fallback. This preserves existing behavior; it is **not** a new privacy certification of Display/Region movies.
+
+The helper has no continuous movie prompt-exclusion mechanism. `helper/ScreenProbe.swift` only takes a permission-probe screenshot with an empty exclusion list. Existing movie exclusions live in Rust: `SystemPrompts` polls CoreGraphics, lists prompt IDs in SCK, updates the stream content filter, drops potentially affected screenshot candidates and pauses screenshots for prompts SCK cannot exclude. These existing mechanisms remain. A forced post-stop check also drops screenshot candidates affected by a prompt still present after teardown. It does not certify a prompt that appeared and disappeared wholly during synchronous native stop, or a prompt missed between polls. Solving that pre-existing movie boundary requires a separately scoped native mechanism and Mac proof; #99 does not manufacture one or disable all Display/Region bundles instead.
+
+The new Window path pins window ID, owner PID and bundle ID. Every filter lookup must resolve that owner and builds a window-only filter; loss of the window cannot become a display capture. Other applications' system-prompt windows are outside that source, including during synchronous stop. A fresh stop image must resolve the same owner and geometry. This is source isolation, not a promise that application-owned dialogs or arbitrary sensitive window contents are redacted.
+
+`unsafe_video` rejects a failed new Window stream, not all legacy movies. With no movie, safe screenshot-only capture still builds a bundle. With no safe screenshots, finalization still refuses to decode an untrusted raw movie into a bundle and retains the existing recovery guard. A candidate error, bad screenshot, identity change or timeout preserves the independently stopped original window movie. Candidate failure is not itself evidence that the original contains different pixels.
+
+## Candidate publication and lifetime
+
+Rust passes borrowed SCK `CMSampleBuffer` pointers synchronously to a versioned Swift ABI. Swift retains each accepted sample before returning, releases it after serial-queue consumption, and bounds pending samples. One pixel-buffer adaptor writes stream samples and the final real screenshot on the same fixed canvas. Native PTS is mapped onto the existing capture/video-offset clock and implausible jumps fail the candidate.
+
+The stop screenshot is timestamped at actual capture completion, strictly after the last accepted PTS and within 500 ms of the stop request. Finish and bounded native tail validation must succeed before atomic replacement. Validation checks the last decoded image against the screenshot and its packet endpoint. Only the waiting caller can publish; a timed-out worker can only delete its candidate. Audio is independent and unchanged. The maximum candidate wait remains 26 seconds for Window only; actual Mac stop latency and the 500 ms gate remain unverified.
+
+The dylib loader uses one process-lifetime `OnceLock`, including cached load/symbol errors. It no longer takes a new `dlopen` reference per capture. It deliberately does not unload: Swift queue and AVFoundation completion closures can outlive destroy or finish timeout. A failed load requires process restart after repairing the installed dylib. Existing media leases and scratch retention are unchanged by this correction.
+
+## Verification and remaining Mac proof
+
+Linux checks cover the mode gate, pinned identity rejection, stop-frame timestamp constraints, validation-before-replacement, timeout/late-worker cleanup and safe screenshot-only finalization. Python source-wiring checks cover the legacy path, window-only candidate, singleton loader, packaging and publication checks. Linux test builds also compile the SDK-independent Rust ABI caller; this does not compile the SCK adapter or Swift library.
+
+Before publication: compile the Mac Rust and Swift paths with the target SDK; verify dylib symbols, loader path and signatures in the installed app. On an isolated Mac display or VM, run the six-second idle Finder window probe (`scripts/tests/mac_recording_cadence.py`), changing-window capture, callback and encoder failures, owner loss/recycled ID, window move/resize, rejected/slow screenshot, finish timeout and original-preserved paths. Inspect packet timestamps and the decoded last image, plus a real bundle's manifest, summary, contact sheet and frames. Verify Display/Region still capture normally, prompt exclusions and screenshot-only fallback. Do not infer native safety or cadence from Linux tests, and do not record Kit's desk Mac.

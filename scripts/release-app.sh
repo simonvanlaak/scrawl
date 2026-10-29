@@ -26,6 +26,7 @@ mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources" "${AP
 
 cp -f "${REPO_DIR}/target/release/apparent" "${APP_BUNDLE}/Contents/MacOS/apparent"
 cp -f "${REPO_DIR}/target/release/apparent-helper" "${APP_BUNDLE}/Contents/MacOS/apparent-helper"
+cp -f "${REPO_DIR}/target/release/libapparent_realtime_writer.dylib" "${APP_BUNDLE}/Contents/Frameworks/"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/apparent" "${APP_BUNDLE}/Contents/MacOS/apparent-helper"
 
 cp -f "${REPO_DIR}/assets/Apparent.icns" "${APP_BUNDLE}/Contents/Resources/Apparent.icns"
@@ -109,6 +110,7 @@ SPARKLE_VER="${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework/Versions/B"
 "${SIGN[@]}" "${SPARKLE_VER}/Autoupdate"
 "${SIGN[@]}" "${SPARKLE_VER}/Updater.app"
 "${SIGN[@]}" "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
+"${SIGN[@]}" --identifier "dev.kitlangton.apparent.realtime-writer" "${APP_BUNDLE}/Contents/Frameworks/libapparent_realtime_writer.dylib"
 "${SIGN[@]}" --entitlements "${ENTITLEMENTS}" --identifier "dev.kitlangton.apparent.helper" "${APP_BUNDLE}/Contents/MacOS/apparent-helper"
 "${SIGN[@]}" --entitlements "${ENTITLEMENTS}" --identifier "dev.kitlangton.apparent" "${APP_BUNDLE}"
 

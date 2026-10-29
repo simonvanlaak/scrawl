@@ -36,6 +36,7 @@ class PreviewReleaseTest(unittest.TestCase):
                 '#!/bin/sh\nmkdir -p target/release\n'
                 'printf "test" > target/release/apparent\n'
                 'printf "test" > target/release/apparent-helper\n'
+                'printf "test" > target/release/libapparent_realtime_writer.dylib\n'
             )
             (root / "bin/plutil").write_text('#!/bin/sh\nexit 0\n')
             (root / "bin/codesign").write_text('#!/bin/sh\nexit 0\n')
@@ -63,6 +64,7 @@ class PreviewReleaseTest(unittest.TestCase):
             self.assertIn("preview-mac-feed/appcast.xml", info["SUFeedURL"])
             self.assertEqual(info["SUPublicEDKey"], env["APPARENT_PREVIEW_PUBLIC_KEY"])
             self.assertTrue((root / "dist/Apparent Preview.app/Contents/Frameworks/Sparkle.framework").is_dir())
+            self.assertEqual((root / "dist/Apparent Preview.app/Contents/Frameworks/libapparent_realtime_writer.dylib").read_bytes(), b"test")
             for asset in ("fonts/HostGrotesk-Variable.ttf", "brand/apparent-wordmark.png",
                           "Apparent.icns", "brand/apparent-a.png"):
                 self.assertEqual(

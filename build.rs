@@ -18,6 +18,7 @@ fn main() {
     }
     compile_laser_shader();
     compile_helper();
+    compile_realtime_writer();
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     if let Ok(output) = Command::new("xcode-select").arg("-p").output()
         && output.status.success()
@@ -195,6 +196,7 @@ fn compile_helper() {
         .expect("helper/ is missing")
         .filter_map(|entry| entry.ok().map(|e| e.path()))
         .filter(|path| path.extension().is_some_and(|ext| ext == "swift"))
+        .filter(|path| path.file_name().is_some_and(|name| name != "RealtimeWriter.swift"))
         .collect();
     sources.sort();
     for source in &sources {
@@ -257,4 +259,32 @@ fn compile_helper() {
     let dest = profile_dir.join("apparent-helper");
     let _ = std::fs::remove_file(&dest);
     std::fs::copy(&built, dest).expect("Could not place apparent-helper");
+}
+
+/// A separate dlopen-only writer; the helper executable must not contain these exports.
+fn compile_realtime_writer() {
+    let source = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("helper/RealtimeWriter.swift");
+    println!("cargo:rerun-if-changed={}", source.display());
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let profile_dir = out_dir.ancestors().nth(3).expect("Unexpected OUT_DIR layout");
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH");
+    let arch = match target_arch.as_deref() {
+        Ok("aarch64") => "arm64",
+        Ok(other) => other,
+        Err(_) => "arm64",
+    };
+    let name = "libapparent_realtime_writer.dylib";
+    let built = out_dir.join(name);
+    let status = Command::new("xcrun")
+        .args(["swiftc", "-O", "-swift-version", "5", "-emit-library", "-target"])
+        .arg(format!("{arch}-apple-macos15.0"))
+        .arg(&source)
+        .args(["-module-name", "ApparentRealtimeWriter", "-Xlinker", "-install_name", "-Xlinker", "@rpath/libapparent_realtime_writer.dylib"])
+        .arg("-o")
+        .arg(&built)
+        .status()
+        .expect("xcrun swiftc is required to build the realtime writer");
+    assert!(status.success(), "realtime writer dylib failed to compile");
+    std::fs::copy(&built, profile_dir.join(name)).expect("Could not stage realtime writer");
 }

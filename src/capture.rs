@@ -18,6 +18,96 @@ use crate::model::{
 mod platform;
 pub use platform::*;
 
+// The ABI caller itself is Unix-only, not SDK-dependent. Compile it in Linux
+// tests too so ordinary Rust type/lifetime mistakes cannot hide behind cfg.
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+mod realtime_writer;
+
+/// Validation must finish before the rename. A failed candidate never modifies the
+/// independent ScreenCaptureKit movie (or the separately recorded audio.wav).
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn publish_validated_movie(
+    original: &Path,
+    candidate: &Path,
+    validate: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    validate(candidate)?;
+    anyhow::ensure!(original.is_file() && candidate.is_file(), "missing movie");
+    anyhow::ensure!(
+        original.parent() == candidate.parent(),
+        "candidate must be beside original for atomic replacement"
+    );
+    std::fs::rename(candidate, original).context("publish validated movie")
+}
+
+/// Only the waiting caller can publish; a late worker can only drop its file.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+struct ValidatedCandidate(PathBuf);
+
+impl Drop for ValidatedCandidate {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn bounded_candidate(
+    timeout: Duration,
+    work: impl FnOnce() -> Result<ValidatedCandidate> + Send + 'static,
+) -> Result<ValidatedCandidate> {
+    let begun = Instant::now();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    thread::Builder::new().name("apparent-movie-finish".into()).spawn(move || {
+        let _ = sender.send(work());
+    })?;
+    let remaining = timeout.checked_sub(begun.elapsed()).unwrap_or_default();
+    let candidate = receiver.recv_timeout(remaining).context("candidate finish/validation timed out")??;
+    Ok(candidate)
+}
+
+/// Issue #99 changes window cadence only. Display/Region retain their SCK recorder.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn uses_realtime_writer(mode: CaptureMode) -> bool {
+    mode == CaptureMode::Window
+}
+
+/// Stamp the actual image, not the earlier stop request; reject slow stop images.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn stop_frame_pts(stop_ms: u64, offset_ms: u64, last_ms: i64, screenshot_start: u64, screenshot_end: u64) -> Option<i64> {
+    const MAX_STOP_LAG_MS: u64 = 500;
+    if stop_ms == 0 || stop_ms <= offset_ms || screenshot_start < stop_ms
+        || screenshot_end < screenshot_start || screenshot_end - stop_ms > MAX_STOP_LAG_MS
+    {
+        return None;
+    }
+    let pts = i64::try_from(screenshot_end.checked_sub(offset_ms)?).ok()?;
+    (pts > last_ms).then_some(pts)
+}
+
+/// A window ID can be recycled. A stop-time image must still belong to the selected app
+/// and the process pinned when recording began; missing identity data fails closed.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn same_window_owner(
+    target: &TargetInfo,
+    window_id: u32,
+    owner_pid: i32,
+    bundle_id: &str,
+    _app_name: &str,
+) -> bool {
+    target.window_owner_pid.is_some_and(|pid| pid > 0 && pid == owner_pid)
+        && same_window_identity(target, window_id, bundle_id)
+}
+
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn same_window_identity(
+    target: &TargetInfo,
+    window_id: u32,
+    bundle_id: &str,
+) -> bool {
+    target.mode == CaptureMode::Window
+        && target.window_id == Some(window_id)
+        && target.bundle_id.as_deref() == Some(bundle_id)
+        && !bundle_id.is_empty()
+}
+
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// Candidate frames only feed scene diffs and keyframe selection; the keyframes themselves are
 /// decoded from `recording.mp4` at full size afterwards.
@@ -117,6 +207,9 @@ pub struct ScreenRecording {
     pub duration_ms: u64,
     /// The capture time (on the frames' clock) of the video's start.
     pub video_offset_ms: u64,
+    /// A new window-only stream failed its safety checks. Not a new certification
+    /// of legacy Display/Region recording. No movie means safe screenshots still work.
+    pub unsafe_video: bool,
 }
 
 /// Live UI events emitted by the global input monitor to drive Apparent's HUD & Review windows.
@@ -536,6 +629,7 @@ pub fn region_target(
         window_title: hit.and_then(|window| window.window_title.clone()),
         window_id: None,
         display_id,
+        window_owner_pid: None,
         frame: TargetFrame {
             x,
             y,
@@ -573,6 +667,10 @@ pub(crate) struct Sampler {
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
     pub video_offset_ms: Arc<AtomicU64>,
+    #[cfg(target_os = "macos")]
+    pub unsafe_video: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    pub stop_requested_ms: Arc<AtomicU64>,
 }
 
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture
@@ -583,6 +681,10 @@ pub struct ScreenCaptureSession {
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
     video_offset_ms: Arc<AtomicU64>,
+    #[cfg(target_os = "macos")]
+    unsafe_video: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    stop_requested_ms: Arc<AtomicU64>,
     sampler_thread: Option<JoinHandle<Option<PathBuf>>>,
     _recording: crate::retention::Recording,
 }
@@ -598,11 +700,20 @@ impl ScreenCaptureSession {
         let urgent_snapshot = Arc::new(AtomicBool::new(true));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
         let video_offset_ms = Arc::new(AtomicU64::new(0));
+        // A crashed sampler cannot certify a movie as prompt-free.
+        #[cfg(target_os = "macos")]
+        let unsafe_video = Arc::new(AtomicBool::new(true));
+        #[cfg(target_os = "macos")]
+        let stop_requested_ms = Arc::new(AtomicU64::new(0));
 
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
         let thread_offset = Arc::clone(&video_offset_ms);
+        #[cfg(target_os = "macos")]
+        let thread_unsafe_video = Arc::clone(&unsafe_video);
+        #[cfg(target_os = "macos")]
+        let thread_stop_ms = Arc::clone(&stop_requested_ms);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
             .name("apparent-frame-sampler".into())
@@ -616,6 +727,10 @@ impl ScreenCaptureSession {
                     urgent: thread_urgent,
                     frames: thread_frames,
                     video_offset_ms: thread_offset,
+                    #[cfg(target_os = "macos")]
+                    unsafe_video: thread_unsafe_video,
+                    #[cfg(target_os = "macos")]
+                    stop_requested_ms: thread_stop_ms,
                 })
             })
             .ok();
@@ -626,6 +741,10 @@ impl ScreenCaptureSession {
             urgent_snapshot,
             frames,
             video_offset_ms,
+            #[cfg(target_os = "macos")]
+            unsafe_video,
+            #[cfg(target_os = "macos")]
+            stop_requested_ms,
             sampler_thread,
             _recording: crate::retention::Recording::start(),
         }
@@ -644,6 +763,8 @@ impl ScreenCaptureSession {
 
     pub fn stop(mut self) -> ScreenRecording {
         let duration_ms = self.elapsed_ms();
+        #[cfg(target_os = "macos")]
+        self.stop_requested_ms.store(duration_ms, Ordering::Release);
         self.stopping.store(true, Ordering::Release);
         let video_path = self
             .sampler_thread
@@ -668,6 +789,12 @@ impl ScreenCaptureSession {
             video: valid_video,
             duration_ms: duration_ms.max(100),
             video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
+            unsafe_video: {
+                #[cfg(target_os = "macos")]
+                { self.unsafe_video.load(Ordering::Acquire) }
+                #[cfg(not(target_os = "macos"))]
+                { false }
+            },
         }
     }
 }
@@ -1523,6 +1650,142 @@ mod tests {
     use super::*;
 
     #[test]
+    fn failed_candidate_validation_preserves_original_movie_and_audio() {
+        let dir = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let original = dir.join("recording.mp4");
+        let candidate = dir.join("candidate.mp4");
+        let audio = dir.join("audio.wav");
+        std::fs::write(&original, b"original media").unwrap();
+        std::fs::write(&candidate, b"bad candidate").unwrap();
+        std::fs::write(&audio, b"independent audio").unwrap();
+        assert!(publish_validated_movie(&original, &candidate, |_| anyhow::bail!("bad tail")).is_err());
+        assert_eq!(std::fs::read(original).unwrap(), b"original media");
+        assert_eq!(std::fs::read(audio).unwrap(), b"independent audio");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validated_candidate_replaces_movie_without_touching_audio() {
+        let dir = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let original = dir.join("recording.mp4");
+        let candidate = dir.join("candidate.mp4");
+        let audio = dir.join("audio.wav");
+        std::fs::write(&original, b"old frames").unwrap();
+        std::fs::write(&candidate, b"validated frames and stop tail").unwrap();
+        std::fs::write(&audio, b"independent audio").unwrap();
+        publish_validated_movie(&original, &candidate, |path| {
+            anyhow::ensure!(std::fs::read(path)? == b"validated frames and stop tail", "invalid tail");
+            Ok(())
+        }).unwrap();
+        assert_eq!(std::fs::read(original).unwrap(), b"validated frames and stop tail");
+        assert!(!candidate.exists());
+        assert_eq!(std::fs::read(audio).unwrap(), b"independent audio");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stop_window_identity_rejects_recycled_id_and_owner() {
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: Some("Finder".into()),
+            bundle_id: Some("com.apple.finder".into()),
+            window_title: None,
+            window_id: Some(7),
+            window_owner_pid: Some(81),
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
+        };
+        assert!(same_window_owner(&target, 7, 81, "com.apple.finder", "Finder"));
+        // Picker label cleanup must not affect the pinned process identity.
+        assert!(same_window_owner(&target, 7, 81, "com.apple.finder", "Finder  "));
+        // A stop image cannot be authenticated by its reusable window ID alone.
+        assert!(!same_window_owner(&TargetInfo {window_owner_pid: None, ..target.clone()}, 7, 81, "com.apple.finder", "Finder"));
+        assert!(!same_window_owner(&TargetInfo {window_owner_pid: Some(0), ..target.clone()}, 7, 81, "com.apple.finder", "Finder"));
+        assert!(!same_window_owner(&target, 7, 82, "com.apple.finder", "Finder"));
+        assert!(!same_window_owner(&target, 7, 81, "com.other", "Finder"));
+        assert!(!same_window_owner(&target, 8, 81, "com.apple.finder", "Finder"));
+        assert!(!same_window_owner(&TargetInfo { bundle_id: None, ..target.clone() }, 7, 81, "com.apple.finder", "Finder"));
+        assert!(!same_window_owner(&TargetInfo { mode: CaptureMode::Display, ..target }, 7, 81, "com.apple.finder", "Finder"));
+    }
+
+    #[test]
+    fn display_region_are_not_new_writer_or_privacy_certification_targets() {
+        for mode in [CaptureMode::Display, CaptureMode::Region] {
+            assert!(!uses_realtime_writer(mode));
+        }
+        assert!(uses_realtime_writer(CaptureMode::Window));
+    }
+
+    #[test]
+    fn candidate_timeout_returns_failure_without_publication() {
+        let (release, wait) = std::sync::mpsc::channel();
+        let result = bounded_candidate(Duration::from_millis(5), move || {
+            wait.recv().unwrap();
+            anyhow::bail!("late native failure")
+        });
+        release.send(()).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stop_frame_stamps_capture_time_and_rejects_stale_screenshots() {
+        assert_eq!(stop_frame_pts(1_000, 100, 850, 1_020, 1_040), Some(940));
+        assert_eq!(stop_frame_pts(1_000, 100, 850, 1_020, 1_501), None);
+        assert_eq!(stop_frame_pts(1_000, 100, 940, 1_020, 1_040), None);
+        assert_eq!(stop_frame_pts(1_000, 1_000, 0, 1_020, 1_040), None);
+    }
+
+    #[test]
+    fn timed_out_candidate_cannot_publish_late() {
+        let dir = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let original = dir.join("recording.mp4");
+        let candidate = dir.join("candidate.mp4");
+        std::fs::write(&original, b"original").unwrap();
+        let (release, wait) = std::sync::mpsc::sync_channel::<()>(0);
+        let (finished, done) = std::sync::mpsc::sync_channel::<()>(0);
+        let path = candidate.clone();
+        assert!(bounded_candidate(Duration::from_millis(10), move || {
+            wait.recv().unwrap();
+            std::fs::write(&path, b"candidate").unwrap();
+            let guard = ValidatedCandidate(path);
+            let _ = finished.send(());
+            Ok(guard)
+        }).is_err());
+        release.send(()).unwrap();
+        done.recv_timeout(Duration::from_secs(2)).unwrap();
+        // The worker's channel send drops the guard when the receiver is gone.
+        for _ in 0..100 {
+            if !candidate.exists() { break; }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!candidate.exists());
+        assert_eq!(std::fs::read(&original).unwrap(), b"original");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validated_candidate_waits_for_caller_privacy_decision() {
+        let dir = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let original = dir.join("recording.mp4");
+        let candidate = dir.join("candidate.mp4");
+        std::fs::write(&original, b"original").unwrap();
+        let path = candidate.clone();
+        let ready = bounded_candidate(Duration::from_secs(1), move || {
+            std::fs::write(&path, b"candidate")?;
+            Ok(ValidatedCandidate(path))
+        }).unwrap();
+        // An unsafe postwait check drops the guard rather than publishing.
+        drop(ready);
+        assert_eq!(std::fs::read(&original).unwrap(), b"original");
+        assert!(!candidate.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn screen_stop_joins_worker_before_collecting_its_final_media() {
         let stopping = Arc::new(AtomicBool::new(false));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
@@ -1844,6 +2107,7 @@ mod tests {
                 window_title: None,
                 window_id: None,
                 display_id: 2,
+                window_owner_pid: None,
                 frame,
             };
             // Windows frames are pixels already and never upscaled.
@@ -2037,6 +2301,10 @@ mod tests {
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
+            #[cfg(target_os = "macos")]
+            unsafe_video: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            stop_requested_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),
         };
@@ -2051,6 +2319,7 @@ mod tests {
             bundle_id: None,
             window_title: None,
             window_id: None,
+            window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame {
                 x: 0.0,
@@ -2101,6 +2370,7 @@ mod tests {
             bundle_id: None,
             window_title: Some(format!("Window {id}")),
             window_id: Some(id),
+            window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame {
                 x,

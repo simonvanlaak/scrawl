@@ -187,6 +187,41 @@ fn recording() -> bool {
     RECORDING.load(Ordering::Acquire) > 0
 }
 
+/// An advisory directory lock, also visible to a separate `apparent clean`
+/// process. Closing the descriptor releases it, including after a crash.
+#[cfg(unix)]
+pub(crate) struct MediaLease { _file: std::fs::File }
+
+#[cfg(unix)]
+fn media_lease(dir: &Path, exclusive: bool) -> Result<MediaLease> {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::File::open(dir)?;
+    let operation = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH };
+    // SAFETY: flock borrows this live descriptor; LOCK_NB never waits on capture.
+    let result = unsafe { libc::flock(file.as_raw_fd(), operation | libc::LOCK_NB) };
+    if result != 0 { return Err(std::io::Error::last_os_error().into()); }
+    Ok(MediaLease { _file: file })
+}
+
+#[cfg(unix)]
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+pub(crate) fn candidate_media_lease(dir: &Path) -> Result<MediaLease> {
+    media_lease(dir, false)
+}
+
+/// Candidate names are private writer output, never user-selected files.
+fn candidate_movies(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut paths: Vec<_> = entries.filter_map(Result::ok).filter_map(|entry| {
+        let name = entry.file_name();
+        let name = name.to_str()?;
+        (name.starts_with(".candidate-") && name.ends_with(".mp4")
+            && entry.file_type().ok()?.is_file()).then(|| entry.path())
+    }).collect();
+    paths.sort();
+    paths
+}
+
 // MARK: Planning
 
 #[derive(Debug, Default, Deserialize)]
@@ -316,12 +351,13 @@ pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
             continue;
         }
         if due(policy.media_days) {
-            let items: Vec<PathBuf> = crate::handoff::HEAVY_MEDIA
+            let mut items: Vec<PathBuf> = crate::handoff::HEAVY_MEDIA
                 .iter()
                 .chain(&DERIVED_MEDIA)
                 .map(|rel| dir.join(rel))
                 .filter(|p| p.exists())
                 .collect();
+            items.extend(candidate_movies(&dir));
             if !items.is_empty() {
                 actions.push(Action::TrashMedia { bundle: dir, items });
             }
@@ -487,6 +523,10 @@ pub fn apply(actions: &[Action], policy: &Policy, trasher: Trasher, shrink: bool
         let Some(_claim) = claim(bundle) else {
             continue;
         };
+        #[cfg(unix)]
+        let Ok(_media_lease) = media_lease(bundle, true) else {
+            continue;
+        };
         let now = SystemTime::now();
         if live_marker(bundle, crate::handoff::MEDIA_PENDING, now)
             || live_marker(bundle, MEDIA_SENDING, now)
@@ -600,6 +640,21 @@ fn sweep_leftovers(captures: &Path, now: SystemTime) {
         return;
     };
     for path in entries.filter_map(|e| e.ok().map(|e| e.path())) {
+        // Crash-only scratch cleanup is independent of manifests/recovery and
+        // retention policy. Active native writers hold a shared directory lease
+        // even after their caller times out; never touch their output.
+        if path.extension().is_some_and(|ext| ext == "apparent") && path.is_dir()
+            && !is_claimed(&path) {
+            #[cfg(unix)]
+            if let Ok(_lease) = media_lease(&path, true) {
+                for candidate in candidate_movies(&path) {
+                    if modified_ago(&candidate, now)
+                        .is_some_and(|ago| ago > Duration::from_secs(6 * 3600)) {
+                        let _ = std::fs::remove_file(candidate);
+                    }
+                }
+            }
+        }
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -902,6 +957,57 @@ mod tests {
 
     fn planned(captures: &Path, policy: &Policy) -> Vec<Action> {
         plan(captures, policy, later())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cleanup_respects_active_candidate_directory_lock() {
+        use std::os::fd::AsRawFd;
+        let tmp = TempDir::new("candidate-active");
+        let old = bundle(&tmp.0, "apparent-old", 8.0, false);
+        let candidate = old.join(".candidate-active.mp4");
+        std::fs::write(&candidate, b"active candidate").unwrap();
+        let lock = std::fs::File::open(&old).unwrap();
+        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) }, 0);
+        let actions = vec![Action::TrashMedia { bundle: old.clone(), items: vec![candidate.clone()] }];
+        let remove = |path: &Path| -> Result<()> { std::fs::remove_dir_all(path)?; Ok(()) };
+        assert_eq!(apply(&actions, &Policy::default(), &remove, false), Report::default());
+        assert!(candidate.exists(), "active native candidate must not be moved");
+        drop(lock);
+        assert_eq!(apply(&actions, &Policy::default(), &remove, false).media_trashed, 1);
+        assert!(!candidate.exists());
+    }
+
+    #[test]
+    fn inactive_crash_candidates_are_swept_without_requiring_a_manifest() {
+        let tmp = TempDir::new("candidate-crash");
+        let dir = tmp.0.join("apparent-crashed.apparent");
+        std::fs::create_dir(&dir).unwrap();
+        let stale = dir.join(".candidate-abandoned.mp4");
+        marker(&dir, ".candidate-abandoned.mp4", SystemTime::now() - Duration::from_secs(8 * 3600));
+        let recent = dir.join(".candidate-recent.mp4");
+        std::fs::write(&recent, b"recent").unwrap();
+        let unrelated = dir.join("candidate-user.mp4");
+        std::fs::write(&unrelated, b"keep").unwrap();
+        let lease = candidate_media_lease(&dir).unwrap();
+        sweep_leftovers(&tmp.0, SystemTime::now());
+        assert!(stale.exists(), "even an old candidate is protected while its writer is alive");
+        drop(lease);
+        sweep_leftovers(&tmp.0, SystemTime::now());
+        assert!(!stale.exists());
+        assert!(recent.exists());
+        assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn crashed_candidates_are_heavy_media() {
+        let tmp = TempDir::new("candidate-media");
+        let old = bundle(&tmp.0, "apparent-old", 8.0, false);
+        let candidate = old.join(".candidate-crashed.mp4");
+        std::fs::write(&candidate, b"private candidate").unwrap();
+        let actions = planned(&tmp.0, &Policy::default());
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::TrashMedia { items, .. } if items.contains(&candidate))));
     }
 
     #[test]

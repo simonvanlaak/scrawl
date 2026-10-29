@@ -871,6 +871,7 @@ mod tests {
                 bundle_id: None,
                 window_title: None,
                 window_id: None,
+                window_owner_pid: None,
                 display_id: 1,
                 frame: TargetFrame {
                     x: 0.0,

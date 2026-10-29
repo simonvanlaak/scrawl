@@ -22,8 +22,10 @@ taskpolicy -c utility cargo build -j 3
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${FRAMEWORKS_DIR}" "${HOME}/bin"
 
 rm -f "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
+rm -f "${FRAMEWORKS_DIR}/libapparent_realtime_writer.dylib"
 cp -f "${REPO_DIR}/target/debug/apparent" "${MACOS_DIR}/apparent"
 cp -f "${REPO_DIR}/target/debug/apparent-helper" "${MACOS_DIR}/apparent-helper"
+cp -f "${REPO_DIR}/target/debug/libapparent_realtime_writer.dylib" "${FRAMEWORKS_DIR}/"
 chmod +x "${MACOS_DIR}/apparent" "${MACOS_DIR}/apparent-helper"
 
 cp -f "${REPO_DIR}/assets/Apparent.icns" "${RESOURCES_DIR}/Apparent.icns"
@@ -104,6 +106,7 @@ if [[ -d "${FRAMEWORKS_DIR}/Sparkle.framework/Versions/B" ]]; then
   codesign --force --sign "${IDENTITY}" "${SPARKLE_VER}/Updater.app"
   codesign --force --sign "${IDENTITY}" "${FRAMEWORKS_DIR}/Sparkle.framework"
 fi
+codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.apparent.realtime-writer" "${FRAMEWORKS_DIR}/libapparent_realtime_writer.dylib"
 codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.apparent.helper" "${MACOS_DIR}/apparent-helper"
 codesign --force --sign "${IDENTITY}" --identifier "dev.kitlangton.apparent" "${APP_DIR}"
 

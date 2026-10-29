@@ -327,6 +327,7 @@ fn window_target(window: &win::WindowInfo, app: &str, id: &str) -> TargetInfo {
         bundle_id: Some(id.to_owned()),
         window_title: Some(clean_label(&window.title)).filter(|t| !t.is_empty()),
         window_id: Some(window.hwnd as u32),
+        window_owner_pid: None,
         display_id: display_index(monitor.as_ref()),
         frame: frame_of(window.rect, monitor.map_or(1.0, |m| m.scale)),
     }
@@ -372,6 +373,7 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
             .map(|w| clean_label(&w.title))
             .filter(|t| !t.is_empty()),
         window_id: None,
+        window_owner_pid: None,
         display_id: index as u32,
         frame: frame_of(rect, scale),
     }

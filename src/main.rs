@@ -862,7 +862,14 @@ pub fn finalize_capture_bundle(
         video: video_path,
         duration_ms,
         video_offset_ms,
+        unsafe_video,
     } = recording;
+    // A failed new window stream must not enter movie decode. This is not a
+    // blanket certification of legacy movies. With no movie, safe screenshots work.
+    if unsafe_video && video_path.is_some() {
+        recover::mark_unsafe_video(bundle_dir)?;
+        anyhow::bail!("unsafe screen stream; raw movie retained privately, no bundle or movie decode");
+    }
     if frames.is_empty() {
         // The MP4 stream can succeed even when every screenshot fails. Do not turn
         // it into keyframes here: the sampler drops screenshots while a system
@@ -1421,6 +1428,7 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBu
         bundle_id: Some("ai.opencode.desktop".into()),
         window_title: Some("session/tool-running — OpenCode".into()),
         window_id: Some(4210),
+        window_owner_pid: None,
         display_id: 1,
         frame: TargetFrame {
             x: 100.0,
@@ -1585,6 +1593,16 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBu
     )
 }
 
+fn ensure_requested_window(query: Option<&str>, target: &TargetInfo) -> Result<()> {
+    if let Some(query) = query {
+        anyhow::ensure!(
+            target.mode == CaptureMode::Window && target.window_id.is_some(),
+            "No selectable window matches {query:?}; refusing to record a display instead"
+        );
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     linux::prepare_process();
@@ -1719,6 +1737,7 @@ fn main() -> Result<()> {
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
             let target = discover_target(window.as_deref());
+            ensure_requested_window(window.as_deref(), &target)?;
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
@@ -1916,6 +1935,7 @@ fn main() -> Result<()> {
                                 video: Some(linked),
                                 duration_ms: old.duration_ms,
                                 video_offset_ms: offset,
+                                unsafe_video: false,
                             },
                             iter_strokes,
                             iter_events,
@@ -2440,6 +2460,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn safe_screenshots_without_a_movie_survive_uncertified_video_state() {
+        for mode in [CaptureMode::Display, CaptureMode::Region, CaptureMode::Window] {
+            let dir = std::env::temp_dir().join(make_bundle_id());
+            crate::recover::begin_screen_capture(&dir).unwrap();
+            let target = TargetInfo {
+                mode, app: None, bundle_id: None, window_title: None,
+                window_id: None, window_owner_pid: None, display_id: 1,
+                frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+            };
+            let result = finalize_capture_bundle(&dir, target, capture::ScreenRecording {
+                frames: vec![RgbaFrame::new(0, 32, 32, vec![255; 32 * 32 * 4])],
+                video: None, duration_ms: 1_000, video_offset_ms: 0, unsafe_video: true,
+            }, Vec::new(), Vec::new(), None, None, windows::ActivityLog::default(), None);
+            assert!(result.is_ok(), "safe screenshot fallback failed: {:?}", result.err());
+            let manifest: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(dir.join("apparent.json")).unwrap()).unwrap();
+            assert!(manifest["video"].is_null());
+            assert!(dir.join("contact-sheet.png").is_file());
+            assert!(!dir.join(crate::recover::UNSAFE_VIDEO).exists());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn legacy_display_region_movies_still_finalize_with_safe_screenshot_fallback() {
+        for mode in [CaptureMode::Display, CaptureMode::Region] {
+            let dir = std::env::temp_dir().join(make_bundle_id());
+            crate::recover::begin_screen_capture(&dir).unwrap();
+            // Deliberately undecodable: exercise decoder fallback, not pretend
+            // this Linux host has recorded an SCK movie.
+            let movie = dir.join("recording.mp4");
+            std::fs::write(&movie, b"undecodable legacy movie").unwrap();
+            let target = TargetInfo {
+                mode, app: None, bundle_id: None, window_title: None,
+                window_id: None, window_owner_pid: None, display_id: 1,
+                frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+            };
+            let (_, bundle, _) = finalize_capture_bundle(&dir, target, capture::ScreenRecording {
+                frames: vec![RgbaFrame::new(0, 32, 32, vec![255; 32 * 32 * 4])],
+                video: Some(movie.clone()), duration_ms: 1_000, video_offset_ms: 0, unsafe_video: false,
+            }, Vec::new(), Vec::new(), None, None, windows::ActivityLog::default(), None).unwrap();
+            assert!(bundle.video.is_some());
+            assert!(dir.join("contact-sheet.png").is_file());
+            assert_eq!(std::fs::read(movie).unwrap(), b"undecodable legacy movie");
+            assert!(!dir.join(crate::recover::UNSAFE_VIDEO).exists());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn movie_without_safe_screenshots_is_not_a_bundle() {
         let dir = std::env::temp_dir().join(make_bundle_id());
         std::fs::create_dir(&dir).unwrap();
@@ -2452,34 +2522,68 @@ mod tests {
             bundle_id: None,
             window_title: None,
             window_id: None,
+            window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
         };
         let error = finalize_capture_bundle(
-            &dir,
-            target,
+            &dir, target,
             capture::ScreenRecording {
-                frames: Vec::new(),
-                video: Some(movie.clone()),
-                duration_ms: 1_000,
-                video_offset_ms: 0,
+                frames: Vec::new(), video: Some(movie.clone()), duration_ms: 1_000, video_offset_ms: 0, unsafe_video: false,
             },
-            Vec::new(),
-            Vec::new(),
-            None,
-            None,
-            windows::ActivityLog::default(),
-            None,
-        )
-        .err()
-        .expect("a movie alone is not a safe screenshot candidate");
+            Vec::new(), Vec::new(), None, None, windows::ActivityLog::default(), None,
+        ).err().expect("a movie alone is not a safe screenshot candidate");
         assert!(error.to_string().contains(&movie.display().to_string()));
         assert!(movie.exists());
         assert!(!dir.join("apparent.json").exists());
         assert!(dir.join(crate::recover::UNSAFE_VIDEO).exists());
-        assert!(!crate::recover::owed(&dir), "a later recovery must not decode unsafe movie frames");
+        assert!(!crate::recover::owed(&dir));
         assert!(crate::recover::rebuild(&dir, &crate::recover::Media::SYSTEM).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unsafe_stream_with_a_safe_candidate_frame_is_not_published_or_decoded() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        crate::recover::begin_screen_capture(&dir).unwrap();
+        let movie = dir.join("recording.mp4");
+        std::fs::write(&movie, b"private raw movie").unwrap();
+        let target = TargetInfo {
+            mode: CaptureMode::Display, app: None, bundle_id: None, window_title: None,
+            window_id: None, window_owner_pid: None, display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let error = finalize_capture_bundle(&dir, target, capture::ScreenRecording {
+            frames: vec![RgbaFrame::new(0, 32, 32, vec![0; 32 * 32 * 4])],
+            video: Some(movie.clone()), duration_ms: 1_000, video_offset_ms: 0, unsafe_video: true,
+        }, Vec::new(), Vec::new(), None, None, windows::ActivityLog::default(), None)
+            .err().expect("unsafe movie must not reach the bundle builder");
+        assert!(error.to_string().contains("unsafe"), "{error:#}");
+        assert_eq!(std::fs::read(&movie).unwrap(), b"private raw movie");
+        assert!(!dir.join("apparent.json").exists());
+        assert!(!crate::recover::owed(&dir));
+        assert!(crate::recover::rebuild(&dir, &crate::recover::Media::SYSTEM).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explicit_window_recording_never_falls_back_to_a_display() {
+        let mut target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            window_owner_pid: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
+        };
+        assert!(ensure_requested_window(None, &target).is_ok());
+        assert!(ensure_requested_window(Some("Finder"), &target).is_err());
+        target.mode = CaptureMode::Window;
+        assert!(ensure_requested_window(Some("Finder"), &target).is_err());
+        target.window_id = Some(42);
+        assert!(ensure_requested_window(Some("Finder"), &target).is_ok());
     }
 
     #[test]
@@ -2508,6 +2612,7 @@ mod tests {
             bundle_id: None,
             window_title: None,
             window_id: None,
+            window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
         };
@@ -2652,7 +2757,7 @@ mod tests {
         let bundle_dir = dir.join("fallback.apparent");
         let target = TargetInfo {
             mode: CaptureMode::Window,
-            app: None, bundle_id: None, window_title: None, window_id: None,
+            app: None, bundle_id: None, window_title: None, window_id: None, window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
         };
@@ -2688,7 +2793,7 @@ mod tests {
         let bundle_dir = root.join("fallback.apparent");
         let target = TargetInfo {
             mode: CaptureMode::Display,
-            app: None, bundle_id: None, window_title: None, window_id: None,
+            app: None, bundle_id: None, window_title: None, window_id: None, window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 480.0, height: 300.0, scale: 1.0 },
         };
@@ -2742,7 +2847,7 @@ mod tests {
         let root = std::env::temp_dir().join(make_bundle_id());
         let target = TargetInfo {
             mode: CaptureMode::Display,
-            app: None, bundle_id: None, window_title: None, window_id: None,
+            app: None, bundle_id: None, window_title: None, window_id: None, window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
         };
@@ -2773,7 +2878,7 @@ mod tests {
         let root = std::env::temp_dir().join(make_bundle_id());
         let target = TargetInfo {
             mode: CaptureMode::Display,
-            app: None, bundle_id: None, window_title: None, window_id: None,
+            app: None, bundle_id: None, window_title: None, window_id: None, window_owner_pid: None,
             display_id: 1,
             frame: TargetFrame { x: 0.0, y: 0.0, width: 1280.0, height: 800.0, scale: 1.0 },
         };

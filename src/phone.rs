@@ -437,6 +437,7 @@ pub fn phone_target(
         bundle_id: bundle_id.map(str::to_owned),
         window_title: None,
         window_id: None,
+        window_owner_pid: None,
         display_id: 0,
         frame: TargetFrame {
             x: 0.0,

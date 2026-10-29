@@ -15,6 +15,7 @@ use screencapturekit::recording_output::{
     SCRecordingOutputFileType,
 };
 use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
+use screencapturekit::cm::CMSampleBufferSCExt;
 
 use super::{
     CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, CARBON_CMD_KEY, CARBON_CONTROL_KEY, CARBON_OPTION_KEY,
@@ -23,6 +24,49 @@ use super::{
     poll_clicks, apparent_log, track_shift_ink,
 };
 use crate::model::{CaptureMode, InteractionEvent, RgbaFrame, TargetInfo};
+use super::realtime_writer::Writer;
+
+struct CandidateWriter {
+    writer: Option<Writer>,
+    failed: bool,
+    first_pts: Option<f64>,
+    first_ms: i64,
+    last_ms: i64,
+    accepted: usize,
+    clock_latched: bool,
+}
+
+impl CandidateWriter {
+    fn new(writer: Writer) -> Self {
+        Self { writer: Some(writer), failed: false, first_pts: None,
+            first_ms: 0, last_ms: -1, accepted: 0, clock_latched: false }
+    }
+
+    fn sample(&mut self, sample: &screencapturekit::cm::CMSampleBuffer, elapsed_ms: i64) {
+        if self.failed || !sample.frame_status().is_some_and(|status| status.has_content()) { return; }
+        let pts = sample.presentation_timestamp();
+        if pts.timescale <= 0 { self.failed = true; return; }
+        let seconds = pts.value as f64 / pts.timescale as f64;
+        if !seconds.is_finite() || seconds < 0.0 { self.failed = true; return; }
+        let base = *self.first_pts.get_or_insert_with(|| {
+            self.first_ms = elapsed_ms;
+            seconds
+        });
+        let ms = self.first_ms + ((seconds - base) * 1000.0).round() as i64;
+        // Anchor SCK host-clock PTS to the capture's monotonic clock. Discard an
+        // implausible clock jump rather than inventing a timestamp.
+        if ms < 0 || (ms - elapsed_ms).abs() > 500 || ms <= self.last_ms { self.failed = true; return; }
+        if let Some(writer) = &mut self.writer {
+            if let Err(error) = writer.sample(sample.as_ptr().cast(), ms) {
+                apparent_log(format!("candidate stream sample refused: {error:#}"));
+                self.failed = true;
+            } else {
+                self.last_ms = ms;
+                self.accepted += 1;
+            }
+        }
+    }
+}
 
 /// Recordings may hold up to twice a frame's size in points (Retina pixels).
 pub const MAX_CAPTURE_SCALE: f64 = 2.0;
@@ -808,6 +852,7 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
                     bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
                     window_title: win.title(),
                     window_id: Some(win.window_id()),
+                    window_owner_pid: owner.as_ref().map(|a| a.process_id()).filter(|pid| *pid > 0),
                     display_id,
                     frame: crate::screens::with_scale(rect, scale),
                 };
@@ -850,6 +895,7 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
                 window_title,
                 window_id: None,
                 display_id: display.display_id(),
+                window_owner_pid: None,
                 frame: crate::screens::with_scale(rect, scale),
             };
         }
@@ -873,6 +919,7 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
         window_title: None,
         window_id: None,
         display_id,
+        window_owner_pid: None,
         frame,
     }
 }
@@ -920,6 +967,7 @@ pub fn list_selectable_windows() -> Vec<TargetInfo> {
                 bundle_id: owner.as_ref().map(|a| a.bundle_identifier()),
                 window_title: w.title().map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
                 window_id: Some(w.window_id()),
+                window_owner_pid: owner.as_ref().map(|a| a.process_id()).filter(|pid| *pid > 0),
                 display_id,
                 frame: crate::screens::with_scale(rect, scale),
             }
@@ -1023,14 +1071,17 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         urgent: thread_urgent,
         frames: thread_frames,
         video_offset_ms: thread_offset,
+        unsafe_video: stream_unsafe_video,
+        stop_requested_ms,
     } = sampler;
     let initial_excluded = excluded_window_ids
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
+
     // Keep SCK initialization, capture and teardown on the owning worker.
     // stop() joins even if it arrives while setup is still in progress.
-    let (stream, recording_output, video_path, filter) = setup_sck_capture(
+    let (stream, recording_output, video_path, filter, writer) = setup_sck_capture(
         &sampler_target,
         video_output_path,
         &initial_excluded,
@@ -1050,12 +1101,16 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         .unwrap_or_else(Instant::now);
     let mut last_excluded = initial_excluded.clone();
     let mut prompts = SystemPrompts::new(&sampler_target);
+    let mut candidate_poisoned = false;
     while !thread_stopping.load(Ordering::Acquire) {
         let mut cur_excluded = excluded_window_ids
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if prompts.check(started_at) {
+            // A prompt may have overlapped a stream callback before the next filter
+            // update. No metadata proves those pixels were excluded; refuse publication.
+            candidate_poisoned = true;
             // Frames since the last look may show the prompt.
             thread_frames
                 .lock()
@@ -1064,18 +1119,42 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         cur_excluded.extend(&prompts.ids);
         if cur_excluded != last_excluded {
-            last_excluded.clone_from(&cur_excluded);
-            prompts.hidden = sck_lists_windows(&prompts.ids);
-            if let Some((new_filter, _)) =
-                build_sck_filter_and_config(&sampler_target, &cur_excluded)
+            if !super::uses_realtime_writer(sampler_target.mode) {
+                // Keep main's Display/Region prompt filtering and screenshot fallback.
+                last_excluded.clone_from(&cur_excluded);
+                prompts.hidden = sck_lists_windows(&prompts.ids);
+                if let Some((new_filter, _)) =
+                    build_sck_filter_and_config_for_owner(&sampler_target, &cur_excluded, &[])
+                {
+                    if let Some(ref stream) = stream
+                        && let Err(error) = stream.update_content_filter(&new_filter)
+                    {
+                        apparent_log(format!("Recording filter update failed: {error:?}"));
+                    }
+                    filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
+                }
+            } else if let Some((new_filter, _)) =
+                build_sck_filter_and_config_for_owner(&sampler_target, &cur_excluded, &prompts.ids)
             {
                 // Keep explicit privacy exclusions consistent in movie and candidates.
-                if let Some(ref stream) = stream
-                    && let Err(error) = stream.update_content_filter(&new_filter)
-                {
-                    apparent_log(format!("Recording filter update failed: {error:?}"));
+                let updated = stream.as_ref().is_none_or(|stream| {
+                    match stream.update_content_filter(&new_filter) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            apparent_log(format!("Recording filter update failed: {error:?}"));
+                            false
+                        }
+                    }
+                });
+                if updated {
+                    prompts.hidden = sck_lists_windows(&prompts.ids);
+                    last_excluded.clone_from(&cur_excluded);
+                    filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
+                } else {
+                    candidate_poisoned = true;
                 }
-                filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
+            } else {
+                candidate_poisoned = true;
             }
         }
         let urgent = thread_urgent.swap(false, Ordering::AcqRel);
@@ -1105,13 +1184,144 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         thread::park_timeout(Duration::from_millis(30));
     }
-    if let Some(stream) = stream {
-        let _ = stream.stop_capture();
+    if !super::uses_realtime_writer(sampler_target.mode) {
+        // Existing SCK teardown; no candidate conversion or extra finish wait.
+        if let Some(stream) = stream {
+            let _ = stream.stop_capture();
+            if let Some(ref output) = recording_output {
+                let _ = stream.remove_recording_output(output);
+            }
+        }
+        // Catch prompts still present after stop and drop affected screenshots.
+        // A prompt wholly inside native stop remains a legacy observation gap,
+        // not a reason to disable every existing Display/Region capture.
+        prompts.checked = None;
+        if prompts.check(started_at) {
+            thread_frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .drop_since(prompts.clear_until_ms);
+        }
+        stream_unsafe_video.store(false, Ordering::Release);
+        return video_path;
+    }
+    // The new path uses a pinned window-only source throughout native stop.
+    let mut original_privacy_safe = !candidate_poisoned
+        && stream.is_some() && recording_output.is_some();
+    candidate_poisoned |= !original_privacy_safe;
+    if let Some(mut stream) = stream {
+        if let Err(error) = stream.stop_capture() {
+            original_privacy_safe = false;
+            candidate_poisoned = true;
+            apparent_log(format!("SCK stop failed: {error:?}"));
+        }
+        if let Some((_, handler_id)) = &writer {
+            if !matches!(stream.remove_output_handler(*handler_id, SCStreamOutputType::Screen), Ok(true)) {
+                candidate_poisoned = true;
+                apparent_log("candidate callback removal failed");
+            }
+        }
         if let Some(ref output) = recording_output {
-            let _ = stream.remove_recording_output(output);
+            if let Err(error) = stream.remove_recording_output(output) {
+                original_privacy_safe = false;
+                candidate_poisoned = true;
+                apparent_log(format!("SCK recording finalization failed: {error:?}"));
+            }
         }
     }
+    // Candidate checks do not certify an already stopped original.
+    prompts.checked = None;
+    if prompts.check(started_at) || prompts.showing() {
+        candidate_poisoned = true;
+    }
+    let candidate = writer.and_then(|(state, _)| {
+        // Callback enqueue and handle removal share this lock. A late callback sees
+        // None; Swift drains earlier retained samples before finishing.
+        let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.failed || candidate_poisoned || state.accepted == 0 || video_path.is_none() {
+            return None;
+        }
+        state.writer.take().map(|writer| (writer, state.last_ms))
+    });
+    if let (Some((mut writer, last_ms)), Some(ref original)) = (candidate, &video_path) {
+        prompts.checked = None;
+        if prompts.check(started_at) {
+            candidate_poisoned = true;
+        }
+        let mut excluded = excluded_window_ids.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        excluded.extend(&prompts.ids);
+        let listed = sck_lists_windows(&prompts.ids);
+        let stop_geometry = stop_target_geometry(&sampler_target);
+        if !candidate_poisoned && prompts.ids.iter().all(|id| listed.contains(id))
+            && stop_geometry.is_some() {
+            if let Some((filter, config)) = build_sck_filter_and_config_for_owner(
+                &sampler_target, &excluded, &prompts.ids)
+            {
+                let screenshot_start = started_at.elapsed().as_millis() as u64;
+                if let Some(image) = capture_sck_frame(&filter, &config, screenshot_start) {
+                    let screenshot_end = started_at.elapsed().as_millis() as u64;
+                    let ms = super::stop_frame_pts(stop_requested_ms.load(Ordering::Acquire),
+                        thread_offset.load(Ordering::Acquire), last_ms, screenshot_start, screenshot_end);
+                    prompts.checked = None;
+                    if prompts.check(started_at) || prompts.showing()
+                        || stop_target_geometry(&sampler_target) != stop_geometry {
+                        candidate_poisoned = true;
+                    }
+                    if let Some(ms) = ms.filter(|_| !candidate_poisoned && prompts.ids.iter().all(|id| listed.contains(id))) {
+                        let original = original.clone();
+                        // Allow the final enqueue (up to 2s), native finish (15s),
+                        // validation (8s) and a little scheduling slack. Earlier
+                        // queued frames can exhaust this wall budget: explicitly
+                        // fall back to the untouched original on timeout.
+                        let result = super::bounded_candidate(Duration::from_secs(26), move || {
+                            writer.final_frame(&image.rgba, image.width, image.height, ms)?;
+                            writer.finish_and_validate(&image.rgba, image.width, image.height, ms)
+                        });
+                        prompts.checked = None;
+                        if prompts.check(started_at) || prompts.showing()
+                            || stop_target_geometry(&sampler_target) != stop_geometry {
+                            candidate_poisoned = true;
+                        }
+                        match result {
+                            Ok(candidate) if !candidate_poisoned => {
+                                if let Err(error) = super::publish_validated_movie(
+                                    &original, &candidate.0, |_| Ok(())) {
+                                    apparent_log(format!("candidate retained original: {error:#}"));
+                                }
+                            }
+                            Err(error) => apparent_log(format!("candidate retained original: {error:#}")),
+                            _ => apparent_log("candidate rejected after native finish; original retained"),
+                        }
+                    }
+                }
+            } else {
+                candidate_poisoned = true;
+                apparent_log("candidate rejected: stop target owner or privacy exclusions unavailable");
+            }
+        } else {
+            candidate_poisoned = true;
+            apparent_log("candidate rejected: a system prompt or filter update was unsafe");
+        }
+    }
+    // The window-only original is independent of candidate finish/validation.
+    if original_privacy_safe && video_path.is_some() {
+        stream_unsafe_video.store(false, Ordering::Release);
+    }
     video_path
+}
+
+/// A fresh source snapshot must still identify the pinned window.
+fn stop_target_geometry(target: &TargetInfo) -> Option<[f64; 4]> {
+    let Ok(content) = SCShareableContent::get() else { return None };
+    content.windows().into_iter().find_map(|window| {
+        let matches = window.owning_application().as_ref().is_some_and(|owner| {
+            super::same_window_owner(target, window.window_id(), owner.process_id(),
+                &owner.bundle_identifier(), &owner.application_name())
+        });
+        matches.then(|| {
+            let f = window.frame();
+            [f.origin.x, f.origin.y, f.size.width, f.size.height]
+        })
+    })
 }
 
 fn push_sck_candidate(
@@ -1124,9 +1334,12 @@ fn push_sck_candidate(
     }
 }
 
-fn build_sck_filter_and_config(
+/// Re-resolve a target on every filter update. A missing window or display must never
+/// change the recording into a capture of some other part of the desktop.
+fn build_sck_filter_and_config_for_owner(
     target: &TargetInfo,
     excluded_window_ids: &[u32],
+    required_exclusions: &[u32],
 ) -> Option<(SCContentFilter, SCStreamConfiguration)> {
     let content = match SCShareableContent::get() {
         Ok(c) => c,
@@ -1139,13 +1352,21 @@ fn build_sck_filter_and_config(
             return None;
         }
     };
+    if required_exclusions.iter().any(|id| !content.windows().iter().any(|w| w.window_id() == *id)) {
+        return None;
+    }
     let filter = if let Some(window_id) = target.window_id
         && let Some(window) = content
             .windows()
             .into_iter()
-            .find(|w| w.window_id() == window_id)
+            .find(|w| w.owning_application().as_ref().is_some_and(|owner| {
+                super::same_window_owner(target, w.window_id(), owner.process_id(),
+                    &owner.bundle_identifier(), &owner.application_name())
+            }) && w.window_id() == window_id)
     {
         SCContentFilter::create().with_window(&window).build().ok()
+    } else if target.window_id.is_some() || target.mode == CaptureMode::Window {
+        None
     } else if let Some(display) = content
         .displays()
         .into_iter()
@@ -1214,22 +1435,16 @@ fn sck_config(target: &TargetInfo, long_edge: f64) -> SCStreamConfiguration {
 
 /// Starts the recording stream; returns it with the filter for candidate screenshots. Stores
 /// when the recording started (ms since `started_at`) into `video_offset_ms`.
-fn setup_sck_capture(
+fn setup_legacy_sck_capture(
     target: &TargetInfo,
     video_output_path: Option<PathBuf>,
     excluded_window_ids: &[u32],
     started_at: Instant,
     video_offset_ms: &AtomicU64,
-) -> (
-    Option<SCStream>,
-    Option<SCRecordingOutput>,
-    Option<PathBuf>,
-    Option<SCContentFilter>,
-) {
-    let Some((filter, config)) = build_sck_filter_and_config(target, excluded_window_ids) else {
+) -> (Option<SCStream>, Option<SCRecordingOutput>, Option<PathBuf>, Option<SCContentFilter>) {
+    let Some((filter, config)) = build_sck_filter_and_config_for_owner(target, excluded_window_ids, &[]) else {
         return (None, None, None, None);
     };
-
     if let Some(video_path) = video_output_path {
         if let Ok(rec_cfg_builder) = SCRecordingOutputConfiguration::new()
             && let Ok(rec_cfg) = rec_cfg_builder.with_output_url(&video_path).map(|c| {
@@ -1240,23 +1455,109 @@ fn setup_sck_capture(
             && let Ok(stream) = SCStream::new(&filter, &config)
             && stream.add_recording_output(&rec_output).is_ok()
         {
-            // The movie's clock starts while `start_capture` runs; its midpoint is the closest
-            // estimate this side of the recording delegate.
             let before = started_at.elapsed();
             if stream.start_capture().is_ok() {
                 let after = started_at.elapsed();
                 video_offset_ms.store(((before + after) / 2).as_millis() as u64, Ordering::Release);
+                return (Some(stream), Some(rec_output), Some(video_path), Some(filter));
+            }
+        }
+    }
+    (None, None, None, Some(filter))
+}
+
+fn setup_sck_capture(
+    target: &TargetInfo,
+    video_output_path: Option<PathBuf>,
+    excluded_window_ids: &[u32],
+    started_at: Instant,
+    video_offset_ms: &Arc<AtomicU64>,
+) -> (
+    Option<SCStream>,
+    Option<SCRecordingOutput>,
+    Option<PathBuf>,
+    Option<SCContentFilter>,
+    Option<(Arc<Mutex<CandidateWriter>>, usize)>,
+) {
+    if !super::uses_realtime_writer(target.mode) {
+        let (stream, output, path, filter) = setup_legacy_sck_capture(
+            target, video_output_path, excluded_window_ids, started_at, video_offset_ms);
+        return (stream, output, path, filter, None);
+    }
+    if target.mode == CaptureMode::Window && target.window_owner_pid.is_none() {
+        return (None, None, None, None, None);
+    }
+    let Some((filter, config)) = build_sck_filter_and_config_for_owner(target, excluded_window_ids, &[]) else {
+        return (None, None, None, None, None);
+    };
+
+    if let Some(video_path) = video_output_path {
+        if let Ok(rec_cfg_builder) = SCRecordingOutputConfiguration::new()
+            && let Ok(rec_cfg) = rec_cfg_builder.with_output_url(&video_path).map(|c| {
+                c.with_video_codec(SCRecordingOutputCodec::H264)
+                    .with_output_file_type(SCRecordingOutputFileType::MP4)
+            })
+            && let Some(rec_output) = SCRecordingOutput::new(&rec_cfg)
+            && let Ok(mut stream) = SCStream::new(&filter, &config)
+            && stream.add_recording_output(&rec_output).is_ok()
+        {
+            let (width, height) = capture_size(target, 1280.0);
+            let writer = match Writer::create(&video_path, width, height) {
+                Ok(candidate) => {
+                    let state = Arc::new(Mutex::new(CandidateWriter::new(candidate)));
+                    let callback_state = Arc::clone(&state);
+                    let callback_offset = Arc::clone(video_offset_ms);
+                    let handler = move |sample: screencapturekit::cm::CMSampleBuffer, kind: SCStreamOutputType| {
+                        if kind == SCStreamOutputType::Screen {
+                            let mut state = callback_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            state.clock_latched = true;
+                            let offset = callback_offset.load(Ordering::Acquire);
+                            if offset == 0 { return; }
+                            state.sample(&sample, started_at.elapsed().as_millis().saturating_sub(offset as u128) as i64);
+                        }
+                    };
+                    match stream.add_output_handler(handler, SCStreamOutputType::Screen) {
+                        Ok(handler_id) => Some((state, handler_id)),
+                        Err(error) => {
+                            apparent_log(format!("candidate callback registration failed: {error:?}"));
+                            None
+                        }
+                    }
+                }
+                Err(error) => {
+                    apparent_log(format!("candidate writer unavailable: {error:#}"));
+                    None
+                }
+            };
+            // The movie's clock starts while `start_capture` runs; its midpoint is the closest
+            // estimate this side of the recording delegate.
+            let before = started_at.elapsed();
+            // The first callback can run inside start_capture. Give it a
+            // provisional nonzero clock origin rather than dropping its picture.
+            video_offset_ms.store(before.as_millis().max(1) as u64, Ordering::Release);
+            if stream.start_capture().is_ok() {
+                let after = started_at.elapsed();
+                let midpoint = ((before + after) / 2).as_millis().max(1) as u64;
+                if let Some((state, _)) = &writer {
+                    let state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if !state.clock_latched {
+                        video_offset_ms.store(midpoint, Ordering::Release);
+                    }
+                } else {
+                    video_offset_ms.store(midpoint, Ordering::Release);
+                }
                 return (
                     Some(stream),
                     Some(rec_output),
                     Some(video_path),
                     Some(filter),
+                    writer,
                 );
             }
         }
     }
 
-    (None, None, None, Some(filter))
+    (None, None, None, Some(filter), None)
 }
 
 fn capture_sck_frame(

@@ -140,8 +140,11 @@ fn is_control(role: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn cell_child_label<'a>(children: impl IntoIterator<Item = (&'a str, Option<&'a str>, bool)>) -> Option<String> {
-    let mut names = children.into_iter()
+fn cell_child_label<'a>(
+    children: impl IntoIterator<Item = (&'a str, Option<&'a str>, bool)>,
+) -> Option<String> {
+    let mut names = children
+        .into_iter()
         .filter(|(role, _, owned)| *role == "AXStaticText" && *owned)
         .filter_map(|(_, value, _)| value.and_then(clip));
     let name = names.next()?;
@@ -150,14 +153,21 @@ fn cell_child_label<'a>(children: impl IntoIterator<Item = (&'a str, Option<&'a 
 
 #[cfg(target_os = "macos")]
 fn window_owner_at(raw: &[crate::windows::RawWindow], x: f64, y: f64, own: i32) -> Option<i32> {
-    raw.iter().filter(|w| {
-        let [wx, wy, ww, wh] = w.bounds;
-        // The Dock reports a full-screen window even where it draws nothing.
-        // Window Server's cursor sprite follows the pointer above the clicked app.
-        w.alpha > 0.01 && !(w.owner == "Dock" && w.layer == 20)
-            && !(w.owner == "Window Server" && w.layer == 2_147_483_630)
-            && x >= wx && x <= wx + ww && y >= wy && y <= wy + wh
-    }).find(|w| w.pid != own).map(|w| w.pid)
+    raw.iter()
+        .filter(|w| {
+            let [wx, wy, ww, wh] = w.bounds;
+            // The Dock reports a full-screen window even where it draws nothing.
+            // Window Server's cursor sprite follows the pointer above the clicked app.
+            w.alpha > 0.01
+                && !(w.owner == "Dock" && w.layer == 20)
+                && !(w.owner == "Window Server" && w.layer == 2_147_483_630)
+                && x >= wx
+                && x <= wx + ww
+                && y >= wy
+                && y <= wy + wh
+        })
+        .find(|w| w.pid != own)
+        .map(|w| w.pid)
 }
 
 /// Owns a CoreFoundation value returned under the create rule.
@@ -223,18 +233,35 @@ fn cell_name(element: AxElement, owner: i32, started: Instant) -> Option<String>
         return None;
     }
     let count = unsafe { CFArrayGetCount(children.0) };
-    if !(0..=8).contains(&count) { return None; }
+    if !(0..=8).contains(&count) {
+        return None;
+    }
     let mut candidates = Vec::new();
     for i in 0..count {
-        if started.elapsed() > LOOKUP_BUDGET { return None; }
+        if started.elapsed() > LOOKUP_BUDGET {
+            return None;
+        }
         let child = unsafe { CFArrayGetValueAtIndex(children.0, i) };
-        if child.is_null() || unsafe { core_foundation::base::CFGetTypeID(child) } != unsafe { AXUIElementGetTypeID() } { return None; }
+        if child.is_null()
+            || unsafe { core_foundation::base::CFGetTypeID(child) }
+                != unsafe { AXUIElementGetTypeID() }
+        {
+            return None;
+        }
         let owned = pid_of(child) == Some(owner);
         let role = string_attribute(child, "AXRole").unwrap_or_default();
-        let value = if owned && role == "AXStaticText" { string_attribute(child, "AXValue") } else { None };
+        let value = if owned && role == "AXStaticText" {
+            string_attribute(child, "AXValue")
+        } else {
+            None
+        };
         candidates.push((role, value, owned));
     }
-    cell_child_label(candidates.iter().map(|(role, value, owned)| (role.as_str(), value.as_deref(), *owned)))
+    cell_child_label(
+        candidates
+            .iter()
+            .map(|(role, value, owned)| (role.as_str(), value.as_deref(), *owned)),
+    )
 }
 
 /// The topmost element at a global top-left point, looking past Apparent's own windows. Blocking;
@@ -252,11 +279,16 @@ pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
         let app = Owned(unsafe { AXUIElementCreateApplication(pid) });
         unsafe { AXUIElementSetMessagingTimeout(app.0, MESSAGE_TIMEOUT_S) };
         element = element_at(app.0, x, y)?;
-        if pid_of(element.0) != Some(pid) { return None; }
+        if pid_of(element.0) != Some(pid) {
+            return None;
+        }
     } else {
         let raw = objc2::rc::autoreleasepool(|_| crate::windows::raw_windows());
         if let Some(pid) = window_owner_at(&raw, x, y, own)
-            && pid_of(element.0) != Some(pid) { return None; }
+            && pid_of(element.0) != Some(pid)
+        {
+            return None;
+        }
     }
     let over = || started.elapsed() > LOOKUP_BUDGET;
 
@@ -556,31 +588,72 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn a_cell_uses_only_one_direct_owned_static_text_name() {
-        assert_eq!(cell_child_label([("AXImage", None, true), ("AXStaticText", Some("Desktop"), true)]), Some("Desktop".into()));
-        assert_eq!(cell_child_label([("AXStaticText", Some("Private"), false)]), None);
-        assert_eq!(cell_child_label([("AXTextField", Some("typed secret"), true)]), None);
-        assert_eq!(cell_child_label([("AXStaticText", Some("One"), true), ("AXStaticText", Some("Two"), true)]), None);
+        assert_eq!(
+            cell_child_label([
+                ("AXImage", None, true),
+                ("AXStaticText", Some("Desktop"), true)
+            ]),
+            Some("Desktop".into())
+        );
+        assert_eq!(
+            cell_child_label([("AXStaticText", Some("Private"), false)]),
+            None
+        );
+        assert_eq!(
+            cell_child_label([("AXTextField", Some("typed secret"), true)]),
+            None
+        );
+        assert_eq!(
+            cell_child_label([
+                ("AXStaticText", Some("One"), true),
+                ("AXStaticText", Some("Two"), true)
+            ]),
+            None
+        );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn overlay_fallback_requires_the_front_window_owner() {
-        let window = |pid, x| crate::windows::RawWindow { id: pid as u32, pid, owner: String::new(), title: String::new(), bounds: [x, 0.0, 100.0, 100.0], layer: 0, alpha: 1.0 };
-        assert_eq!(window_owner_at(&[window(7, 0.0), window(8, 0.0)], 50.0, 50.0, 9), Some(7));
-        assert_eq!(window_owner_at(&[window(9, 0.0), window(7, 0.0)], 50.0, 50.0, 9), Some(7));
+        let window = |pid, x| crate::windows::RawWindow {
+            id: pid as u32,
+            pid,
+            owner: String::new(),
+            title: String::new(),
+            bounds: [x, 0.0, 100.0, 100.0],
+            layer: 0,
+            alpha: 1.0,
+        };
+        assert_eq!(
+            window_owner_at(&[window(7, 0.0), window(8, 0.0)], 50.0, 50.0, 9),
+            Some(7)
+        );
+        assert_eq!(
+            window_owner_at(&[window(9, 0.0), window(7, 0.0)], 50.0, 50.0, 9),
+            Some(7)
+        );
         assert_eq!(window_owner_at(&[window(7, 200.0)], 50.0, 50.0, 9), None);
         let mut dock = window(6, 0.0);
         dock.owner = "Dock".into();
         dock.layer = 20;
-        assert_eq!(window_owner_at(&[dock, window(7, 0.0)], 50.0, 50.0, 9), Some(7));
+        assert_eq!(
+            window_owner_at(&[dock, window(7, 0.0)], 50.0, 50.0, 9),
+            Some(7)
+        );
         let mut cursor = window(6, 0.0);
         cursor.owner = "Window Server".into();
         cursor.layer = 2_147_483_630;
-        assert_eq!(window_owner_at(&[cursor, window(7, 0.0)], 50.0, 50.0, 9), Some(7));
+        assert_eq!(
+            window_owner_at(&[cursor, window(7, 0.0)], 50.0, 50.0, 9),
+            Some(7)
+        );
         let mut menu_bar = window(6, 0.0);
         menu_bar.owner = "Window Server".into();
         menu_bar.layer = 24;
-        assert_eq!(window_owner_at(&[menu_bar, window(7, 0.0)], 50.0, 50.0, 9), Some(6));
+        assert_eq!(
+            window_owner_at(&[menu_bar, window(7, 0.0)], 50.0, 50.0, 9),
+            Some(6)
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ Read this before changing `src/onboarding.rs`, `src/settings.rs`, `src/command_l
 
 Rust decides what shows (`Flow`, `launch_plan`, `Gate`, tested) and stores progress under `"onboarding"` in `~/.config/apparent/config.json`, including the tour's current step (`resume`), so any quit (macOS's "Quit & Reopen" too) picks up there; the SwiftUI window in `apparent-helper onboarding` only renders the state it's sent and reports buttons (`grant:<permission>` for a row).
 
-Tour: Welcome → HowItWorks → Permissions (one checklist of three required rows, Screen Recording first, then Microphone and Accessibility; any order works) → TryIt → Done. Camera (iPhone) is never in the tour: its first use opens `Flow::fix(vec![Camera])`, the same screen with one row.
+Tour: Welcome → HowItWorks → Permissions (one checklist of three required rows, Screen Recording first, then Microphone and Accessibility; any order works) → Shortcut → TryIt → Done. Shortcut shows the effective Record keys. Continue moves on without editing; Change shortcut starts the Record recorder in the same onboarding page, using Settings' validation, save, cancel and reset behavior. Leaving the page cancels an unfinished recording and resumes hotkeys. On Omarchy, a Hyprland-owned shortcut cannot be replaced by Apparent; the inline page explains that ownership. Camera (iPhone) is never in the tour: its first use opens `Flow::fix(vec![Camera])`, the same screen with one row.
 
 HowItWorks is a silent 11 s loop (`helper/OnboardingDemo.swift`): a pretend checkout page whose Pay button runs out of its window, ⌥⇧S opening the pill, subtitles for what the person says, a ⇧ mark around the bug, a click, ⌥⇧S to Copied, the frame lifting off as a one-frame contact sheet with its `1` chip, ⌥⇧V into an agent chat, and the fix. Everything on the stage is a function of one clock (`DemoScript`), so any moment renders the same. Holding ⇧ over the stage pauses the loop and draws a mark in the window (nothing is recorded or asked for). The button under it reads Skip until the loop has played through or a mark was drawn, then Continue; the helper reports `skip`, `watched` and `practiced`, and `Flow` keeps the furthest outcome in `Progress::tutorial` (`"tutorial"`), so a resumed tour keeps Continue. Reduced motion shows four still frames with captions. `apparent-helper onboarding --render DIR --demo-frames 30` writes one loop as PNGs for a video.
 
@@ -42,7 +42,7 @@ The sidebar is the helper's alone: a row selects on mouse-down and its pane repl
 
 About has a Star on GitHub button below the update control. Its heading, action and caption share one box in the Mac helper and Linux GPUI Settings. It opens `https://github.com/tryapparent/apparent` in the browser; starring remains the user's choice on GitHub.
 
-Linux GPUI Settings currently renders its light palette. Hovered buttons and menu items pair black text with light lilac (`#c4a9e6`, 10.09:1); the selected sidebar keeps dark lilac (`#302442`) with cream text. Black on that dark lilac gives only 1.45:1. The dark palette's cream-on-dark hover pair (12.71:1) is covered by a contrast test but is not yet used by Settings.
+Settings follows system light or dark appearance without storing a preference. The Mac helper resolves the SwiftUI theme from its environment and the titlebar background from a dynamic AppKit color; an open window updates when macOS appearance changes. Linux reads the desktop portal before opening, then watches its color-scheme revision and repaints the open GPUI window. Hovered buttons and menu items use black on light lilac (`#c4a9e6`) in light mode, and cream on dark lilac (`#302442`) in dark mode; the selected sidebar always has cream text. The Linux update result panel also follows the palette, including its secondary actions.
 
 
 Settings › About keeps its existing **Check for Updates…** action. On Linux, a manual check
@@ -55,10 +55,10 @@ The current Linux `check_cli` feed contract checks **and installs**: “Update a
 covers an image already installed for the next launch. It does not mean a discovery-only check.
 That result offers **Update now** (quit and launch the staged AppImage after exit) and
 **Update later** (dismiss, leaving it for the next launch). The primary Update now action
-uses brand Signal blue with Paper text; Update later uses Paper, Carbon text and border.
+uses brand Signal violet with Paper text; Update later uses the theme field and contrasting text and border.
 Both use the brand's square geometry, 18px control type, and 44px hit height rather than
-the compact pill buttons in Settings rows. The result panel has a square Paper field,
-Carbon rule, 18px native status, and 8px-based spacing; failure text uses the semantic
+the compact pill buttons in Settings rows. The result panel has a square theme-colored field,
+contrasting rule, 18px native status, and 8px-based spacing; failure text uses the semantic
 failure color. Other results use a matching secondary OK action. Tab moves between
 the choices, and Enter or Space activates the focused choice; Enter without a
 focused choice chooses now. Escape defers. On other results Enter and Escape dismiss.

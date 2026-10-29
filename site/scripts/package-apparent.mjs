@@ -9,7 +9,7 @@ const site = join(dirname(fileURLToPath(import.meta.url)), "..")
 const dist = join(site, "dist")
 const out = join(site, "dist-apparent")
 const html = readFileSync(join(dist, "index.html"), "utf8")
-if (!html.includes("https://app.tryapparent.com/") || !html.includes("Make what you mean")) {
+if (!html.includes("https://app.tryapparent.com/") || !html.includes("Visual feedback gets lost") || !html.includes("We believe work should be")) {
   throw new Error("Refusing to package a stale or unrelated build")
 }
 if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangton/tap")) {
@@ -18,7 +18,7 @@ if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangt
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 for (const name of [
-  "index.html", "assets", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
+  "index.html", "assets", "pond", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
   "apparent-narration-mac.mp3",
 ]) {
   if (!existsSync(join(dist, name))) throw new Error(`Missing required asset: ${name}`)

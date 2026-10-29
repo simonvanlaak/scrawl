@@ -227,7 +227,7 @@ impl ViewState {
 
 // MARK: Look
 
-/// Apparent's Paper workspace and Carbon navigation, independent of OS dark mode.
+/// Apparent's Paper workspace and Carbon navigation, following OS appearance.
 #[derive(Clone, Copy)]
 struct Theme {
     dark: bool,
@@ -294,10 +294,10 @@ impl Theme {
         rgb(0x7a58c7)
     }
     fn positive(self) -> Rgba {
-        rgb(0x146b43)
+        rgb(if self.dark { 0x77d6a5 } else { 0x146b43 })
     }
     fn negative(self) -> Rgba {
-        rgb(0xb42318)
+        rgb(if self.dark { 0xff8175 } else { 0xb42318 })
     }
 }
 
@@ -347,6 +347,7 @@ pub struct SettingsWindow {
     pane: Pane,
     events: Events,
     focus: FocusHandle,
+    appearance_revision: u64,
     update_later_focus: FocusHandle,
     update_now_focus: FocusHandle,
     update_dismiss_focus: FocusHandle,
@@ -361,6 +362,11 @@ pub struct SettingsWindow {
 }
 
 fn open(request: Request, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::appearance::initialize();
+        crate::linux::appearance::watch();
+    }
     for handle in cx.windows() {
         if handle.downcast::<SettingsWindow>().is_some() {
             let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -431,7 +437,18 @@ fn open(request: Request, cx: &mut App) {
                                     window.remove_window();
                                     return false;
                                 }
-                                if changed || view.pane == Pane::Recording && view.meter.is_some() {
+                                let appearance_changed = {
+                                    #[cfg(target_os = "linux")]
+                                    {
+                                        let revision = crate::linux::appearance::revision();
+                                        let changed = revision != view.appearance_revision;
+                                        view.appearance_revision = revision;
+                                        changed
+                                    }
+                                    #[cfg(not(target_os = "linux"))]
+                                    { false }
+                                };
+                                if changed || appearance_changed || view.pane == Pane::Recording && view.meter.is_some() {
                                     cx.notify();
                                 }
                                 true
@@ -448,6 +465,12 @@ fn open(request: Request, cx: &mut App) {
                     pane: pane.unwrap_or(Pane::General),
                     events,
                     focus,
+                    appearance_revision: {
+                        #[cfg(target_os = "linux")]
+                        { crate::linux::appearance::revision() }
+                        #[cfg(not(target_os = "linux"))]
+                        { 0 }
+                    },
                     update_later_focus: cx.focus_handle(),
                     update_now_focus: cx.focus_handle(),
                     update_dismiss_focus: cx.focus_handle(),
@@ -596,7 +619,7 @@ impl SettingsWindow {
 }
 
 /// The platform key code for a key GPUI names (`r`, `f5`, `space`), as the hotkeys register it.
-fn key_code(key: &str) -> Option<u32> {
+pub(crate) fn key_code(key: &str) -> Option<u32> {
     #[cfg(not(target_os = "macos"))]
     let named: &[(&str, u32)] = &[
         ("space", 0x20),
@@ -785,10 +808,9 @@ fn button(theme: Theme, id: impl Into<SharedString>, title: &str, enabled: bool)
 
 /// The update decision uses the brand's primary and secondary action roles,
 /// rather than the compact pill buttons used by Settings rows.
-fn update_choice_button(id: &'static str, title: &str, primary: bool, focus: &FocusHandle, selected: bool) -> Stateful<Div> {
+fn update_choice_button(theme: Theme, id: &'static str, title: &str, primary: bool, focus: &FocusHandle, selected: bool) -> Stateful<Div> {
     let paper = rgb(0xf5f0e8);
-    let carbon = rgb(0x19161d);
-    let signal = rgb(0x0000f2);
+    let signal = theme.accent();
     div()
         .id(id)
         .track_focus(focus)
@@ -797,15 +819,15 @@ fn update_choice_button(id: &'static str, title: &str, primary: bool, focus: &Fo
         .h(px(44.0))
         .px(px(16.0))
         .flex().items_center().justify_center()
-        .bg(if primary { signal } else { paper })
+        .bg(if primary { signal } else { theme.window() })
         .border_2()
-        .border_color(if selected { if primary { carbon } else { signal } } else if primary { signal } else { carbon })
+        .border_color(if selected { if primary { theme.text() } else { signal } } else if primary { signal } else { theme.text() })
         .text_size(px(18.0))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(if primary { paper } else { carbon })
+        .text_color(if primary { paper } else { theme.text() })
         .cursor_pointer()
-        .when(primary, |d| d.hover(move |s| s.border_color(carbon)))
-        .when(!primary, |d| d.hover(|s| s.bg(rgb(0xe7e0ee))))
+        .when(primary, |d| d.hover(move |s| s.border_color(theme.text())))
+        .when(!primary, |d| d.hover(move |s| s.bg(theme.group())))
         .child(title.to_owned())
 }
 
@@ -1343,6 +1365,10 @@ impl SettingsWindow {
         let video = state.video_export;
         #[cfg(target_os = "linux")]
         let decoder_warning = crate::linux::media::decoder_warning();
+        #[cfg(target_os = "linux")]
+        let encoder_warning = crate::linux::media::encoder_warning();
+        #[cfg(not(target_os = "linux"))]
+        let encoder_warning: Option<String> = None;
         #[cfg(not(target_os = "linux"))]
         let decoder_warning: Option<String> = None;
         div()
@@ -1370,6 +1396,9 @@ impl SettingsWindow {
             .child(header(theme, "Transcription"))
             .child(group(theme, rows))
             .child(caption(theme, &note, false))
+            .when_some(encoder_warning, |pane, warning| {
+                pane.child(caption(theme, &warning, true))
+            })
             .when_some(decoder_warning, |pane, warning| {
                 pane.child(caption(theme, &warning, true))
             })
@@ -1884,21 +1913,21 @@ impl SettingsWindow {
             .child(div()
                 .id("settings-update-result")
                 .w(px(340.0)).p(px(24.0))
-                .bg(rgb(0xf5f0e8))
-                .border_1().border_color(rgb(0x19161d))
+                .bg(theme.window())
+                .border_1().border_color(theme.text())
                 .flex().flex_col().gap(px(16.0))
                 .child(div().flex().justify_center().child(img(update_frog(result)).w(frog_width).h(frog_height).flex_shrink_0()))
                 .child(div().text_center().text_size(px(18.0)).font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(if result == UpdateResult::Failed { 0xb42318 } else { 0x19161d }))
+                    .text_color(if result == UpdateResult::Failed { theme.negative() } else { theme.text() })
                     .child(result.label()))
                 .child(div().flex().justify_end().gap(px(8.0))
                     .when(result == UpdateResult::Available, |row| row
-                        .child(update_choice_button("settings-update-later", "Update later", false, &self.update_later_focus, self.update_later_focus.is_focused(window))
+                        .child(update_choice_button(theme, "settings-update-later", "Update later", false, &self.update_later_focus, self.update_later_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateLater))))
-                        .child(update_choice_button("settings-update-now", "Update now", true, &self.update_now_focus, self.update_now_focus.is_focused(window))
+                        .child(update_choice_button(theme, "settings-update-now", "Update now", true, &self.update_now_focus, self.update_now_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::UpdateNow)))))
                     .when(result != UpdateResult::Available, |row| row
-                        .child(update_choice_button("settings-update-dismiss", "OK", false, &self.update_dismiss_focus, self.update_dismiss_focus.is_focused(window))
+                        .child(update_choice_button(theme, "settings-update-dismiss", "OK", false, &self.update_dismiss_focus, self.update_dismiss_focus.is_focused(window))
                             .on_click(cx.listener(|view, _, _, _| view.act(Action::DismissUpdateCheck))))))
         ))
     }
@@ -2087,7 +2116,14 @@ fn caption_buttons(theme: Theme) -> Option<Div> {
 
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = Theme { dark: false };
+        let theme = Theme {
+            dark: {
+                #[cfg(target_os = "linux")]
+                { crate::linux::appearance::is_dark() }
+                #[cfg(not(target_os = "linux"))]
+                { false }
+            },
+        };
         let root = div()
             .id("settings-root")
             .track_focus(&self.focus)
@@ -2126,6 +2162,17 @@ impl Render for SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_renderer_tracks_the_linux_system_appearance() {
+        let source = include_str!("settings_window.rs");
+        let source = source.split("mod tests {").next().unwrap();
+        assert!(source.contains("crate::linux::appearance::initialize()"));
+        assert!(source.contains("crate::linux::appearance::watch()"));
+        assert!(source.contains("crate::linux::appearance::revision()"));
+        assert!(source.contains("crate::linux::appearance::is_dark()"));
+        assert!(!source.contains("let theme = Theme { dark: false };"));
+    }
 
     #[test]
     fn update_frog_assets_preserve_the_approved_pond_scenes_without_baked_labels() {
@@ -2241,7 +2288,7 @@ mod tests {
     }
 
     #[test]
-    fn hovered_control_text_contrasts_in_both_themes() {
+    fn settings_text_and_update_status_contrast_in_both_themes() {
         fn luminance(color: Rgba) -> f32 {
             let channel = |x: f32| {
                 if x <= 0.04045 {
@@ -2254,13 +2301,25 @@ mod tests {
         }
         for dark in [false, true] {
             let theme = Theme { dark };
-            let a = luminance(theme.hover());
-            let b = luminance(theme.text());
+            assert_eq!(theme.accent(), rgb(crate::ui::pill_theme::SIGNAL));
+            for (surface, text) in [
+                (theme.hover(), theme.text()),
+                (theme.window(), theme.text()),
+                (theme.window(), theme.negative()),
+                (theme.window(), theme.positive()),
+            ] {
+                let a = luminance(surface);
+                let b = luminance(text);
+                let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                assert!(contrast >= 4.5, "Settings text must remain readable in {dark:?} mode: {contrast}");
+            }
+            let a = luminance(theme.window());
+            let b = luminance(theme.accent());
             let contrast = (a.max(b) + 0.05) / (a.min(b) + 0.05);
-            assert!(
-                contrast >= 4.5,
-                "hovered control text must remain readable in both themes: {contrast}"
-            );
+            assert!(contrast >= 3.0, "Update later focus border must be visible in {dark:?} mode: {contrast}");
+            let paper = luminance(rgb(0xf5f0e8));
+            let contrast = (paper.max(b) + 0.05) / (paper.min(b) + 0.05);
+            assert!(contrast >= 4.5, "Paper text on Signal update action must remain readable: {contrast}");
         }
     }
 }

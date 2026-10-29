@@ -1,6 +1,7 @@
 import { Demo } from "./demo/Demo"
 import { inkPath } from "./demo/ink"
 import { FrogPond } from "./FrogPond"
+import { GithubStars } from "./GithubStars"
 
 const REPO = "https://github.com/tryapparent/apparent"
 
@@ -17,6 +18,7 @@ export function App() {
         <a className="brand" href="#top" aria-label="Apparent home">
           <img src="/apparent-wordmark.svg" width={149} height={35} decoding="async" alt="apparent" />
         </a>
+        <GithubStars />
       </header>
       <main>
         <FrogPond />

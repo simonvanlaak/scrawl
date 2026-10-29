@@ -1862,8 +1862,8 @@ impl ApparentCoordinator {
         }
     }
 
-    /// Puts the capsule on the display in use: the one being recorded, the one the picker is on,
-    /// else the one under the pointer.
+    /// Puts the capsule on the pointer's display during screen recording or selection,
+    /// else the one under the pointer (the phone mirror places its capsule separately).
     fn place_capsule(&self) {
         let centre = |[x, y, w, h]: [f64; 4]| [x + w / 2.0, y + h / 2.0];
         let anchor = match self.island_phase {
@@ -1871,10 +1871,7 @@ impl ApparentCoordinator {
                 .active_recording
                 .as_ref()
                 .filter(|rec| rec.target.mode != CaptureMode::Device)
-                .map(|rec| {
-                    let f = rec.target.frame;
-                    centre([f.x, f.y, f.width, f.height])
-                }),
+                .map(|_| centre(self.display_rect.map(f64::from))),
             IslandPhase::Selecting { .. } => Some(centre(self.display_rect.map(f64::from))),
             _ => None,
         };
@@ -1915,6 +1912,45 @@ impl ApparentCoordinator {
         self.display_rect = overlay.screen().map(|v| v as f32);
         if let Some(ref pill) = self.native_pill {
             pill.place_on(centre);
+        }
+    }
+
+    /// Follow the pointer with Linux controls, not with the capture source. On Mac,
+    /// a dragged capsule must stay where it was dropped for the whole recording.
+    #[cfg(target_os = "linux")]
+    fn follow_recording_pointer(&mut self) {
+        if !matches!(self.island_phase, IslandPhase::Recording)
+            || !self
+                .active_recording
+                .as_ref()
+                .is_some_and(|rec| rec.target.mode != CaptureMode::Device)
+        {
+            return;
+        }
+        let Some(pointer) = current_mouse_screen() else {
+            return;
+        };
+        let current = self.display_rect.map(f64::from);
+        if crate::screens::contains(current, pointer.map(f64::from)) {
+            return;
+        }
+        let screens = crate::screens::current();
+        if let Some(frame) =
+            recording_pointer_destination(current, pointer.map(f64::from), &screens)
+        {
+            if let Some(overlay) = self
+                .active_recording
+                .as_mut()
+                .and_then(|rec| rec._metal_overlay.as_mut())
+            {
+                overlay.move_to(frame);
+            }
+            self.display_rect = frame.map(|v| v as f32);
+            // A manually dragged Linux capsule remains where it was dropped.
+            // Continue following with the ink overlay, but leave the pill alone.
+            if !platform::pill_user_moved() {
+                self.place_capsule();
+            }
         }
     }
 
@@ -2244,6 +2280,8 @@ impl ApparentCoordinator {
             self.sync_picker_overlay();
         }
         self.follow_phone_mirror();
+        #[cfg(target_os = "linux")]
+        self.follow_recording_pointer();
 
         // Keep layout width at `island_target_width` during open and dismiss so the capsule never
         // clips its inner chips; open/dismiss use a restrained 0.92 <-> 1.0 scale.
@@ -2553,6 +2591,11 @@ impl ApparentCoordinator {
         // It moves to the target's display if that's another one (a window picked there).
         let f = target.frame;
         let target_rect = [f.x, f.y, f.width, f.height];
+        let screens = crate::screens::current();
+        self.display_rect =
+            crate::screens::index_at(&screens, [f.x + f.width / 2.0, f.y + f.height / 2.0])
+                .map_or(target_rect, |i| screens[i].frame)
+                .map(|v| v as f32);
         if let Some(ref pill) = self.native_pill {
             pill.place_on([f.x + f.width / 2.0, f.y + f.height / 2.0]);
         }
@@ -4556,6 +4599,20 @@ fn area_rect(a: [f32; 2], b: [f32; 2], display: [f32; 4]) -> Option<[f64; 4]> {
         .then(|| [a[0].min(b[0]), a[1].min(b[1]), w, h].map(f64::from))
 }
 
+fn recording_pointer_destination(
+    current: [f64; 4],
+    pointer: [f64; 2],
+    screens: &[crate::screens::Screen],
+) -> Option<[f64; 4]> {
+    if crate::screens::contains(current, pointer) {
+        return None;
+    }
+    let frame = screens
+        .get(crate::screens::index_at(screens, pointer)?)?
+        .frame;
+    ((0..4).any(|i| (frame[i] - current[i]).abs() >= 1.0)).then_some(frame)
+}
+
 fn clip_rect([x, y, w, h]: [f32; 4], [sw, sh]: [f32; 2]) -> [f32; 4] {
     let x0 = x.clamp(0.0, sw);
     let y0 = y.clamp(0.0, sh);
@@ -6293,6 +6350,50 @@ mod tests {
             Some([40.0, 20.0, 60.0, 60.0])
         );
         assert_eq!(area_rect([0.0, 0.0], [30.0, 200.0], laptop), None);
+    }
+
+    #[test]
+    fn recording_controls_follow_the_pointer_without_retargeting_the_capture() {
+        let first = crate::screens::Screen {
+            id: 1,
+            frame: [0.0, 0.0, 1920.0, 1200.0],
+            visible: [0.0, 0.0, 1920.0, 1200.0],
+            scale: 1.25,
+            safe_top: 0.0,
+        };
+        let second = crate::screens::Screen {
+            id: 2,
+            frame: [1920.0, 0.0, 1280.0, 800.0],
+            visible: [1920.0, 0.0, 1280.0, 800.0],
+            scale: 1.0,
+            safe_top: 0.0,
+        };
+        let screens = [first, second];
+        let selected_capture = second.frame;
+        assert_eq!(
+            recording_pointer_destination(second.frame, [2400.0, 300.0], &screens),
+            None
+        );
+        assert_eq!(
+            recording_pointer_destination(second.frame, [350.0, 300.0], &screens),
+            Some(first.frame)
+        );
+        assert_eq!(
+            recording_pointer_destination(first.frame, [350.0, 300.0], &screens),
+            None
+        );
+        assert_eq!(
+            recording_pointer_destination(first.frame, [2400.0, 300.0], &screens),
+            Some(second.frame)
+        );
+        assert_eq!(
+            recording_pointer_destination(second.frame, [3300.0, 300.0], &screens),
+            None
+        );
+        assert_eq!(
+            selected_capture, second.frame,
+            "the selected capture must not move with the UI"
+        );
     }
 
     /// Kit's review: a drag that starts at x -150 on a left display and overshoots to x 160 on

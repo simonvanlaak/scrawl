@@ -22,6 +22,15 @@
   ],
   "features": [
     {
+      "id": "feedback-issue",
+      "group": "delivery",
+      "name": "Give Feedback…",
+      "says": "Start a capture from the menu, review it locally, then open a GitHub feedback form. No capture data is added to the URL or uploaded automatically.",
+      "status": "experiment:feedbackIssue",
+      "platforms": ["mac", "linux"],
+      "docs": ["docs/capture.md"]
+    },
+    {
       "id": "linux-h264-decoder-check",
       "group": "settings",
       "name": "H.264 decoder setup warning",
@@ -864,6 +873,16 @@
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
+    },
+    {
+      "id": "export-cli-linux",
+      "group": "export",
+      "name": "apparent export on Linux",
+      "says": "The CLI burns ink, pins and click ripples into an MP4, with optional auto-zoom and aligned WAV audio, using FFmpeg and ffprobe.",
+      "status": "main",
+      "platforms": ["linux"],
+      "note": "The menu export experiment remains Mac-only. Requires FFmpeg with H.264/AAC encoders; the timed CLI recorder does not collect click or ink telemetry.",
+      "docs": ["docs/export-and-retention.md", "docs/linux.md"]
     },
     {
       "id": "export-menu",

@@ -1,0 +1,14 @@
+.video-demo .stage-wrap {
+  position: relative;
+  aspect-ratio: 1916 / 1164;
+  height: auto;
+  touch-action: pan-y;
+}
+
+.video-demo .stage-wrap.drawing { touch-action: none; }
+.video-demo video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.video-demo .video-demo-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.video-demo .track { touch-action: none; }
+.video-demo .stage-wrap:focus-visible,
+.video-demo .track:focus-visible { outline: 2px solid var(--lilac); outline-offset: 4px; }
+.video-demo [role="alert"] { margin: 12px 0; font-size: 14px; }

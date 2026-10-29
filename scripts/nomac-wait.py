@@ -91,10 +91,22 @@ def save(path, record):
         tmp.unlink(missing_ok=True)
 
 
+def expire_invalid_queued(path, record):
+    if record and record.get("state") == "queued":
+        created, deadline = record.get("created"), record.get("deadline")
+        if not (isinstance(created, (int, float)) and not isinstance(created, bool)
+                and math.isfinite(created) and isinstance(deadline, (int, float))
+                and not isinstance(deadline, bool) and math.isfinite(deadline)
+                and created < deadline <= created + 24 * 3600):
+            record["state"] = "expired"
+            save(path, record)
+    return record
+
+
 def records(directory):
     result = []
     for path in directory.glob("*.json"):
-        record = load(path)
+        record = expire_invalid_queued(path, load(path))
         if record and (record.get("state") in ("starting", "provisioning") or
                        (record.get("state") == "queued" and record["deadline"] > timestamp())):
             result.append(record)
@@ -109,6 +121,9 @@ def enqueue(directory, ticket, deadline):
         if record:
             if record["workdir"] != workdir:
                 raise Refused("ticket belongs to another working directory")
+            record = expire_invalid_queued(path, record)
+            if record["state"] == "expired":
+                raise Refused("ticket deadline invalid or expired; use a new ticket")
             return record
         workspace = directory / "workspaces" / ticket
         workspace.mkdir(mode=0o700, parents=True, exist_ok=False)

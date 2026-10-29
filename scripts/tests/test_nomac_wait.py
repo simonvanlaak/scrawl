@@ -86,6 +86,36 @@ class NoMacWaitTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertFalse((self.state / "ticket-a.json").exists())
 
+    def test_legacy_invalid_queued_deadline_does_not_block_next_ticket(self):
+        for index, invalid in enumerate((float("nan"), float("inf"), 1e308)):
+            with self.subTest(invalid=invalid):
+                self.state = self.work / f"legacy-state-{index}"
+                self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)
+                path = self.state / "ticket-a.json"
+                record = json.loads(path.read_text())
+                record["deadline"] = invalid
+                path.write_text(json.dumps(record))
+                self.assertEqual(self.run_cli("enqueue", "ticket-b").returncode, 0)
+                self.mode.write_text("ready")
+                result = self.run_cli("wait", "ticket-b", "--slice", "0")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(path.read_text())["state"], "expired")
+                self.assertEqual(self.run_cli("wait", "ticket-a", "--slice", "0").returncode, 2)
+
+    def test_legacy_invalid_starting_deadline_is_not_auto_cleared(self):
+        self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)
+        path = self.state / "ticket-a.json"
+        record = json.loads(path.read_text())
+        record.update(state="starting", deadline=float("inf"))
+        path.write_text(json.dumps(record))
+        self.assertEqual(self.run_cli("enqueue", "ticket-b").returncode, 0)
+        self.mode.write_text("ready")
+        result = self.run_cli("wait", "ticket-b", "--slice", "0")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertEqual(json.loads(path.read_text())["state"], "starting")
+        self.assertFalse(self.calls.exists())
+
+
     def test_waiting_behind_an_active_start_is_not_an_error_or_second_rental(self):
         self.mode.write_text("slow-capacity")
         self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)

@@ -12,6 +12,8 @@ During a screen recording, the capsule shows **Mic unavailable** if the input ca
 
 The recording controls also open a floating **Whiteboard**. Its drawing survives closing and reopening the window during the same capture. Finish closes the window and adds the final drawing as a separate paper frame in the bundle; the next capture starts with an empty board.
 
+With the off-by-default `movableRecordingControls` experiment enabled, drag the recording capsule by its clock/status cluster to uncover the screen beneath it. The whole panel stays on its original display, holds its dropped position for that capture and resets to the top centre for the next capture. The capsule remains in the Mac ScreenCaptureKit movie and in decoded full-quality keyframes; Linux already records it and only masks the small keyframe-selection candidates. The picker/ink overlay and macOS system prompts keep their separate privacy exclusions. See [interaction rationale and test matrix](recording-capsule-drag.md).
+
 Carbon hotkeys and the key event tap report presses through `emit_capture_shortcut` (deduplicated within 90 ms); while a press waits for its release the UI loop polls the modifiers and takes Esc from the key tap (`tick_shortcut`, `take_escape`), so the release is seen whichever window has focus. Esc from the key tap also closes an open picker when another app has the keys.
 
 ## Mac captures (`src/capture.rs`)

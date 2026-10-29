@@ -288,7 +288,7 @@
       "group": "record",
       "name": "Transcribe at pauses",
       "says": "On Linux, processes completed speech during recording with Parakeet and finishes the remaining audio at stop.",
-      "status": "experiment:pauseTranscribe",
+      "status": "main",
       "added": "2026-10-27",
       "platforms": ["linux"],
       "docs": ["docs/keyframes-and-text.md"]

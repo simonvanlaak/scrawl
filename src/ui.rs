@@ -2942,7 +2942,11 @@ impl ApparentCoordinator {
                     }
                     coord.completed_dir = Some(dir.clone());
                     coord.last_local_capture_ms = crate::now_epoch_ms();
-                    if auto_active {
+                    if feedback_capture {
+                        // No automatic clipboard write: the completed pill must not claim
+                        // that this private capture was copied.
+                        coord.completed_note = Some("Saved · review".into());
+                    } else if auto_active {
                         // A dispatched shortcut is not proof that the editor accepted either
                         // paste. Keep the paper tile and give the user the final say.
                         coord.completed_note = Some("Saved · check draft".into());
@@ -6475,5 +6479,9 @@ mod tests {
             "Sent to APPARENT · No words"
         );
         assert_eq!(completed_status_label(0, None, None), "Copied");
+        assert_eq!(
+            completed_status_label(0, Some("Saved · review"), Some(CompletedAudioIssue::NoAudio)),
+            "Saved · review · No audio"
+        );
     }
 }

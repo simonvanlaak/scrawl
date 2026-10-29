@@ -101,9 +101,9 @@
       "group": "start",
       "name": "Output-bound Region on Hyprland",
       "says": "A multi-output Hyprland capture checks that the sharing portal selected the chosen output, and a Region is cropped within its stream.",
-      "status": "main",
+      "status": "review:#80",
       "platforms": ["linux"],
-      "note": "A second-output Region was captured on a two-output Omarchy VM at 1x. Pointer-follow behavior in both directions, other Wayland portal backends and mirrored layouts are not verified.",
+      "note": "Mixed-scale Region and separate Cancel/Finish actions after output crossings were verified on an Omarchy VM and X1. The earlier X1 synthetic Cancel-to-Finish misdispatch did not recur; other Wayland portal backends and mirrored layouts are unverified.",
       "docs": ["docs/linux.md", "docs/capture.md"]
     },
     {

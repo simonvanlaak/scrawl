@@ -1915,7 +1915,9 @@ impl ApparentCoordinator {
         }
     }
 
-    /// Follow the pointer with the controls, not with the capture source.
+    /// Follow the pointer with Linux controls, not with the capture source. On Mac,
+    /// a dragged capsule must stay where it was dropped for the whole recording.
+    #[cfg(target_os = "linux")]
     fn follow_recording_pointer(&mut self) {
         if !matches!(self.island_phase, IslandPhase::Recording)
             || !self
@@ -1944,7 +1946,11 @@ impl ApparentCoordinator {
                 overlay.move_to(frame);
             }
             self.display_rect = frame.map(|v| v as f32);
-            self.place_capsule();
+            // A manually dragged Linux capsule remains where it was dropped.
+            // Continue following with the ink overlay, but leave the pill alone.
+            if !platform::pill_user_moved() {
+                self.place_capsule();
+            }
         }
     }
 
@@ -2271,6 +2277,7 @@ impl ApparentCoordinator {
             self.sync_picker_overlay();
         }
         self.follow_phone_mirror();
+        #[cfg(target_os = "linux")]
         self.follow_recording_pointer();
 
         // Keep layout width at `island_target_width` during open and dismiss so the capsule never

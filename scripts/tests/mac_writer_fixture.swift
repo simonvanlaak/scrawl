@@ -1,11 +1,31 @@
-// Standalone issue #99 codec fixture. Not linked into Apparent.
-// On macOS: xcrun swiftc -swift-version 5 scripts/tests/mac_writer_fixture.swift -o /tmp/mac-writer-fixture
-//           /tmp/mac-writer-fixture /tmp/issue99-writer-fixture.mp4
+// Native issue #99 writer/validator ABI fixture, linked against the Cargo-built dylib.
+// On macOS, after cargo build: xcrun swiftc -swift-version 5 \
+//   scripts/tests/mac_writer_fixture.swift -L target/debug -lapparent_realtime_writer \
+//   -o "$TMPDIR/mac-writer-fixture"
+//   DYLD_LIBRARY_PATH="$PWD/target/debug" "$TMPDIR/mac-writer-fixture" "$TMPDIR/issue99-writer-fixture.mp4"
 // Synthetic red stream frames at 0 and 1 s; a fresh green stop pixel at 6 s.
 import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+
+@_silgen_name("apparent_writer_create_v1")
+private func createWriter(_ path: UnsafePointer<UInt8>?, _ length: Int,
+                          _ width: Int32, _ height: Int32) -> UnsafeMutableRawPointer?
+@_silgen_name("apparent_writer_enqueue_sample_v1")
+private func enqueueSample(_ handle: UnsafeMutableRawPointer?, _ sample: UnsafeRawPointer?,
+                           _ captureMs: Int64) -> Int32
+@_silgen_name("apparent_writer_enqueue_final_rgba_v1")
+private func enqueueFinal(_ handle: UnsafeMutableRawPointer?, _ rgba: UnsafeRawPointer?,
+                          _ width: Int32, _ height: Int32, _ stopMs: Int64) -> Int32
+@_silgen_name("apparent_writer_finish_v1")
+private func finishWriter(_ handle: UnsafeMutableRawPointer?) -> Int32
+@_silgen_name("apparent_writer_destroy_v1")
+private func destroyWriter(_ handle: UnsafeMutableRawPointer?)
+@_silgen_name("apparent_writer_validate_v1")
+private func validateWriter(_ path: UnsafePointer<UInt8>?, _ length: Int,
+                            _ rgba: UnsafeRawPointer?, _ width: Int32,
+                            _ height: Int32, _ stopMs: Int64) -> Int32
 
 private enum FixtureError: Error {
   case failed(String)
@@ -59,71 +79,13 @@ private func sample(_ buffer: CVPixelBuffer, at ms: Int64) throws -> CMSampleBuf
   return result!
 }
 
-// One writer/input/adaptor for both stream samples and the final screenshot.
-// This fixture writes synchronously and holds at most one pending pixel buffer.
-// A production SCK callback must enqueue a retained buffer instead of waiting here.
-private final class FixtureWriter {
-  let writer: AVAssetWriter
-  let input: AVAssetWriterInput
-  let adaptor: AVAssetWriterInputPixelBufferAdaptor
-  private var lastMs: Int64 = -1
-
-  init(url: URL) throws {
-    writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-    input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-      AVVideoCodecKey: AVVideoCodecType.h264,
-      AVVideoWidthKey: width,
-      AVVideoHeightKey: height,
-      AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 800_000,
-        AVVideoAllowFrameReorderingKey: false],
-    ])
-    input.expectsMediaDataInRealTime = true
-    adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
-      sourcePixelBufferAttributes: [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        kCVPixelBufferWidthKey as String: width,
-        kCVPixelBufferHeightKey as String: height,
-      ])
-    writer.add(input)
-    try require(writer.startWriting(), "writer start failed: \(String(describing: writer.error))")
-    writer.startSession(atSourceTime: .zero)
+private func greenRGBA() -> [UInt8] {
+  var bytes = [UInt8](repeating: 0, count: width * height * 4)
+  for pixel in stride(from: 0, to: bytes.count, by: 4) {
+    bytes[pixel + 1] = 255
+    bytes[pixel + 3] = 255
   }
-
-  func stream(_ frame: CMSampleBuffer) throws {
-    guard let buffer = CMSampleBufferGetImageBuffer(frame) else {
-      throw FixtureError.failed("stream sample has no image")
-    }
-    let time = CMSampleBufferGetPresentationTimeStamp(frame)
-    try append(buffer, at: time)
-  }
-
-  func stopPixels(_ buffer: CVPixelBuffer, at time: CMTime) throws {
-    try append(buffer, at: time)
-  }
-
-  private func append(_ buffer: CVPixelBuffer, at time: CMTime) throws {
-    try require(time.isValid && !time.isIndefinite, "invalid frame time")
-    try require(CVPixelBufferGetWidth(buffer) == width && CVPixelBufferGetHeight(buffer) == height,
-      "canvas changed")
-    let ms = CMTimeConvertScale(time, timescale: 1000, method: .roundTowardZero).value
-    try require(ms > lastMs, "timestamps must increase")
-    let deadline = Date().addingTimeInterval(5)
-    while !input.isReadyForMoreMediaData && writer.status == .writing && Date() < deadline {
-      Thread.sleep(forTimeInterval: 0.005)
-    }
-    try require(input.isReadyForMoreMediaData, "encoder stalled: \(String(describing: writer.error))")
-    try require(adaptor.append(buffer, withPresentationTime: time),
-      "append failed: \(String(describing: writer.error))")
-    lastMs = ms
-  }
-
-  func finish() throws {
-    input.markAsFinished()
-    let done = DispatchSemaphore(value: 0)
-    writer.finishWriting { done.signal() }
-    try require(done.wait(timeout: .now() + 15) == .success, "writer finish timed out")
-    try require(writer.status == .completed, "writer finish failed: \(String(describing: writer.error))")
-  }
+  return bytes
 }
 
 private func verify(_ url: URL) throws {
@@ -172,11 +134,30 @@ do {
   }
   let url = URL(fileURLWithPath: CommandLine.arguments[1])
   try require(!FileManager.default.fileExists(atPath: url.path), "output already exists")
-  let writer = try FixtureWriter(url: url)
-  try writer.stream(sample(pixels(red: true), at: 0))
-  try writer.stream(sample(pixels(red: true), at: 1000))
-  try writer.stopPixels(pixels(red: false), at: CMTime(value: 6000, timescale: 1000))
-  try writer.finish()
+  let path = Array(url.path.utf8)
+  let writer = path.withUnsafeBufferPointer {
+    createWriter($0.baseAddress, $0.count, Int32(width), Int32(height))
+  }
+  try require(writer != nil, "production writer creation failed")
+  defer { destroyWriter(writer) }
+  for ms in [Int64(0), 1000] {
+    let frame = try sample(pixels(red: true), at: ms)
+    try require(enqueueSample(writer, Unmanaged.passUnretained(frame).toOpaque(), ms) == 0,
+      "production sample enqueue failed at \(ms) ms")
+  }
+  let final = greenRGBA()
+  try final.withUnsafeBytes { raw in
+    try require(enqueueFinal(writer, raw.baseAddress, Int32(width), Int32(height), 6000) == 0,
+      "production stop image enqueue failed")
+  }
+  try require(finishWriter(writer) == 0, "production writer finish failed")
+  try path.withUnsafeBufferPointer { pathBytes in
+    try final.withUnsafeBytes { rgba in
+      try require(validateWriter(pathBytes.baseAddress, pathBytes.count, rgba.baseAddress,
+        Int32(width), Int32(height), 6000) == 0,
+        "production tail validation failed")
+    }
+  }
   try verify(url)
 } catch {
   fputs("FAIL: \(error)\n", stderr)

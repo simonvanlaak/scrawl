@@ -177,6 +177,21 @@ mod record_target_tests {
         let result = resolve_record_target(Some("A window title longer"), || vec![target(CaptureMode::Window, title, "Browser"), target(CaptureMode::Window, other, "Browser")], || panic!("display capture must not start"));
         assert!(result.is_err(), "truncated picker labels must not hide ambiguity");
     }
+
+    #[test]
+    fn unique_window_keeps_its_pinned_owner_identity() {
+        let mut window = target(CaptureMode::Window, "Private draft", "Editor");
+        window.window_id = Some(731);
+        window.window_owner_pid = Some(2804);
+        window.bundle_id = Some("dev.example.editor".into());
+        let selected = resolve_record_target(Some("Private draft"), || vec![window],
+            || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_id, Some(731));
+        assert_eq!(selected.window_owner_pid, Some(2804));
+        assert_eq!(selected.bundle_id.as_deref(), Some("dev.example.editor"));
+        assert!(same_window_owner(&selected, 731, 2804, "dev.example.editor", "Editor"));
+        assert!(!same_window_owner(&selected, 731, 2805, "dev.example.editor", "Editor"));
+    }
 }
 
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);

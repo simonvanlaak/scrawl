@@ -16,11 +16,11 @@ export function Team() {
             </a>
             <div className="pond-team-proof">
               <div>
-                <img src={`${TEAM_ASSETS}/start-berlin.png`} alt="START Berlin" loading="lazy" />
+                <a href="https://start-berlin.com" target="_blank" rel="noopener noreferrer" aria-label="START Berlin (opens in a new tab)"><img src={`${TEAM_ASSETS}/start-berlin.png`} alt="START Berlin" loading="lazy" /></a>
                 <p><strong>Head of Growth</strong><br />#1 · growth + engagement<br />20 chapters</p>
               </div>
               <div>
-                <img src={`${TEAM_ASSETS}/plug-and-play.png`} alt="Plug and Play" loading="lazy" />
+                <a href="https://plugandplaytechcenter.com" target="_blank" rel="noopener noreferrer" aria-label="Plug and Play (opens in a new tab)"><img src={`${TEAM_ASSETS}/plug-and-play.png`} alt="Plug and Play" loading="lazy" /></a>
                 <p><strong>VC + Fundraising</strong><br />experience</p>
               </div>
             </div>
@@ -32,18 +32,18 @@ export function Team() {
             </a>
             <div className="pond-team-proof">
               <div>
-                <img src={`${TEAM_ASSETS}/imago.png`} alt="IMAGO" loading="lazy" />
+                <a href="https://imago-images.com" target="_blank" rel="noopener noreferrer" aria-label="IMAGO (opens in a new tab)"><img src={`${TEAM_ASSETS}/imago.png`} alt="IMAGO" loading="lazy" /></a>
                 <p><strong>Lead Software Engineer</strong><br />10,000+ images / day</p>
               </div>
               <div>
-                <img src={`${TEAM_ASSETS}/openclaw.svg`} alt="OpenClaw" loading="lazy" />
+                <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" aria-label="OpenClaw (opens in a new tab)"><img src={`${TEAM_ASSETS}/openclaw.svg`} alt="OpenClaw" loading="lazy" /></a>
                 <p><strong>Open Source</strong><br />contributor</p>
               </div>
             </div>
           </article>
           <div className="pond-team-history">
-            <div><span>Part of</span><img src={`${TEAM_ASSETS}/hpi-engine.svg`} alt="HPI Engine" loading="lazy" /></div>
-            <div><span>Educated at</span><img src={`${TEAM_ASSETS}/code-wordmark.svg`} alt="CODE" loading="lazy" /></div>
+            <div><span>Part of</span><a href="https://engine.hpi.de" target="_blank" rel="noopener noreferrer" aria-label="HPI Engine (opens in a new tab)"><img src={`${TEAM_ASSETS}/hpi-engine.svg`} alt="HPI Engine" loading="lazy" /></a></div>
+            <div><span>Educated at</span><a href="https://code.berlin" target="_blank" rel="noopener noreferrer" aria-label="CODE (opens in a new tab)"><img src={`${TEAM_ASSETS}/code-wordmark.svg`} alt="CODE" loading="lazy" /></a></div>
           </div>
         </div>
       </div>

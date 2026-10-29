@@ -65,6 +65,23 @@ test("public homepage carries the source site's complete team section", () => {
   }
 })
 
+test("team portraits fit without cropping and every affiliation logo links to its official site", () => {
+  const html = readFileSync(join(publicDir, "index.html"), "utf8")
+  const css = readFileSync(join(site, "src", "pond-hero.css"), "utf8")
+  assert.match(css, /\.pond-team-profile > img \{[^}]*object-fit: contain;/)
+  for (const [domain, image] of [
+    ["start-berlin.com", "start-berlin.png"],
+    ["plugandplaytechcenter.com", "plug-and-play.png"],
+    ["imago-images.com", "imago.png"],
+    ["openclaw.ai", "openclaw.svg"],
+    ["engine.hpi.de", "hpi-engine.svg"],
+    ["code.berlin", "code-wordmark.svg"],
+  ]) {
+    const url = `https://${domain}`
+    assert.match(html, new RegExp(`<a[^>]*href="${url}"[^>]*><img[^>]*src="/team/${image.replaceAll(".", "\\.")}"`), `missing official link for ${image}`)
+  }
+})
+
 test("download actions fall back safely until the visitor's architecture is known", () => {
   const html = readFileSync(join(publicDir, "index.html"), "utf8")
   const bundle = readdirSync(join(publicDir, "assets")).find((name) => /^index-.*\.js$/.test(name))

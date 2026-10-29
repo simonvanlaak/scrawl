@@ -28,6 +28,8 @@ Verified in an Ubuntu 24.04 arm64 VM with GNOME 46 (Wayland and X11) and Plasma 
 
 `apparent record --duration N` is a separate timed recorder, not a shortcut-driven app session. Even with input access it does not collect click or Shift ink events; its manifest and summary explicitly mark that interaction-telemetry gap. Use `apparent shortcut record` with the app to start and finish when those events matter. The permission and pointer-position limits below still apply to the shortcut path.
 
+`apparent export <bundle> --out movie.mp4 --zoom` renders a saved Linux capture as an MP4 with ink, pins, click ripples and the saved WAV when those tracks exist. Install `ffmpeg` and `ffprobe` with H.264/AAC encoders; HEVC export needs `libx265`. Export uses FFmpeg decoding even if the capture's GStreamer full-quality keyframe decoder fell back to candidate images. The menu export experiment is still Mac-only. A timed CLI capture has no click/ink telemetry to burn into the movie; use the app shortcut for an annotated recording. See `docs/export-and-retention.md`.
+
 Wayland tells no app where the pointer is over another app's window. Apparent reads buttons and keys from the input devices. In onboarding or Settings › Permissions, **Copy command** copies `sudo usermod -aG input "$USER"`. Run it in a terminal, then log out and back in. Apparent checks whether it can open actual keyboard/mouse devices, rather than trusting group membership; it retries devices when access changes. This is the **Input devices** row (the Accessibility row on macOS).
 
 While ⇧ is held, the ink overlay takes the pointer (`linux::overlay::take_pointer`), so XWayland reports where it is and the ink follows it; a click while ⇧ is held lands on the overlay, not the app. On KDE Wayland, Apparent hides the recording overlay between strokes because KWin 5 otherwise blocks clicks into native apps even with an empty X input shape. Ink remains in the bundle, but disappears from the desktop when ⇧ is released.
@@ -159,7 +161,7 @@ left untouched rather than replaced when changing the channel or recording a lau
 
 ## Not on Linux
 
-The cabled iPhone, video export, OS element lookups for `agentContext` (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route). With `agentContext` on, an unnamed Linux click says `clicked (element unavailable)` and a mark receives no OS-derived element label. AT-SPI cannot securely join an accessible top-level to the X11 window where the action occurred; matching PID, title and bounds do not rule out a stale window. Registered dev pages can still supply their own context. See `docs/keyframes-and-text.md`.
+The cabled iPhone, menu-based video export (the CLI supports export), OS element lookups for `agentContext` (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route). With `agentContext` on, an unnamed Linux click says `clicked (element unavailable)` and a mark receives no OS-derived element label. AT-SPI cannot securely join an accessible top-level to the X11 window where the action occurred; matching PID, title and bounds do not rule out a stale window. Registered dev pages can still supply their own context. See `docs/keyframes-and-text.md`.
 
 ## Packaging
 

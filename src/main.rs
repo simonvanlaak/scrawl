@@ -867,6 +867,7 @@ pub fn finalize_capture_bundle(
         // The MP4 stream can succeed even when every screenshot fails. Do not turn
         // it into keyframes here: the sampler drops screenshots while a system
         // permission prompt is visible, but the movie may still contain it.
+        recover::mark_unsafe_video(bundle_dir)?;
         let message = "No screen frames were captured. Choose a screen in the sharing dialog and try again.";
         if let Some(ref video) = video_path {
             anyhow::bail!("{message} The raw video was kept at {}.", video.display());
@@ -2444,6 +2445,7 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let movie = dir.join("recording.mp4");
         std::fs::write(&movie, b"untrusted movie bytes").unwrap();
+        std::fs::write(dir.join("audio.wav"), b"audio bytes").unwrap();
         let target = TargetInfo {
             mode: CaptureMode::Window,
             app: None,
@@ -2474,6 +2476,9 @@ mod tests {
         assert!(error.to_string().contains(&movie.display().to_string()));
         assert!(movie.exists());
         assert!(!dir.join("apparent.json").exists());
+        assert!(dir.join(crate::recover::UNSAFE_VIDEO).exists());
+        assert!(!crate::recover::owed(&dir), "a later recovery must not decode unsafe movie frames");
+        assert!(crate::recover::rebuild(&dir, &crate::recover::Media::SYSTEM).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

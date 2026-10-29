@@ -1267,6 +1267,12 @@ fn capture_sck_frame(
     config: &SCStreamConfiguration,
     t_ms: u64,
 ) -> Option<RgbaFrame> {
+    // Development-only fault injection: keep the movie recording, but force the
+    // privacy-filtered screenshot path to fail for an end-to-end GUI check.
+    #[cfg(debug_assertions)]
+    if std::env::var("APPARENT_TEST_DROP_SCK_FRAMES").as_deref() == Ok("1") {
+        return None;
+    }
     let image = SCScreenshotManager::capture_image(filter, config).ok()?;
     let width = u32::try_from(image.width()).ok()?;
     let height = u32::try_from(image.height()).ok()?;

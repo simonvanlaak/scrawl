@@ -25,6 +25,8 @@ use crate::windows::{CursorSample, WindowSnapshot};
 
 pub const UNFINISHED: &str = "unfinished.json";
 pub const RECOVERING: &str = ".recovering";
+/// A live capture without safe screenshots must not be rebuilt from its potentially private movie.
+pub const UNSAFE_VIDEO: &str = ".unsafe-video";
 
 /// A journal younger than this may belong to a build still running in another process.
 const SETTLE: Duration = Duration::from_secs(15);
@@ -73,6 +75,14 @@ pub fn finished(bundle_dir: &Path) {
     let _ = std::fs::remove_file(bundle_dir.join(RECOVERING));
 }
 
+pub fn mark_unsafe_video(bundle_dir: &Path) -> Result<()> {
+    std::fs::write(
+        bundle_dir.join(UNSAFE_VIDEO),
+        b"No safe screenshots; do not recover movie frames\n",
+    )
+    .with_context(|| format!("Could not protect raw video in {}", bundle_dir.display()))
+}
+
 pub fn read(bundle_dir: &Path) -> Result<Unfinished> {
     let path = bundle_dir.join(UNFINISHED);
     serde_json::from_slice(
@@ -94,6 +104,7 @@ fn orphaned(dir: &Path) -> bool {
 pub fn owed(dir: &Path) -> bool {
     !dir.join("apparent.json").exists()
         && !dir.join(RECOVERING).exists()
+        && !dir.join(UNSAFE_VIDEO).exists()
         && (dir.join(UNFINISHED).is_file() || orphaned(dir))
 }
 
@@ -179,6 +190,11 @@ impl Media {
 /// Builds one bundle in place from its journal, or from its video and audio alone, and marks it
 /// tried first so a crash here isn't repeated at every launch.
 pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
+    anyhow::ensure!(
+        !dir.join(UNSAFE_VIDEO).exists(),
+        "{} has no privacy-filtered screenshots; raw movie recovery is unsafe",
+        dir.display()
+    );
     anyhow::ensure!(
         !dir.join("apparent.json").exists(),
         "{} is already built; `apparent reprocess` rebuilds it into a new bundle",

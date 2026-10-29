@@ -644,6 +644,10 @@ thread_local! {
 }
 
 pub(super) fn install_status_bar() -> Option<flume::Receiver<MenuAction>> {
+    if let Some(warning) = linux::media::encoder_warning() {
+        crate::capture::apparent_log(&warning);
+        linux::shell::notify("Apparent setup: H.264 encoder missing", &warning);
+    }
     if let Some(warning) = linux::media::decoder_warning() {
         crate::capture::apparent_log(&warning);
         linux::shell::notify("Apparent setup: H.264 decoder missing", &warning);

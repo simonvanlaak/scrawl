@@ -294,6 +294,10 @@ enum Command {
     #[cfg(target_os = "linux")]
     #[command(hide = true)]
     DecoderCheck { movie: PathBuf },
+    /// Verify that this Linux runtime can encode a synthetic H.264 MP4.
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    EncoderCheck { movie: PathBuf },
     /// Transcribe a bundle's audio again with Apple Speech, in place: its transcript, each
     /// keyframe's words, `apparent.json` and `summary.md`. Apparent does this for captures
     /// made while the speech model was still downloading.
@@ -1718,6 +1722,10 @@ fn main() -> Result<()> {
                 capture::screen_capture_usable(false),
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
+            #[cfg(target_os = "linux")]
+            if let Some(warning) = linux::media::encoder_warning() {
+                anyhow::bail!("{warning}");
+            }
             let target = discover_target(window.as_deref());
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
@@ -2102,6 +2110,12 @@ fn main() -> Result<()> {
             let frame = &frames[0];
             anyhow::ensure!(frame.width > 0 && frame.height > 0, "Decoded frame has no dimensions");
             println!("Decoded {} full-quality H.264 keyframe(s) ({}x{})", frames.len(), frame.width, frame.height);
+            Ok(())
+        }
+        #[cfg(target_os = "linux")]
+        Command::EncoderCheck { movie } => {
+            linux::media::encoder_check(&movie)?;
+            println!("Encoded and decoded H.264 MP4: {}", movie.display());
             Ok(())
         }
         Command::SckProbe { watch } => {

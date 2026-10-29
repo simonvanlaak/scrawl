@@ -1365,6 +1365,10 @@ impl SettingsWindow {
         let video = state.video_export;
         #[cfg(target_os = "linux")]
         let decoder_warning = crate::linux::media::decoder_warning();
+        #[cfg(target_os = "linux")]
+        let encoder_warning = crate::linux::media::encoder_warning();
+        #[cfg(not(target_os = "linux"))]
+        let encoder_warning: Option<String> = None;
         #[cfg(not(target_os = "linux"))]
         let decoder_warning: Option<String> = None;
         div()
@@ -1392,6 +1396,9 @@ impl SettingsWindow {
             .child(header(theme, "Transcription"))
             .child(group(theme, rows))
             .child(caption(theme, &note, false))
+            .when_some(encoder_warning, |pane, warning| {
+                pane.child(caption(theme, &warning, true))
+            })
             .when_some(decoder_warning, |pane, warning| {
                 pane.child(caption(theme, &warning, true))
             })

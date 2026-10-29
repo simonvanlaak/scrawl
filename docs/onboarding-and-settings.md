@@ -42,7 +42,7 @@ The sidebar is the helper's alone: a row selects on mouse-down and its pane repl
 
 About has a Star on GitHub button below the update control. Its heading, action and caption share one box in the Mac helper and Linux GPUI Settings. It opens `https://github.com/tryapparent/apparent` in the browser; starring remains the user's choice on GitHub.
 
-Linux GPUI Settings currently renders its light palette. Hovered buttons and menu items pair black text with light lilac (`#c4a9e6`, 10.09:1); the selected sidebar keeps dark lilac (`#302442`) with cream text. Black on that dark lilac gives only 1.45:1. The dark palette's cream-on-dark hover pair (12.71:1) is covered by a contrast test but is not yet used by Settings.
+Settings follows system light or dark appearance without storing a preference. The Mac helper resolves the SwiftUI theme from its environment and the titlebar background from a dynamic AppKit color; an open window updates when macOS appearance changes. Linux reads the desktop portal before opening, then watches its color-scheme revision and repaints the open GPUI window. Hovered buttons and menu items use black on light lilac (`#c4a9e6`) in light mode, and cream on dark lilac (`#302442`) in dark mode; the selected sidebar always has cream text. The Linux update result panel also follows the palette, including its secondary actions.
 
 
 Settings › About keeps its existing **Check for Updates…** action. On Linux, a manual check
@@ -55,10 +55,10 @@ The current Linux `check_cli` feed contract checks **and installs**: “Update a
 covers an image already installed for the next launch. It does not mean a discovery-only check.
 That result offers **Update now** (quit and launch the staged AppImage after exit) and
 **Update later** (dismiss, leaving it for the next launch). The primary Update now action
-uses brand Signal blue with Paper text; Update later uses Paper, Carbon text and border.
+uses brand Signal blue with Paper text; Update later uses the theme field and contrasting text and border.
 Both use the brand's square geometry, 18px control type, and 44px hit height rather than
-the compact pill buttons in Settings rows. The result panel has a square Paper field,
-Carbon rule, 18px native status, and 8px-based spacing; failure text uses the semantic
+the compact pill buttons in Settings rows. The result panel has a square theme-colored field,
+contrasting rule, 18px native status, and 8px-based spacing; failure text uses the semantic
 failure color. Other results use a matching secondary OK action. Tab moves between
 the choices, and Enter or Space activates the focused choice; Enter without a
 focused choice chooses now. Escape defers. On other results Enter and Escape dismiss.

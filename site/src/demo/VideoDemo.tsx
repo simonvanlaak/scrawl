@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent, KeyboardEvent } from "react"
-import { INK_SHADOW, InkPath, inkPath } from "./ink"
 import "./video-demo.css"
 
 const SOURCE = "/Apparent-ghost-demo-v4-lilac.mp4"
@@ -15,24 +14,18 @@ const CHAPTERS = [
   { label: "Result", t: 48.7 },
   { label: "Try it", t: 55.7 },
 ]
-type Stroke = { points: [number, number, number][] }
 
 export function Demo() {
   const video = useRef<HTMLVideoElement>(null)
-  const surface = useRef<HTMLDivElement>(null)
   const track = useRef<HTMLDivElement>(null)
   const pendingSeek = useRef<number | null>(null)
   const playRequest = useRef(0)
   const scrubbing = useRef(false)
-  const drawing = useRef(false)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(DURATION)
   const [playing, setPlaying] = useState(false)
   const [started, setStarted] = useState(false)
   const [sound, setSound] = useState(false)
-  const [drawMode, setDrawMode] = useState(false)
-  const [shift, setShift] = useState(false)
-  const [strokes, setStrokes] = useState<Stroke[]>([])
   const [error, setError] = useState("")
   // Media clocks round to microseconds; don't select the previous chapter at its first frame.
   const current = CHAPTERS.reduce((index, chapter, i) => time + .001 >= chapter.t ? i : index, 0)
@@ -40,12 +33,9 @@ export function Demo() {
 
   useEffect(() => {
     const element = video.current
-    const release = () => { setShift(false); drawing.current = false }
-    window.addEventListener("blur", release)
     return () => {
       playRequest.current++
       element?.pause()
-      window.removeEventListener("blur", release)
     }
   }, [])
 
@@ -75,7 +65,7 @@ export function Demo() {
       element.load()
     }
   }
-  const replay = () => { seek(0); setStrokes([]); play() }
+  const replay = () => { seek(0); play() }
   const toggle = () => {
     if (video.current && !video.current.paused) pause()
     else { if (ended) seek(0); play() }
@@ -86,7 +76,6 @@ export function Demo() {
     if (bounds?.width) seek((event.clientX - bounds.left) / bounds.width * duration)
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Shift") setShift(true)
     // Native focused buttons handle their own Space/Enter; don't toggle twice.
     if (event.target !== event.currentTarget) return
     if (event.key === " ") { event.preventDefault(); toggle() }
@@ -94,33 +83,12 @@ export function Demo() {
       event.preventDefault(); seek(CHAPTERS[Math.min(CHAPTERS.length - 1, current + 1)].t)
     } else if (event.key === "ArrowLeft") {
       event.preventDefault(); seek(time - CHAPTERS[current].t > .7 ? CHAPTERS[current].t : CHAPTERS[Math.max(0, current - 1)].t)
-    } else if ((event.metaKey || event.ctrlKey) && event.key === "z") {
-      event.preventDefault(); setStrokes((old) => old.slice(0, -1))
     }
   }
-  const point = (event: ReactPointerEvent): [number, number, number] => {
-    const bounds = surface.current!.getBoundingClientRect()
-    return [(event.clientX - bounds.left) / bounds.width * 1916, (event.clientY - bounds.top) / bounds.height * 1164, event.pressure || .5]
-  }
-  const finishDrawing = () => { drawing.current = false }
 
   return (
     <div className="demo video-demo">
-      <div ref={surface} className={`stage-wrap${drawMode || shift ? " drawing" : ""}`} tabIndex={0} aria-label="Apparent demo"
-        onKeyDown={onKeyDown} onKeyUp={(event) => { if (event.key === "Shift") { setShift(false); finishDrawing() } }}
-        onPointerDown={(event) => {
-          if (event.button !== 0 || !(drawMode || event.shiftKey)) return
-          if ((event.target as HTMLElement).closest("button, a")) return
-          event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId)
-          drawing.current = true
-          setStrokes((old) => [...old, { points: [point(event)] }])
-        }}
-        onPointerMove={(event) => {
-          if (!drawing.current) return
-          const next = point(event)
-          setStrokes((old) => old.length ? [...old.slice(0, -1), { points: [...old[old.length - 1].points, next] }] : old)
-        }}
-        onPointerUp={finishDrawing} onPointerCancel={finishDrawing} onLostPointerCapture={finishDrawing}>
+      <div className="stage-wrap" tabIndex={0} aria-label="Apparent demo" onKeyDown={onKeyDown}>
         <video ref={video} src={SOURCE} poster={POSTER} preload="none" playsInline muted={!sound}
           aria-label="A real Apparent capture: launch, sketch, handoff and the implemented ghost"
           onLoadedMetadata={() => {
@@ -132,9 +100,6 @@ export function Demo() {
           onPlay={() => { setPlaying(true); setStarted(true) }} onPause={() => setPlaying(false)}
           onEnded={() => { setPlaying(false); setTime(video.current?.duration ?? DURATION) }}
           onError={() => setError("The demo could not load. Try again, or open the video directly.")} />
-        <svg className="video-demo-ink" viewBox="0 0 1916 1164" style={INK_SHADOW} aria-hidden="true">
-          {strokes.map((stroke, i) => <InkPath key={i} d={inkPath(stroke.points, 7, .5)} />)}
-        </svg>
         {!started && <button className="stage-play liquid-glass" onClick={() => play(true)}><PlayIcon />Play with sound</button>}
         {started && playing && !sound && <button className="stage-sound-hint liquid-glass" onClick={() => { if (video.current) video.current.muted = false; setSound(true) }}>Tap for sound</button>}
         {ended && <div className="stage-end"><button className="stage-btn liquid-glass" onClick={replay}><ReplayIcon />Replay</button></div>}
@@ -163,7 +128,6 @@ export function Demo() {
           </div>
           <div className="beats">{CHAPTERS.map((item, i) => <button key={item.label} className={i === current ? "on" : ""} aria-label={`Chapter: ${item.label}`} aria-current={i === current ? "step" : undefined} style={{ flexGrow: (CHAPTERS[i + 1]?.t ?? duration) - item.t }} onClick={() => chapter(item.t)}><span>{i + 1}</span><em>{item.label}</em></button>)}</div>
         </div>
-        <div className="controls-right"><button className={`draw-btn${drawMode ? " on" : ""}`} aria-label="Draw on demo" aria-pressed={drawMode} onClick={() => setDrawMode(!drawMode)} title="Draw (or hold ⇧ and drag)"><kbd>⇧</kbd> Draw</button></div>
       </div>
     </div>
   )

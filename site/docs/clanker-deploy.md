@@ -29,7 +29,7 @@ server that supports HTTP byte ranges, run
 `node scripts/verify-video-demo-browser.mjs <URL> <private evidence directory>`.
 `CHROME_PATH` can select an existing Chrome installation. The browser check covers
 first-load chapter seeking, play/pause, replay, all chapters, sound, pointer and
-keyboard seeking, drawing/undo, natural ending, rapid switching, missing-media
+keyboard seeking, absence of drawing controls and Shift-drag ink, natural ending, rapid switching, missing-media
 feedback, and 390/320px layouts. It does not verify physical speakers or Safari.
 Do not use Python's basic `http.server` to judge seeking: it ignores Range requests
 and Chrome can clamp an early seek to zero. Require a live `206` response with

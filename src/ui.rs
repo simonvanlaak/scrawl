@@ -2501,7 +2501,14 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
-        let _ = std::fs::create_dir_all(&bundle_dir);
+        if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
+            apparent_log(format!("Capture could not protect raw video: {error:#}"));
+            self.cancel_recording(cx);
+            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                *status = Some("Capture failed — could not protect raw video".into());
+            }
+            return;
+        }
         let video_path = bundle_dir.join("recording.mp4");
 
         self.telemetry.set_capture_mode(target.mode);

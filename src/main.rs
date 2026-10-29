@@ -1722,7 +1722,7 @@ fn main() -> Result<()> {
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
-            std::fs::create_dir_all(&bundle_dir)?;
+            recover::begin_screen_capture(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
             let playback = playback::Guard::start();
             let audio = AudioRecorder::start().ok();

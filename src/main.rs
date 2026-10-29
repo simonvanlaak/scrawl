@@ -2413,7 +2413,7 @@ fn main() -> Result<()> {
         Command::Copy { bundle } => {
             let dir = handoff::resolve_bundle_dir(&bundle)?;
             handoff::copy_bundle_to_clipboard(&dir)?;
-            println!("Copied {} to clipboard", dir.display());
+            println!("{}", copy_confirmation(&dir));
             Ok(())
         }
         Command::Preview {
@@ -2435,9 +2435,25 @@ fn main() -> Result<()> {
     }
 }
 
+fn copy_confirmation(dir: &std::path::Path) -> String {
+    format!(
+        "Copied {} to clipboard. Copy is text-only by default; it cannot confirm an image attachment. Use Apparent's Paste control for image + text, or attach {} manually; check the draft before sending.",
+        dir.display(),
+        dir.join("contact-sheet.png").display()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_confirmation_does_not_imply_visuals_reached_the_agent() {
+        let confirmation = copy_confirmation(std::path::Path::new("/captures/example.apparent"));
+        assert!(confirmation.contains("contact-sheet.png"), "{confirmation}");
+        assert!(confirmation.contains("Paste"), "{confirmation}");
+        assert!(confirmation.contains("check the draft"), "{confirmation}");
+    }
 
     #[test]
     fn movie_without_safe_screenshots_is_not_a_bundle() {

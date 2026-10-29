@@ -74,7 +74,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 
 use crate::audio::{AudioRecorder, RecordedAudio};
-use crate::capture::{ScreenCaptureSession, discover_target, write_bundle_artifacts};
+use crate::capture::{ScreenCaptureSession, discover_target, record_target, write_bundle_artifacts};
 use crate::keyframes::select_keyframes;
 use crate::model::{
     CaptureMode, DeviceInfo, InteractionEvent, Mark, RgbaFrame, SCALE, ApparentBundle, Shape, Stroke,
@@ -1593,16 +1593,6 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBu
     )
 }
 
-fn ensure_requested_window(query: Option<&str>, target: &TargetInfo) -> Result<()> {
-    if let Some(query) = query {
-        anyhow::ensure!(
-            target.mode == CaptureMode::Window && target.window_id.is_some(),
-            "No selectable window matches {query:?}; refusing to record a display instead"
-        );
-    }
-    Ok(())
-}
-
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     linux::prepare_process();
@@ -1736,8 +1726,7 @@ fn main() -> Result<()> {
                 capture::screen_capture_usable(false),
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
-            let target = discover_target(window.as_deref());
-            ensure_requested_window(window.as_deref(), &target)?;
+            let target = record_target(window.as_deref())?;
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
@@ -2566,25 +2555,6 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
-    fn explicit_window_recording_never_falls_back_to_a_display() {
-        let mut target = TargetInfo {
-            mode: CaptureMode::Display,
-            app: None,
-            bundle_id: None,
-            window_title: None,
-            window_id: None,
-            window_owner_pid: None,
-            display_id: 1,
-            frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
-        };
-        assert!(ensure_requested_window(None, &target).is_ok());
-        assert!(ensure_requested_window(Some("Finder"), &target).is_err());
-        target.mode = CaptureMode::Window;
-        assert!(ensure_requested_window(Some("Finder"), &target).is_err());
-        target.window_id = Some(42);
-        assert!(ensure_requested_window(Some("Finder"), &target).is_ok());
-    }
 
     #[test]
     fn cli_identifies_as_apparent() {

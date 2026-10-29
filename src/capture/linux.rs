@@ -405,16 +405,16 @@ fn app_windows() -> Vec<(linux::WindowInfo, String, String)> {
         .collect()
 }
 
-fn window_target(window: &linux::WindowInfo, app: &str, id: &str) -> TargetInfo {
+fn window_target(window: &linux::WindowInfo, app: &str, id: &str, picker: bool) -> TargetInfo {
     let monitor = linux::monitor_at(
         window.rect[0] + window.rect[2] / 2.0,
         window.rect[1] + window.rect[3] / 2.0,
     );
     TargetInfo {
         mode: CaptureMode::Window,
-        app: Some(clean_label(app)).filter(|s| !s.is_empty()),
+        app: Some(if picker { clean_label(app) } else { app.trim().to_owned() }).filter(|s| !s.is_empty()),
         bundle_id: Some(id.to_owned()),
-        window_title: Some(clean_label(&window.title)).filter(|t| !t.is_empty()),
+        window_title: Some(if picker { clean_label(&window.title) } else { window.title.trim().to_owned() }).filter(|t| !t.is_empty()),
         window_id: Some(window.hwnd as u32),
         window_owner_pid: None,
         display_id: monitor.as_ref().map_or(0, linux::monitor_id),
@@ -428,16 +428,8 @@ pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
 }
 
 /// Like `discover_target`, recording the display under `point` (see `pick_display`).
-pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
+pub fn discover_target_at(_window_query: Option<&str>, point: Option<[f64; 2]>) -> TargetInfo {
     let frontmost = frontmost_app_info();
-    if let Some(query) = window_query {
-        let q = query.to_lowercase();
-        if let Some((window, app, id)) = app_windows().into_iter().find(|(w, app, _)| {
-            w.title.to_lowercase().contains(&q) || app.to_lowercase().contains(&q)
-        }) {
-            return window_target(&window, &app, &id);
-        }
-    }
     let monitors = linux::monitors();
     let front = external_front_window();
     let rects: Vec<[f64; 4]> = monitors.iter().map(|m| m.rect).collect();
@@ -464,10 +456,19 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
 
 /// All on-screen app windows at least 80 px each way, front to back, for the Window picker.
 pub fn list_selectable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(true)
+}
+
+/// The same eligible windows, with full names for unambiguous CLI matching.
+pub fn list_recordable_windows() -> Vec<TargetInfo> {
+    windows_for_selection(false)
+}
+
+fn windows_for_selection(picker: bool) -> Vec<TargetInfo> {
     app_windows()
         .into_iter()
         .filter(|(w, _, _)| w.rect[2] >= 80.0 && w.rect[3] >= 80.0)
-        .map(|(w, app, id)| window_target(&w, &app, &id))
+        .map(|(w, app, id)| window_target(&w, &app, &id, picker))
         .collect()
 }
 

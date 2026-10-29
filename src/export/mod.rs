@@ -16,6 +16,8 @@
 pub mod camera;
 pub mod crop;
 pub mod ink;
+#[cfg(target_os = "linux")]
+mod linux;
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -25,7 +27,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::autocrop::Rect;
-use crate::model::{InteractionEvent, ApparentBundle};
+use crate::model::{ApparentBundle, InteractionEvent};
 
 use self::camera::{CameraKey, Focus};
 use self::crop::CropArg;
@@ -214,6 +216,9 @@ pub fn export(
                 .unwrap_or_else(|| format!("This bundle has no video ({})", video.display()))
         );
     }
+    #[cfg(target_os = "linux")]
+    let probe = linux::probe(&video).context("Could not read the recording's video")?;
+    #[cfg(not(target_os = "linux"))]
     let probe = crate::helper::probe(&video).context("Could not read the recording's video")?;
     ensure!(
         probe.width > 0 && probe.height > 0 && probe.duration_ms > 0,
@@ -245,10 +250,10 @@ pub fn export(
     let (audio, audio_start, audio_length) =
         if bundle.source.as_deref() == Some("iphone") && probe.audio_tracks > 0 {
             (Some(video.clone()), 0, probe.duration_ms)
-        } else if let Some(wav) = wav {
-            let wav_ms = wav_duration_ms(&wav)?;
+        } else if let Some(wav) = wav.as_ref() {
+            let wav_ms = wav_duration_ms(wav)?;
             match crop::audio_window(bundle.video_offset_ms, probe.duration_ms, wav_ms) {
-                Some((start, length)) => (Some(wav), start, length),
+                Some((start, length)) => (Some(wav.clone()), start, length),
                 None => (None, 0, 0),
             }
         } else {
@@ -270,7 +275,35 @@ pub fn export(
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
     }
-    let partial = out.with_extension("partial.mp4");
+    // A lexical comparison misses `--out bundle/./recording.mp4`, symlinked
+    // directories and other aliases. Keep the original video/WAV untouched.
+    let parent = std::fs::canonicalize(out.parent().unwrap_or_else(|| Path::new(".")))?;
+    // An export inside a bundle must not replace its manifest, frames or other
+    // existing evidence either. A new movie path there is still allowed.
+    ensure!(
+        !(out.exists() && parent.starts_with(std::fs::canonicalize(dir)?)),
+        "Export output cannot replace an existing bundle file"
+    );
+    let destination = if out.exists() {
+        std::fs::canonicalize(&out)?
+    } else {
+        parent.join(out.file_name().context("Export output needs a file name")?)
+    };
+    ensure!(
+        destination != std::fs::canonicalize(&video)?,
+        "Export output cannot replace source media"
+    );
+    if let Some(source) = &wav {
+        ensure!(
+            destination != std::fs::canonicalize(source)?,
+            "Export output cannot replace source media"
+        );
+    }
+    let partial = out.with_file_name(format!(
+        ".{}.{}.partial.mp4",
+        out.file_name().unwrap_or_default().to_string_lossy(),
+        crate::make_bundle_id()
+    ));
     let plan = Plan {
         video: &video,
         out: &partial,
@@ -298,11 +331,17 @@ pub fn export(
         }),
         ink: &ink,
     };
-    let plan_path =
-        std::env::temp_dir().join(format!("apparent-export-{}.json", crate::make_bundle_id()));
-    std::fs::write(&plan_path, serde_json::to_vec(&plan)?)?;
-    let result = run_helper(&plan_path, options.background, progress);
-    let _ = std::fs::remove_file(&plan_path);
+    #[cfg(target_os = "linux")]
+    let result = linux::run(&plan, progress);
+    #[cfg(not(target_os = "linux"))]
+    let result = {
+        let plan_path =
+            std::env::temp_dir().join(format!("apparent-export-{}.json", crate::make_bundle_id()));
+        std::fs::write(&plan_path, serde_json::to_vec(&plan)?)?;
+        let result = run_helper(&plan_path, options.background, progress);
+        let _ = std::fs::remove_file(&plan_path);
+        result
+    };
     let done = match result {
         Ok(done) => done,
         Err(error) => {
@@ -310,8 +349,10 @@ pub fn export(
             return Err(error);
         }
     };
-    std::fs::rename(&partial, &out)
-        .with_context(|| format!("Could not write {}", out.display()))?;
+    if let Err(error) = std::fs::rename(&partial, &out) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error).with_context(|| format!("Could not write {}", out.display()));
+    }
     progress(1.0);
     Ok(Exported {
         path: out,
@@ -339,6 +380,7 @@ fn wav_duration_ms(path: &Path) -> Result<u64> {
 
 /// Runs `apparent-helper export PLAN`, reading its JSON lines: `{"progress": f}` and a final
 /// `{"done": {...}}`.
+#[cfg(not(target_os = "linux"))]
 fn run_helper(plan: &Path, background: bool, progress: &mut dyn FnMut(f32)) -> Result<Done> {
     let helper = crate::helper::path()?;
     let mut command = if background {
@@ -409,6 +451,236 @@ pub fn describe(exported: &Exported) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_exports_a_real_movie_with_annotated_pixels_and_audio() {
+        match std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+        {
+            Ok(output) if output.status.success() => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipped: FFmpeg is not installed");
+                return;
+            }
+            other => panic!("FFmpeg is installed but cannot start: {other:?}"),
+        }
+        let root =
+            std::env::temp_dir().join(format!("apparent-export-test-{}", crate::make_bundle_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let movie = root.join("recording.mp4");
+        let made = Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:s=320x180:r=10:d=2",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-y",
+            ])
+            .arg(&movie)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let wav = root.join("audio.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&wav, spec).unwrap();
+        for i in 0..(48_000 * 2) {
+            let sample = if i < 48_000 / 2 {
+                0
+            } else {
+                ((i as f32 / 40.0).sin() * 4000.0) as i16
+            };
+            writer.write_sample(sample).unwrap();
+        }
+        writer.finalize().unwrap();
+        let mut b = bundle();
+        b.video = Some("recording.mp4".into());
+        b.audio = Some("audio.wav".into());
+        b.video_offset_ms = 100;
+        b.events = vec![InteractionEvent::Click {
+            t: 600,
+            x: 0.5,
+            y: 0.5,
+            button: None,
+            label: None,
+            role: None,
+        }];
+        b.strokes = serde_json::from_value(serde_json::json!([
+            {"t0": 900, "t1": 900, "fw": 2560, "fh": 1440,
+             "pin": 1, "pts": [640, 720, 0]},
+            {"t0": 1000, "t1": 1200, "fw": 2560, "fh": 1440,
+             "pts": [1900, 500, 0, 2100, 700, 200]}
+        ]))
+        .unwrap();
+        let mut options = Options {
+            out: Some(root.join("out.mp4")),
+            crop: CropArg::Full,
+            fps: Some(10),
+            ..Default::default()
+        };
+        let output = export(&root, &b, &options, &mut |_| {}).unwrap();
+        assert!(output.audio);
+        assert!(output.bytes > 0);
+        let frame_at = |time: &str| {
+            let decoded = Command::new("ffmpeg")
+                .args(["-v", "error", "-ss", time, "-i"])
+                .arg(&output.path)
+                .args([
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgba",
+                    "pipe:1",
+                ])
+                .output()
+                .unwrap();
+            assert!(decoded.status.success());
+            crate::model::RgbaFrame::new(0, output.width, output.height, decoded.stdout)
+        };
+        let frame = frame_at("0.5");
+        let marked = ((frame.height / 2 - 14)..(frame.height / 2 + 14)).any(|y| {
+            ((frame.width / 2 - 14)..(frame.width / 2 + 14)).any(|x| {
+                let pixel = ((y * frame.width + x) * 4) as usize;
+                frame.rgba[pixel..pixel + 3].iter().any(|&v| v < 200)
+            })
+        });
+        assert!(marked, "click ring is visible on white");
+        let late = frame_at("1.1");
+        let colored = late
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[0] > px[1].saturating_add(40) && px[0] > px[2].saturating_add(40))
+            .count();
+        assert!(
+            colored > 30,
+            "pin and stroke are visible after the click has faded"
+        );
+        let audio_at = |time: &str| {
+            Command::new("ffmpeg")
+                .args(["-v", "error", "-ss", time, "-i"])
+                .arg(&output.path)
+                .args([
+                    "-t", "0.05", "-map", "0:a:0", "-f", "s16le", "-ac", "1", "-ar", "48000",
+                    "pipe:1",
+                ])
+                .output()
+                .unwrap()
+                .stdout
+                .chunks_exact(2)
+                .map(|sample| i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs() as u64)
+                .sum::<u64>()
+        };
+        assert!(
+            audio_at("0.2") < audio_at("0.8") / 5,
+            "audio follows the video offset"
+        );
+        let original_video = std::fs::read(&movie).unwrap();
+        let original_audio = std::fs::read(&wav).unwrap();
+        options.out = Some(root.join("./recording.mp4"));
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        options.out = Some(root.join("./audio.wav"));
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        options.out = Some(alias.join("recording.mp4"));
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        b.video_offset_ms = 3_000; // WAV exists, but ends before the movie begins.
+        options.out = Some(root.join("./audio.wav"));
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        let manifest = root.join("apparent.json");
+        std::fs::write(&manifest, "private bundle manifest").unwrap();
+        options.out = Some(manifest.clone());
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        assert_eq!(
+            std::fs::read_to_string(manifest).unwrap(),
+            "private bundle manifest"
+        );
+        assert_eq!(std::fs::read(&movie).unwrap(), original_video);
+        assert_eq!(std::fs::read(&wav).unwrap(), original_audio);
+        options.out = Some(root.join("missing.mp4"));
+        std::fs::remove_file(&movie).unwrap();
+        assert!(export(&root, &b, &options, &mut |_| {}).is_err());
+        assert!(!options.out.as_ref().unwrap().exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_exports_the_video_timeline_not_a_longer_container_audio_tail() {
+        use std::process::Command;
+        if !Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .unwrap()
+            .status
+            .success()
+        {
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("apparent-export-tail-{}", crate::make_bundle_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let movie = root.join("recording.mp4");
+        let encoded = Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:s=320x180:r=30:d=0.266667",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-y",
+            ])
+            .arg(&movie)
+            .output()
+            .unwrap();
+        assert!(
+            encoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&encoded.stderr)
+        );
+        let mut b = bundle();
+        b.video = Some("recording.mp4".into());
+        b.audio = None;
+        b.events.clear();
+        b.strokes.clear();
+        let result = export(
+            &root,
+            &b,
+            &Options {
+                out: Some(root.join("out.mp4")),
+                crop: CropArg::Full,
+                ..Default::default()
+            },
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!((result.duration_ms as i64 - 267).abs() < 100);
+        assert!(!result.audio);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn bundle() -> ApparentBundle {
         serde_json::from_value(serde_json::json!({

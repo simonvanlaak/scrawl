@@ -5,7 +5,25 @@ description: Use when told "make it apparent" or asked for video proof.
 
 # Make It Apparent: show the change
 
-When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and make a separate share copy only when it improves clarity. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
+When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and deliver a separate polished share copy by default. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
+
+## Required spoken-style explanation and reusable CLI
+
+Every delivered proof video needs timed natural sentences explaining the action, evidence and result, with matching burned subtitles and synchronized TTS by default. Retain editable cues, SRT and script. This is postproduction explanation, not a transcription or replacement of recorded evidence. Disclose synthetic narration; never play it through speakers during capture. Simon can request a silent captioned copy instead. Suitable live narration need not be duplicated.
+
+Use the repository helper, not a new per-video script. Read `docs/proof-video.md` for setup, cue format and privacy. From the Apparent checkout, write a private `cues.json` array of `[start_seconds, end_seconds, text]` against the existing video's clock, then run:
+
+```sh
+uv run scripts/proof-video.py /absolute/private/walkthrough.mp4 \
+  --cues /absolute/private/cues.json \
+  --out-dir /absolute/private/proof-take-1 \
+  --source-audio drop --allow-online-tts \
+  --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+```
+
+The output directory must be new. The font example is Linux-specific; select a real regular sans-serif TTF on other hosts. `--allow-online-tts` consents to sending cue text only to Microsoft Edge TTS; never include secrets. Default voice is en-GB-RyanNeural at +10%, not Nova. Use `--silent` instead of that consent flag for silent opt-out. Explicit `--source-audio keep` mixes reviewed original audio; default practice is `drop` to avoid leaking source conversation. Neither choice changes the original. Do not publish media without destination approval.
+
+Use measured `--crop x,y,width,height` for useful close-ups, and put `--caption-box x,y,width,height` in empty output space, away from results. Default output is 1440×900 with white regular 32 px sans-serif, padded rounded dark translucent boxes. The top-left disclosure also needs clear space. Keep captions to two short lines and natural spoken sentences. Reject overlapping/out-of-range cues and speech that exceeds its real window: shorten text rather than rush speech, retime real actions or invent claims. The helper emits H264/AAC/YUV420p faststart MP4 at 30 fps, fully decodes it and retains provenance/timing/QA reports; it does not certify truth, privacy or semantic caption placement. Inspect the complete `share.mp4`, caption boundaries, audio and final caveat before delivering it. Tooling has been exercised on Linux; macOS execution is not yet verified.
 
 ## Point out the claim
 
@@ -47,7 +65,7 @@ If export works on this host, use `--fps 30` (or `--fps 60` on explicit request)
 apparent export /absolute/private/path/walkthrough.apparent --out /absolute/private/path/walkthrough.mp4 --fps 30
 ```
 
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
+Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed captions. Run the required proof-video helper above on the existing movie for the narrated share copy. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; `ffprobe` verifies format, not truth or privacy. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
 
 ## Hand it back
 
@@ -57,5 +75,5 @@ Embed or link the **verified playable file** in a channel the viewer can reach. 
 
 - A staged click after the result was already present proves nothing; reset to the starting state and capture the action.
 - A smooth mock or browser replay is not evidence for a live native app; name the provenance visibly and in the handoff.
-- Automatic zoom, captions and fast-forward are optional explanation, not permission to conceal failures or invent causality.
+- Timed spoken-style explanation, matching captions and default TTS are delivery requirements; silent opt-out keeps captions. A measured crop or zoom helps readability, never conceals failures or invents causality.
 - A complete source bundle is not a shareable artifact until its entire media and delivery destination have been checked.

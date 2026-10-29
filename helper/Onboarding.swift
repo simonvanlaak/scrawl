@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import CoreGraphics
 import CoreText
 import Speech
@@ -934,7 +935,10 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
   let model: OnboardingModel
   var window: NSWindow?
   private var shortcutMonitor: Any?
-  private lazy var keys = HelperWindowKeys(window: { [weak self] in self?.window })
+  private lazy var keys = HelperWindowKeys(
+    window: { [weak self] in self?.window },
+    enabled: { [weak self] in self?.model.shortcutEditor?.recording != true }
+  )
 
   init(model: OnboardingModel) {
     self.model = model
@@ -1064,7 +1068,11 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
                let data = try? JSONSerialization.data(withJSONObject: shortcut),
                let editor = try? JSONDecoder().decode(OnboardingShortcut.self, from: data) {
               self.model.shortcutEditor = editor
-              self.listenForShortcut(editor.recording)
+              // Focus may have gone elsewhere before the recorder's first acknowledgement.
+              // Cancel it even if windowDidResignKey saw the previous, non-recording state.
+              let active = self.window?.isKeyWindow == true
+              if editor.recording && !active { emit(["action": "cancel-shortcut"]) }
+              self.listenForShortcut(editor.recording && active)
             }
           case "hide": self.window?.orderOut(nil)
           case "show": self.present()

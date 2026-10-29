@@ -2608,6 +2608,13 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
+        #[cfg(target_os = "linux")]
+        if let Some(warning) = crate::linux::media::encoder_warning() {
+            apparent_log(&warning);
+            crate::linux::shell::notify("Apparent setup: H.264 encoder missing", &warning);
+            self.cancel_recording(cx);
+            return;
+        }
         whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         if let Ok(mut status) = CAPTURE_STATUS.lock() {

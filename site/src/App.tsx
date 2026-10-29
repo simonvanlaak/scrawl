@@ -1,6 +1,7 @@
 import { Demo } from "./demo/Demo"
 import { inkPath } from "./demo/ink"
 import { FrogPond } from "./FrogPond"
+import { Team } from "./Team"
 
 const REPO = "https://github.com/tryapparent/apparent"
 
@@ -17,6 +18,7 @@ export function App() {
         <a className="brand" href="#top" aria-label="Apparent home">
           <img src="/apparent-wordmark.svg" width={149} height={35} decoding="async" alt="apparent" />
         </a>
+        <a className="pond-team-link" href="#team">Team</a>
       </header>
       <main>
         <FrogPond />
@@ -29,6 +31,7 @@ export function App() {
         <section className="pond-purpose">
           <h2>We believe work should be <span className="word-highlight">enjoyable<svg className="brush-highlight" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d={brushPath} fill="#b7a5d8" /></svg></span><br /> and leave us free for late nights with friends.</h2>
         </section>
+        <Team />
       </main>
       <footer className="foot">
         <img src="/apparent-wordmark.svg" width={130} height={30} decoding="async" alt="apparent" />

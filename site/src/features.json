@@ -22,6 +22,15 @@
   ],
   "features": [
     {
+      "id": "feedback-issue",
+      "group": "delivery",
+      "name": "Give Feedback…",
+      "says": "Start a capture from the menu, review it locally, then open a GitHub feedback form. No capture data is added to the URL or uploaded automatically.",
+      "status": "experiment:feedbackIssue",
+      "platforms": ["mac", "linux"],
+      "docs": ["docs/capture.md"]
+    },
+    {
       "id": "linux-h264-decoder-check",
       "group": "settings",
       "name": "H.264 decoder setup warning",
@@ -86,6 +95,16 @@
       "status": "stable@0.3.4",
       "platforms": ["mac"],
       "docs": ["docs/capture.md"]
+    },
+    {
+      "id": "linux-hyprland-multi-display",
+      "group": "start",
+      "name": "Output-bound Region on Hyprland",
+      "says": "A multi-output Hyprland capture checks that the sharing portal selected the chosen output, and a Region is cropped within its stream.",
+      "status": "main",
+      "platforms": ["linux"],
+      "note": "Mixed-scale Region and separate Cancel/Finish actions after output crossings were verified on an Omarchy VM and X1. A Region selected on the VM's 1.25x output also saved visible content in its movie and keyframe. The earlier X1 synthetic Cancel-to-Finish misdispatch did not recur; other Wayland portal backends and mirrored layouts are unverified.",
+      "docs": ["docs/linux.md", "docs/capture.md"]
     },
     {
       "id": "recent-area",
@@ -864,6 +883,16 @@
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
+    },
+    {
+      "id": "export-cli-linux",
+      "group": "export",
+      "name": "apparent export on Linux",
+      "says": "The CLI burns ink, pins and click ripples into an MP4, with optional auto-zoom and aligned WAV audio, using FFmpeg and ffprobe.",
+      "status": "main",
+      "platforms": ["linux"],
+      "note": "The menu export experiment remains Mac-only. Requires FFmpeg with H.264/AAC encoders; the timed CLI recorder does not collect click or ink telemetry.",
+      "docs": ["docs/export-and-retention.md", "docs/linux.md"]
     },
     {
       "id": "export-menu",

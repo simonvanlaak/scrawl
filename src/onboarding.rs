@@ -142,7 +142,8 @@ pub enum Status {
     Granted,
 }
 
-/// What macOS has granted Apparent, from a fresh `apparent-helper permissions`.
+/// Permission statuses shown to the user. macOS Accessibility is checked in the recording
+/// process; other statuses come from a fresh `apparent-helper permissions`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Grants {
     pub statuses: BTreeMap<Permission, Status>,
@@ -810,13 +811,18 @@ pub enum Event {
     Exited,
 }
 
-/// Reads what's granted now from a fresh helper, plus whether this process can use a Screen
-/// Recording grant yet. Only once the helper says it's granted does this process try a real
-/// ScreenCaptureKit capture (`capture::screen_capture_usable`), so no prompt can come of it.
+/// Reads what's granted now from a fresh helper, except Accessibility: the separately
+/// signed helper may not share the recording process's trust. Only once the helper says
+/// Screen Recording is granted does this process try a real ScreenCaptureKit capture.
 pub fn read_grants() -> Option<Grants> {
     let statuses = crate::helper::permissions()
         .inspect_err(|error| crate::capture::apparent_log(format!("permissions: {error:#}")))
         .ok()?;
+    let statuses = if cfg!(target_os = "macos") {
+        reconcile_accessibility(statuses, crate::capture::accessibility_granted())
+    } else {
+        statuses
+    };
     let screen = statuses.get(&Permission::ScreenRecording) == Some(&Status::Granted);
     let grants = Grants {
         statuses,
@@ -824,6 +830,21 @@ pub fn read_grants() -> Option<Grants> {
     };
     crate::speech_model::note_grants(&grants);
     Some(grants)
+}
+
+fn reconcile_accessibility(
+    mut statuses: BTreeMap<Permission, Status>,
+    accessibility: bool,
+) -> BTreeMap<Permission, Status> {
+    statuses.insert(
+        Permission::Accessibility,
+        if accessibility {
+            Status::Granted
+        } else {
+            Status::NotDetermined
+        },
+    );
+    statuses
 }
 
 /// What draws the welcome window: the SwiftUI `apparent-helper onboarding` process on macOS, an
@@ -1846,5 +1867,30 @@ mod tests {
         assert!(g.granted(ScreenRecording));
         assert_eq!(g.status(Microphone), Status::Denied);
         assert_eq!(g.status(Accessibility), Status::NotDetermined);
+    }
+
+    #[test]
+    fn accessibility_matches_the_app_without_hiding_screen_revocation() {
+        let helper = BTreeMap::from([
+            (Accessibility, Status::NotDetermined),
+            (ScreenRecording, Status::NotDetermined),
+            (Microphone, Status::Granted),
+        ]);
+        let statuses = reconcile_accessibility(helper, true);
+        assert_eq!(statuses[&Accessibility], Status::Granted);
+        // A cached positive screen preflight is not evidence against a fresh denial.
+        assert_eq!(statuses[&ScreenRecording], Status::NotDetermined);
+        assert_eq!(statuses[&Microphone], Status::Granted);
+
+        let helper = BTreeMap::from([
+            (Accessibility, Status::Granted),
+            (ScreenRecording, Status::Granted),
+            (Microphone, Status::Granted),
+        ]);
+        let statuses = reconcile_accessibility(helper, false);
+        assert_eq!(statuses[&Accessibility], Status::NotDetermined);
+        // The helper may see a new screen grant before the running app does.
+        assert_eq!(statuses[&ScreenRecording], Status::Granted);
+        assert_eq!(statuses[&Microphone], Status::Granted);
     }
 }

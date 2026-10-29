@@ -24,6 +24,9 @@ use crate::ink_view::{OverlayView, Placement};
 /// The open overlay's window, for `take_pointer`.
 static OVERLAY: AtomicU32 = AtomicU32::new(0);
 static HIDE_BETWEEN_STROKES: AtomicBool = AtomicBool::new(false);
+static POINTER_TAKEN: AtomicBool = AtomicBool::new(false);
+/// The input poller and the UI tick both change this window's mapping and input shape.
+static OVERLAY_STATE: Mutex<()> = Mutex::new(());
 
 /// The overlay for one display. Dropping it closes the window.
 pub struct InkOverlay {
@@ -55,9 +58,8 @@ impl InkOverlay {
         // clicks to the focused app when a full-screen notification window sits above them.
         // Keep it mapped only while drawing, so the sharing dialog, the pill and the app
         // underneath stay usable. The bundle still contains the complete ink.
-        let hide_between_strokes = (super::kde() || super::hyprland())
-            && super::wayland_session()
-            && telemetry.active.load(Ordering::Acquire);
+        let hide_between_strokes =
+            hide_between_strokes(super::kde(), super::hyprland(), super::wayland_session());
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -83,8 +85,12 @@ impl InkOverlay {
             .ok_or("The overlay has no X11 window")?;
         x11::float(id, rect);
         // KWin rebuilds the input region when a managed window becomes override-redirect.
+        let _state = OVERLAY_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         x11::set_click_through(id, true);
         HIDE_BETWEEN_STROKES.store(hide_between_strokes, Ordering::Release);
+        POINTER_TAKEN.store(false, Ordering::Release);
         if hide_between_strokes {
             x11::set_visible(id, false);
         }
@@ -111,6 +117,9 @@ impl InkOverlay {
         let Some(monitor) = super::monitor_at(x + w / 2.0, y + h / 2.0) else {
             return false;
         };
+        let _state = OVERLAY_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         {
             let mut placement = self
                 .placement
@@ -125,13 +134,28 @@ impl InkOverlay {
             };
         }
         x11::place(self.id, monitor.rect);
+        // Hyprland remaps moved override-redirect windows. Restore the same input shape and
+        // visibility they had before the move; an idle overlay must not swallow pill clicks.
+        let taken = POINTER_TAKEN.load(Ordering::Acquire);
+        x11::set_click_through(self.id, !taken);
+        if !visible_after_move(HIDE_BETWEEN_STROKES.load(Ordering::Acquire), taken) {
+            x11::set_visible(self.id, false);
+        }
         true
     }
 }
 
 impl Drop for InkOverlay {
     fn drop(&mut self) {
-        let _ = OVERLAY.compare_exchange(self.id, 0, Ordering::AcqRel, Ordering::Acquire);
+        let _state = OVERLAY_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if OVERLAY
+            .compare_exchange(self.id, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            POINTER_TAKEN.store(false, Ordering::Release);
+        }
         x11::request_close(self.id);
     }
 }
@@ -139,11 +163,61 @@ impl Drop for InkOverlay {
 /// Lets the overlay take the pointer (`true`), so XWayland reports where it is, or lets every
 /// click through again.
 pub fn take_pointer(take: bool) {
+    let _state = OVERLAY_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let id = OVERLAY.load(Ordering::Acquire);
     if id != 0 {
+        POINTER_TAKEN.store(take, Ordering::Release);
         x11::set_click_through(id, !take);
         if HIDE_BETWEEN_STROKES.load(Ordering::Acquire) {
             x11::set_visible(id, take);
         }
+    }
+}
+
+fn visible_after_move(hide_between_strokes: bool, pointer_taken: bool) -> bool {
+    !hide_between_strokes || pointer_taken
+}
+
+fn hide_between_strokes(kde: bool, hyprland: bool, wayland: bool) -> bool {
+    (kde || hyprland) && wayland
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn picker_overlay_stays_unmapped_when_carried_into_recording() {
+        // The picker creates the same overlay before telemetry.active becomes true.
+        assert!(super::hide_between_strokes(false, true, true));
+        assert!(super::hide_between_strokes(true, false, true));
+        assert!(!super::hide_between_strokes(false, true, false));
+    }
+
+    #[test]
+    fn moving_a_hyprland_overlay_does_not_unhide_it_between_strokes() {
+        assert!(!super::visible_after_move(true, false));
+        assert!(super::visible_after_move(true, true));
+        assert!(super::visible_after_move(false, false));
+    }
+
+    #[test]
+    fn shift_transition_cannot_interrupt_an_overlay_move() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let move_guard = super::OVERLAY_STATE.lock().unwrap();
+        let (started, ready) = mpsc::channel();
+        let (finished, done) = mpsc::channel();
+        let input = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            super::take_pointer(true);
+            finished.send(()).unwrap();
+        });
+        ready.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done.recv_timeout(Duration::from_millis(20)).is_err());
+        drop(move_guard);
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+        input.join().unwrap();
     }
 }

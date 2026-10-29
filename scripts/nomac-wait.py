@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -297,8 +298,10 @@ def main():
     finished.add_argument("--session-id", required=True)
     args = parser.parse_args()
     try:
-        if args.command in ("wait", "enqueue") and args.deadline_hours <= 0:
-            raise Refused("deadline must be positive")
+        if args.command in ("wait", "enqueue") and not (
+            math.isfinite(args.deadline_hours) and 0 < args.deadline_hours <= 24
+        ):
+            raise Refused("deadline must be finite and between 0 and 24 hours")
         if args.command == "wait":
             if not 0 <= args.slice <= 400 or args.poll <= 0:
                 raise Refused("slice must be 0–400 seconds and poll must be positive")

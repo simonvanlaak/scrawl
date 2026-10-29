@@ -76,6 +76,16 @@ class NoMacWaitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["session_id"], "ses_test")
 
+    def test_deadline_must_be_finite_and_bounded_before_ticket_creation(self):
+        for value in ("nan", "inf", "-inf", "25", "1e308", "0"):
+            with self.subTest(value=value):
+                result = self.run_cli("enqueue", "ticket-a", "--deadline-hours", value)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse((self.state / "ticket-a.json").exists())
+                result = self.run_cli("wait", "ticket-a", "--deadline-hours", value, "--slice", "0")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse((self.state / "ticket-a.json").exists())
+
     def test_waiting_behind_an_active_start_is_not_an_error_or_second_rental(self):
         self.mode.write_text("slow-capacity")
         self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)

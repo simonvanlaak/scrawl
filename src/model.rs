@@ -69,6 +69,9 @@ pub struct ApparentBundle {
     pub strokes: Vec<Stroke>,
     pub marks: Vec<Mark>,
     pub events: Vec<InteractionEvent>,
+    /// Absent on older bundles; timed CLI recordings have no interaction collector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_telemetry: Option<InteractionTelemetry>,
     pub keyframes: Vec<Keyframe>,
     pub contact_sheet: String,
     /// Why some keyframes use lower-resolution candidates instead of MP4 frames.
@@ -110,6 +113,12 @@ pub struct ApparentBundle {
     /// recovers to the same place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Destination>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InteractionTelemetry {
+    VideoOnly,
 }
 
 impl ApparentBundle {

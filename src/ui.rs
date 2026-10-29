@@ -1154,6 +1154,10 @@ impl ApparentCoordinator {
                 crate::onboarding::relaunch();
                 cx.quit();
             }
+            Effect::QuitForUpdate => {
+                self.settings = None;
+                cx.quit();
+            }
             _ => {}
         }
     }
@@ -2917,6 +2921,7 @@ impl ApparentCoordinator {
                         recorded_audio,
                         None,
                         activity,
+                        None,
                     )
                     .map(|(dir, bundle, summary)| {
                         let (bundle, summary) = whiteboard::finish_handoff(
@@ -4766,6 +4771,8 @@ impl Render for BundleReviewWindow {
 
         let c_keydown = self.coordinator.clone();
         let c_shortcut = self.coordinator.clone();
+        let external_shortcut =
+            crate::settings::external_record_owned(crate::capture::ShortcutKind::Record);
         let c_copy = self.coordinator.clone();
         let c_send = self.coordinator.clone();
         let c_tab_sheet = self.coordinator.clone();
@@ -5000,16 +5007,16 @@ impl Render for BundleReviewWindow {
                             .child(
                                 hint_button(
                                     "btn-shortcut",
-                                    if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
+                                    if external_shortcut { "Managed in Hyprland" } else if recording_shortcut { "Press shortcut…" } else { "Shortcut" },
                                     (!recording_shortcut && !compact).then_some(shortcut_label),
                                     false,
                                 )
-                                .on_click(move |_, _, cx| {
+                                .when(!external_shortcut, |button| button.on_click(move |_, _, cx| {
                                     c_shortcut.update(cx, |coord, cx| {
                                         coord.recording_shortcut_key = !coord.recording_shortcut_key;
                                         cx.notify();
                                     });
-                                }),
+                                })),
                             )
                             .child(
                                 action_button(
@@ -5818,6 +5825,10 @@ pub fn run_app(
         let has_initial = initial_bundle.is_some();
         let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, initial_bundle));
         set_status_inbox_count(coordinator.read(cx).inbox.len());
+        #[cfg(target_os = "linux")]
+        if let Err(error) = crate::linux::update::mark_relaunch_ready() {
+            apparent_log(format!("Linux update relaunch readiness: {error:#}"));
+        }
 
         if has_initial {
             open_review_window(&coordinator, cx);

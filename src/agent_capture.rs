@@ -264,8 +264,13 @@ mod tests {
 
     #[test]
     fn competing_launches_cannot_remove_the_winning_control_socket() {
-        let dir =
-            std::env::temp_dir().join(format!("apparent-agent-control-{}", new_id().unwrap()));
+        // macOS's default temp directory can consume most of sun_path before our filename.
+        // This test creates its own random private child, so a short shared parent is safe.
+        #[cfg(target_os = "macos")]
+        let parent = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let parent = std::env::temp_dir();
+        let dir = parent.join(format!("apparent-agent-control-{}", new_id().unwrap()));
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = dir.join("capture.sock");

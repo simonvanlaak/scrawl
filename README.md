@@ -34,7 +34,7 @@ finishes. See [Linux](docs/linux.md) for desktop-specific limits.
 
 ## Agents
 
-Install the agent skill for Claude Code, OpenCode, Codex and other agents:
+Install the capture-reading skill for Claude Code, OpenCode, Codex and other agents:
 
 ```sh
 bunx skills add tryapparent/apparent
@@ -56,11 +56,17 @@ The repository also ships [`make-it-apparent`](skills/make-it-apparent/SKILL.md)
 agent skill for showing a finished change in a short, checked Apparent video. It covers the
 visible before/action/after, privacy before recording, playback review and honest limits of the
 demo. The capture-reading skill above is still for understanding feedback someone sends you;
-the walkthrough skill is for demonstrating what you built.
+the walkthrough skill is for demonstrating what you built. The default install command above
+does not guarantee that this named workflow is installed. Install it explicitly in the agent's
+environment before asking for a demo:
 
 ```sh
 bunx skills add tryapparent/apparent --skill make-it-apparent
 ```
+
+The walkthrough needs a working Apparent capture on a machine the agent can access. Linux
+cannot use `apparent export`; use the bundle's playable recording or another available
+recording path, and review it before sharing. Installing either skill does not install the app.
 
 ## Usage
 

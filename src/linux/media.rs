@@ -415,6 +415,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         stopping,
         urgent,
         frames,
+        real_frame_seen,
         video_offset_ms,
         excluded_window_ids,
     } = sampler;
@@ -505,10 +506,9 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                 None => None,
             };
             match frame {
-                Some(frame) => frames
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(frame, is_urgent),
+                Some(frame) => crate::capture::push_candidate(
+                    &frames, &real_frame_seen, frame, is_urgent, true,
+                ),
                 None if is_urgent => urgent.store(true, Ordering::Release),
                 None => {}
             }

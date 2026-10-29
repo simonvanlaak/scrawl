@@ -1022,6 +1022,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         stopping: thread_stopping,
         urgent: thread_urgent,
         frames: thread_frames,
+        real_frame_seen: thread_real_frame_seen,
         video_offset_ms: thread_offset,
     } = sampler;
     let initial_excluded = excluded_window_ids
@@ -1097,17 +1098,21 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             if urgent {
                 phase = phase.saturating_add(1);
             }
-            let frame = if let Some((ref filter, ref config)) = filter_and_config {
-                capture_sck_frame(filter, config, t_ms).unwrap_or_else(|| {
-                    crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
-                })
+            let (frame, real) = if let Some((ref filter, ref config)) = filter_and_config {
+                match capture_sck_frame(filter, config, t_ms) {
+                    Some(frame) => (frame, true),
+                    None => (
+                        crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase),
+                        false,
+                    ),
+                }
             } else {
-                crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase)
+                (
+                    crate::render::render_synthetic_demo_frame(1280, 800, t_ms, phase),
+                    false,
+                )
             };
-            thread_frames
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(frame, urgent);
+            super::push_candidate(&thread_frames, &thread_real_frame_seen, frame, urgent, real);
         }
         thread::park_timeout(Duration::from_millis(30));
     }

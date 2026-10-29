@@ -747,7 +747,25 @@ pub struct View {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheck {
     pub checking: bool,
-    pub message: Option<String>,
+    pub result: Option<UpdateResult>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateResult {
+    Available,
+    Current,
+    Failed,
+}
+
+impl UpdateResult {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Available => "Update available",
+            Self::Current => "No update available",
+            Self::Failed => "Update check failed",
+        }
+    }
 }
 
 /// The "Command-line tool" row.
@@ -1139,6 +1157,8 @@ pub enum Action {
     ShowCaptures,
     CheckForUpdates,
     DismissUpdateCheck,
+    UpdateNow,
+    UpdateLater,
     /// "Show Welcome Tour" on About.
     Tour,
     /// Link `apparent` into a folder on PATH, or remove that link.
@@ -1158,6 +1178,8 @@ pub enum Effect {
     OpenLoginItems,
     ShowCaptures,
     CheckForUpdates,
+    RelaunchUpdate,
+    QuitForUpdate,
     /// The captures folder may have changed size.
     Measure,
     /// The Apple Speech language changed.
@@ -1215,12 +1237,20 @@ impl Panel {
     #[cfg(target_os = "linux")]
     fn finish_update_check(&mut self, result: Result<&'static str, String>) {
         self.update_check.checking = false;
-        self.update_check.message = Some(match result {
+        self.update_check.result = Some(match result {
+            // The current Linux feed contract checks AND installs. "Available" includes
+            // a newer image already staged for the next launch; this is not discovery-only.
             Ok("installed; restart Apparent to use it") | Ok("already installed; restart Apparent to use it") =>
-                "Update installed. Restart Apparent to use it.".into(),
-            Ok("up to date") => "No new update is available on this channel.".into(),
-            Ok(other) => other.into(),
-            Err(error) => format!("Could not check for updates: {error}"),
+                UpdateResult::Available,
+            Ok("up to date") => UpdateResult::Current,
+            Ok(other) => {
+                crate::capture::apparent_log(format!("Unexpected update check result: {other}"));
+                UpdateResult::Failed
+            }
+            Err(error) => {
+                crate::capture::apparent_log(format!("Could not check for updates: {error}"));
+                UpdateResult::Failed
+            }
         });
     }
 
@@ -1298,13 +1328,24 @@ impl Panel {
                     return Effect::None;
                 }
                 if cfg!(target_os = "linux") {
-                    self.update_check = UpdateCheck { checking: true, message: None };
+                    self.update_check = UpdateCheck { checking: true, result: None };
                 }
                 Effect::CheckForUpdates
             }
             Action::DismissUpdateCheck => {
-                self.update_check.message = None;
+                self.update_check.result = None;
                 Effect::None
+            }
+            Action::UpdateLater => {
+                self.update_check.result = None;
+                Effect::None
+            }
+            Action::UpdateNow => {
+                if cfg!(target_os = "linux") && self.update_check.result == Some(UpdateResult::Available) {
+                    Effect::RelaunchUpdate
+                } else {
+                    Effect::None
+                }
             }
             Action::Tour => Effect::Tour,
             Action::InstallCli => {
@@ -1903,6 +1944,19 @@ impl Session {
                 check_for_updates();
                 Effect::None
             }
+            Effect::RelaunchUpdate => {
+                #[cfg(target_os = "linux")]
+                {
+                    match crate::linux::update::relaunch_staged() {
+                        Ok(()) => return Effect::QuitForUpdate,
+                        Err(error) => {
+                            crate::capture::apparent_log(format!("Could not relaunch updated AppImage: {error:#}"));
+                            self.panel.update_check.result = Some(UpdateResult::Failed);
+                        }
+                    }
+                }
+                Effect::None
+            }
             Effect::Measure => {
                 crate::retention::nudge();
                 let events = std::sync::Arc::clone(&self.events);
@@ -2091,26 +2145,50 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn manual_update_check_shows_progress_immediately() {
-        let dir = TempDir::new("update-progress");
+    fn available_update_accepts_now_and_later_actions() {
+        let dir = TempDir::new("update-choices");
         let mut host = fake(&dir);
         let mut panel = Panel::default();
-        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
-        let view = serde_json::to_value(panel.view(&host)).unwrap();
-        assert_eq!(view["updateCheck"]["checking"], true, "a click must have visible in-progress state");
-        assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None, "do not start two checks");
-        panel.finish_update_check(Ok("up to date"));
-        let view = serde_json::to_value(panel.view(&host)).unwrap();
-        assert_eq!(view["updateCheck"]["checking"], false);
-        assert_eq!(view["updateCheck"]["message"], "No new update is available on this channel.");
-        panel.on(Action::DismissUpdateCheck, &mut host);
-        assert!(panel.view(&host).update_check.message.is_none());
-        panel.on(Action::CheckForUpdates, &mut host);
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
+        panel.finish_update_check(Ok("installed; restart Apparent to use it"));
+        assert_eq!(panel.on(serde_json::from_str("{\"action\":\"update-later\"}").unwrap(), &mut host), Effect::None);
+        assert!(panel.view(&host).update_check.result.is_none());
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
         panel.finish_update_check(Ok("already installed; restart Apparent to use it"));
-        assert!(panel.view(&host).update_check.message.unwrap().contains("Restart"));
-        panel.on(Action::CheckForUpdates, &mut host);
-        panel.finish_update_check(Err("feed unavailable".into()));
-        assert!(panel.view(&host).update_check.message.unwrap().contains("feed unavailable"));
+        assert_eq!(panel.on(serde_json::from_str("{\"action\":\"update-now\"}").unwrap(), &mut host), Effect::RelaunchUpdate);
+        panel.finish_update_check(Err("network failure".into()));
+        assert_eq!(panel.on(Action::UpdateNow, &mut host), Effect::None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn manual_update_check_serializes_distinct_results_and_preserves_progress() {
+        let dir = TempDir::new("update-results");
+        let mut host = fake(&dir);
+        let mut panel = Panel::default();
+        for (response, expected) in [
+            (Ok("up to date"), "current"),
+            (Ok("installed; restart Apparent to use it"), "available"),
+            (Ok("already installed; restart Apparent to use it"), "available"),
+            (Err("feed unavailable: private diagnostic".into()), "failed"),
+            (Ok("unrecognized worker response"), "failed"),
+        ] {
+            assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::CheckForUpdates);
+            let progress = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(progress["updateCheck"]["checking"], true);
+            assert!(progress["updateCheck"]["result"].is_null());
+            assert_eq!(panel.on(Action::CheckForUpdates, &mut host), Effect::None);
+            panel.finish_update_check(response);
+            let finished = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(finished["updateCheck"], serde_json::json!({
+                "checking": false, "result": expected
+            }), "the public result must identify the outcome without diagnostics or extra copy");
+            assert_eq!(panel.on(Action::DismissUpdateCheck, &mut host), Effect::None);
+            let dismissed = serde_json::to_value(panel.view(&host)).unwrap();
+            assert_eq!(dismissed["updateCheck"], serde_json::json!({
+                "checking": false, "result": null
+            }));
+        }
     }
 
     #[test]

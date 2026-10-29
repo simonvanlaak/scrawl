@@ -519,7 +519,28 @@ enum MenuAction {
 
 /// Text beside the menu bar icon while a video export runs (`None` goes back to the inbox count).
 static EXPORT_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Remains visible beside the menu icon until the next recording; a failed capture has no paper tile.
+static CAPTURE_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static EXPORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn status_bar_text(export: Option<String>, capture: Option<String>) -> Option<String> {
+    export.or(capture)
+}
+
+fn current_status_bar_text() -> Option<String> {
+    status_bar_text(
+        EXPORT_STATUS.lock().ok().and_then(|status| status.clone()),
+        CAPTURE_STATUS.lock().ok().and_then(|status| status.clone()),
+    )
+}
+
+fn refresh_status_bar(inbox_count: usize) {
+    if let Some(text) = current_status_bar_text() {
+        set_status_text(&text);
+    } else {
+        set_status_inbox_count(inbox_count);
+    }
+}
 
 /// Exports the newest bundle to `~/Movies/Apparent/<name>.mp4` off the main thread, reporting
 /// through `EXPORT_STATUS`, then reveals the file in Finder.
@@ -939,7 +960,7 @@ impl ApparentCoordinator {
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
     fn mark_handled(&mut self, dir: &std::path::Path) {
         if self.inbox.remove(dir) {
-            set_status_inbox_count(self.inbox.len());
+            refresh_status_bar(self.inbox.len());
         }
     }
 
@@ -1088,6 +1109,10 @@ impl ApparentCoordinator {
             Effect::Relaunch => {
                 self.settings = None;
                 crate::onboarding::relaunch();
+                cx.quit();
+            }
+            Effect::QuitForUpdate => {
+                self.settings = None;
                 cx.quit();
             }
             _ => {}
@@ -1929,13 +1954,10 @@ impl ApparentCoordinator {
         }
         match crate::native::pill::NativePill::open() {
             Ok(pill) => {
-                let num = pill.window_number();
-                if num > 0 {
-                    self.telemetry
-                        .excluded_window_ids
-                        .lock()
+                if !crate::handoff::experiment("movableRecordingControls") {
+                    self.telemetry.excluded_window_ids.lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(num);
+                        .push(pill.window_number());
                 }
                 self.native_pill = Some(pill);
             }
@@ -2121,6 +2143,10 @@ impl ApparentCoordinator {
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
     pub fn island_tick(&mut self, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if matches!(self.island_phase, IslandPhase::Recording) {
+            platform::tick_pill_drag();
+        }
         let live_no_words = self.recording_has_no_words();
         if live_no_words != self.last_live_no_words {
             self.last_live_no_words = live_no_words;
@@ -2449,6 +2475,9 @@ impl ApparentCoordinator {
         }
         whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
+        }
         let started = Instant::now();
         apparent_log(format!(
             "start_recording_with_target invoked: mode={:?} frame={:?}",
@@ -2473,11 +2502,26 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
-        let _ = std::fs::create_dir_all(&bundle_dir);
+        if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
+            apparent_log(format!("Capture could not protect raw video: {error:#}"));
+            self.cancel_recording(cx);
+            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                *status = Some("Capture failed — could not protect raw video".into());
+            }
+            return;
+        }
         let video_path = bundle_dir.join("recording.mp4");
 
         self.telemetry.set_capture_mode(target.mode);
         self.telemetry.reset_for_session(target.frame);
+        // The picker stays open until present_recording_island defers its close.
+        // Keep it out of the first ScreenCaptureKit frames after the session reset.
+        #[cfg(target_os = "macos")]
+        restore_picker_exclusion(
+            &mut self.telemetry.excluded_window_ids.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            platform::picker_window_number(),
+        );
         let stage = Instant::now();
         // Reuse the continuous 120Hz Metal overlay opened in `begin_target_selection` so the
         // cutout and border never swap windows or jump a single pixel when recording starts.
@@ -2487,8 +2531,25 @@ impl ApparentCoordinator {
         if let Some(ref pill) = self.native_pill {
             pill.place_on([f.x + f.width / 2.0, f.y + f.height / 2.0]);
         }
+        #[cfg(target_os = "macos")]
+        {
+            platform::cancel_pill_drag();
+            if self.native_pill.is_none() {
+                platform::place_hud_pill([f.x + f.width / 2.0, f.y + f.height / 2.0]);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            platform::cancel_pill_drag();
+            platform::place_hud_pill([f.x + f.width / 2.0, f.y + f.height / 2.0]);
+        }
         let metal_overlay = self.picker_metal_overlay.take().map(|mut overlay| {
             overlay.move_to(target_rect);
+            // reset_for_session cleared the picker's exclusion. Reusing its window
+            // must not turn the ink layer into captured screen content on macOS.
+            self.telemetry.excluded_window_ids.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(overlay.window_number());
             overlay
         });
         let metal_overlay = metal_overlay.or_else(|| {
@@ -2595,6 +2656,9 @@ impl ApparentCoordinator {
     pub fn start_recording_iphone(&mut self, cx: &mut Context<Self>) {
         if self.is_recording() || self.is_processing() {
             return;
+        }
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
         }
         apparent_log("start_recording_iphone invoked");
         if self.lab {
@@ -2850,12 +2914,22 @@ impl ApparentCoordinator {
                             apparent_log(format!("Capture failed: {error:#}"));
                             #[cfg(target_os = "linux")]
                             crate::linux::shell::notify("Capture failed", &error.to_string());
+                            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                                *status = Some(if error.to_string().starts_with("No screen frames were captured") {
+                                    "Capture failed — no screen frames".into()
+                                } else {
+                                    "Capture failed".into()
+                                });
+                            }
                             coord.set_island_phase(IslandPhase::Dismissing);
                             cx.notify();
                             return;
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                        *status = None;
+                    }
                     #[cfg(target_os = "linux")]
                     if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
                         if summary.contains("Image quality: ") {
@@ -3450,6 +3524,11 @@ impl Render for HudPillWindow {
                     HUD_TEXT,
                     FontWeight::SEMIBOLD,
                 );
+                let lead = island_lead_base();
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                let lead = lead.on_mouse_down(MouseButton::Left, |_, _, _| {
+                    platform::begin_pill_drag();
+                });
                 traced(
                     row,
                     vec![
@@ -3459,7 +3538,7 @@ impl Render for HudPillWindow {
                     ],
                 )
                 .child(
-                    island_lead()
+                    lead
                         .child(
                             div()
                                 .size(px(CHIP_H))
@@ -3826,13 +3905,16 @@ impl HudPillWindow {
 /// Leading status cluster: a 32px slot concentric with the capsule's left cap, then text.
 /// Also acts as the drag handle for the floating island.
 fn island_lead() -> Div {
+    island_lead_base().map(platform::window_drag_region)
+}
+
+fn island_lead_base() -> Div {
     div()
         .flex()
         .flex_none()
         .items_center()
         .pr(px(LEAD_TRAIL))
         .whitespace_nowrap()
-        .map(platform::window_drag_region)
 }
 
 fn island_divider(theme: PillTheme) -> Div {
@@ -5324,6 +5406,15 @@ fn hint_button(
         })
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn restore_picker_exclusion(ids: &mut Vec<u32>, picker: Option<u32>) {
+    if let Some(id) = picker.filter(|id| *id > 0)
+        && !ids.contains(&id)
+    {
+        ids.push(id);
+    }
+}
+
 fn open_picker_windows(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) {
     close_picker_window(cx);
     let screen = coord_entity.read(cx).display_rect;
@@ -5419,16 +5510,22 @@ fn ensure_hud_pill_open(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App
     restack_soon(cx);
     for handle in cx.windows() {
         if let Some(pill) = handle.downcast::<HudPillWindow>() {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             let telemetry = Arc::clone(&coord_entity.read(cx).telemetry);
             let _ = pill.update(cx, |view, _, cx| {
                 view.chrome.raise();
-                // A new session cleared the excluded windows; the open pill is still on screen.
+                // Linux's exclusion is candidate-only; Mac includes the pill in this experiment.
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 if let Some(num) = view.chrome.window_number() {
+                    #[cfg(target_os = "macos")]
+                    let exclude = !crate::handoff::experiment("movableRecordingControls");
+                    #[cfg(target_os = "linux")]
+                    let exclude = true;
                     let mut ids = telemetry
                         .excluded_window_ids
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if !ids.contains(&num) {
+                    if exclude && !ids.contains(&num) {
                         ids.push(num);
                     }
                 }
@@ -5482,14 +5579,17 @@ fn ensure_hud_pill_open(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App
         },
         move |window, cx| {
             let chrome = PillChrome::open(window, cx);
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             if let Some(num) = chrome.window_number() {
-                pill_coord
-                    .read(cx)
-                    .telemetry
-                    .excluded_window_ids
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(num);
+                #[cfg(target_os = "macos")]
+                let exclude = !crate::handoff::experiment("movableRecordingControls");
+                #[cfg(target_os = "linux")]
+                let exclude = true;
+                if exclude {
+                    pill_coord.read(cx).telemetry.excluded_window_ids.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(num);
+                }
             }
             let focus = cx.focus_handle();
             window.focus(&focus);
@@ -5730,6 +5830,10 @@ pub fn run_app(
         let has_initial = initial_bundle.is_some();
         let coordinator = cx.new(|_| ApparentCoordinator::new(telemetry, initial_bundle));
         set_status_inbox_count(coordinator.read(cx).inbox.len());
+        #[cfg(target_os = "linux")]
+        if let Err(error) = crate::linux::update::mark_relaunch_ready() {
+            apparent_log(format!("Linux update relaunch readiness: {error:#}"));
+        }
 
         if has_initial {
             open_review_window(&coordinator, cx);
@@ -5776,12 +5880,9 @@ pub fn run_app(
                         crate::settings::reconcile_login_item();
                         last_login_check = std::time::Instant::now();
                     }
-                    let status = EXPORT_STATUS.lock().ok().and_then(|s| s.clone());
+                    let status = current_status_bar_text();
                     if status != shown_status {
-                        match &status {
-                            Some(text) => set_status_text(text),
-                            None => set_status_inbox_count(loop_coord.read(cx).inbox.len()),
-                        }
+                        refresh_status_bar(loop_coord.read(cx).inbox.len());
                         shown_status = status;
                     }
                     platform::poll_status_bar();
@@ -5897,6 +5998,24 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_failure_status_survives_inbox_changes() {
+        let failure = Some("Capture failed — no screen frames".to_owned());
+        assert_eq!(status_bar_text(None, failure.clone()), failure);
+        assert_eq!(status_bar_text(Some("Exporting…".into()), failure), Some("Exporting…".into()));
+    }
+
+    #[test]
+    fn picker_exclusion_survives_session_reset_until_deferred_close() {
+        // reset_for_session clears the prior session's IDs before the initial
+        // ScreenCaptureKit filter is built, while the picker is still open.
+        let mut excluded = Vec::new();
+        restore_picker_exclusion(&mut excluded, Some(41));
+        restore_picker_exclusion(&mut excluded, Some(41));
+        restore_picker_exclusion(&mut excluded, None);
+        assert_eq!(excluded, vec![41]);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

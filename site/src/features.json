@@ -407,8 +407,8 @@
     {
       "id": "auto-paste-draft",
       "group": "finish",
-      "name": "Paste a finished capture into its original draft",
-      "says": "Off-by-default T3 Code trial on Hyprland: restore the user-chosen window after Finish and try image-first, text-second paste. Leaves the paper visible because acceptance cannot be verified; never sends the draft.",
+      "name": "Automatic original-draft handoff (blocked)",
+      "says": "Off by default; Linux currently saves the bundle and copies summary text but refuses automatic paste because window identity cannot prove the intended draft or accepted image attachment. Attach the sheet and paste the text manually; never sends the draft.",
       "status": "experiment:autoPasteDraft",
       "added": "2026-10-27",
       "platforms": ["linux"],

@@ -418,7 +418,7 @@ enum Command {
     },
     /// Export a bundle's recording as one shareable .mp4: H.264 video cropped to the activity
     /// with the ink and click ripples burned in, AAC audio in sync, and optionally Screen
-    /// Studio-style auto-zoom (`--zoom`). Encoding runs in the helper with AVFoundation.
+    /// Studio-style auto-zoom (`--zoom`). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
     Export {
         /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
@@ -863,10 +863,17 @@ pub fn finalize_capture_bundle(
         duration_ms,
         video_offset_ms,
     } = recording;
-    anyhow::ensure!(
-        !frames.is_empty(),
-        "No screen frames were captured. Choose a screen in the sharing dialog and try again."
-    );
+    if frames.is_empty() {
+        // The MP4 stream can succeed even when every screenshot fails. Do not turn
+        // it into keyframes here: the sampler drops screenshots while a system
+        // permission prompt is visible, but the movie may still contain it.
+        recover::mark_unsafe_video(bundle_dir)?;
+        let message = "No screen frames were captured. Choose a screen in the sharing dialog and try again.";
+        if let Some(ref video) = video_path {
+            anyhow::bail!("{message} The raw video was kept at {}.", video.display());
+        }
+        anyhow::bail!("{message}");
+    }
     if let Some(ref audio) = recorded_audio {
         let wav_path = bundle_dir.join("audio.wav");
         let _ = std::fs::create_dir_all(bundle_dir);
@@ -1706,11 +1713,16 @@ fn main() -> Result<()> {
             note,
             out,
         } => {
+            #[cfg(target_os = "macos")]
+            anyhow::ensure!(
+                capture::screen_capture_usable(false),
+                "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
+            );
             let target = discover_target(window.as_deref());
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
-            std::fs::create_dir_all(&bundle_dir)?;
+            recover::begin_screen_capture(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
             let playback = playback::Guard::start();
             let audio = AudioRecorder::start().ok();
@@ -2426,6 +2438,49 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn movie_without_safe_screenshots_is_not_a_bundle() {
+        let dir = std::env::temp_dir().join(make_bundle_id());
+        std::fs::create_dir(&dir).unwrap();
+        let movie = dir.join("recording.mp4");
+        std::fs::write(&movie, b"untrusted movie bytes").unwrap();
+        std::fs::write(dir.join("audio.wav"), b"audio bytes").unwrap();
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 32.0, height: 32.0, scale: 1.0 },
+        };
+        let error = finalize_capture_bundle(
+            &dir,
+            target,
+            capture::ScreenRecording {
+                frames: Vec::new(),
+                video: Some(movie.clone()),
+                duration_ms: 1_000,
+                video_offset_ms: 0,
+            },
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            windows::ActivityLog::default(),
+            None,
+        )
+        .err()
+        .expect("a movie alone is not a safe screenshot candidate");
+        assert!(error.to_string().contains(&movie.display().to_string()));
+        assert!(movie.exists());
+        assert!(!dir.join("apparent.json").exists());
+        assert!(dir.join(crate::recover::UNSAFE_VIDEO).exists());
+        assert!(!crate::recover::owed(&dir), "a later recovery must not decode unsafe movie frames");
+        assert!(crate::recover::rebuild(&dir, &crate::recover::Media::SYSTEM).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn cli_identifies_as_apparent() {

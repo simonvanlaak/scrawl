@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -324,6 +324,9 @@ struct PillDrag {
 }
 
 static PILL_DRAG: std::sync::Mutex<Option<PillDrag>> = std::sync::Mutex::new(None);
+// Once moved, the capsule stays on its original output for this recording even
+// after the mouse button is released. The ink overlay may still follow the pointer.
+static PILL_USER_MOVED: AtomicBool = AtomicBool::new(false);
 
 /// Only the recording status/clock starts a drag, not the actionable chips.
 pub(super) fn begin_pill_drag() {
@@ -363,12 +366,18 @@ pub(super) fn tick_pill_drag() {
         [px, py],
     );
     if (x - drag.panel[0]).abs() >= 1.0 || (y - drag.panel[1]).abs() >= 1.0 {
+        PILL_USER_MOVED.store(true, Ordering::Release);
         x11::place(drag.id, [x, y, drag.panel[2], drag.panel[3]]);
     }
 }
 
 pub(super) fn cancel_pill_drag() {
     *PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    PILL_USER_MOVED.store(false, Ordering::Release);
+}
+
+pub(super) fn pill_user_moved() -> bool {
+    PILL_USER_MOVED.load(Ordering::Acquire)
 }
 
 /// Where the pill window opens (DIPs of GPUI's one display): below the work area's top on the
@@ -389,7 +398,9 @@ pub(super) fn place_hud_pill(point: [f64; 2]) {
     let (Some(id), Some(rect)) = (own_window(&PILL_WINDOW), pill_rect_at(point)) else {
         return;
     };
-    std::thread::spawn(move || x11::place(id, rect));
+    // Moving through detached threads lets an older placement run after a newer one when
+    // the pointer crosses displays quickly. Keep the capsule's move in event order.
+    x11::place(id, rect);
 }
 
 /// The pill's window. Linux has no native shell for it: GPUI draws the capsule, its shadow and
@@ -612,6 +623,9 @@ impl ksni::Tray for ApparentTray {
         }
         items.push(self.item(record_title(), MenuAction::ToggleCapture));
         items.push(self.item("Choose What to Record…", MenuAction::ChooseTarget));
+        if crate::handoff::experiment("feedbackIssue") {
+            items.push(self.item("Give Feedback…", MenuAction::GiveFeedback));
+        }
         items.push(ksni::MenuItem::Separator);
         items.push(self.item("Open Latest Capture", MenuAction::OpenLatest));
         if crate::handoff::video_export() {

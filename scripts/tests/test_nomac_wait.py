@@ -2,12 +2,14 @@
 import hashlib
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "nomac-wait.py"
 
@@ -19,6 +21,16 @@ class NoMacWaitTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.work = self.root / "work"
         self.work.mkdir()
+        self.git("init", "-b", "main")
+        self.git("config", "user.email", "fixture@example.invalid")
+        self.git("config", "user.name", "Fixture")
+        (self.work / "source").write_text("baseline\n")
+        self.git("add", "source")
+        self.git("commit", "-m", "baseline")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.remote = self.root / "remote.git"
+        self.git("clone", "--bare", str(self.work), str(self.remote))
+        self.git("remote", "add", "origin", str(self.remote))
         self.state = self.root / "state"
         self.home = self.root / "home"
         self.home.mkdir()
@@ -50,7 +62,33 @@ class NoMacWaitTest(unittest.TestCase):
             "print(json.dumps({'session': {'id': 'ses_test', 'state': mode}}))\n")
         self.nomac.chmod(0o700)
 
+    def git(self, *args):
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        result = subprocess.run(["git", *args], cwd=self.work, env=env,
+                                text=True, capture_output=True, check=True)
+        return result.stdout
+
+    def pin_ticket(self, ticket):
+        candidate = self.raw_cli("candidate")
+        self.assertEqual(candidate.returncode, 0, candidate.stderr)
+        result = self.raw_cli("pin", ticket, "--candidate", candidate.stdout.strip(),
+                              "--base-sha", self.base, "--phase", "final")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def run_cli(self, *args):
+        # Queue-contract fixtures approve a candidate once, not on every wait.
+        # Gate and migration tests use raw_cli without automatic approval.
+        if args[0] in ("enqueue", "wait") and not (self.state / (args[1] + ".json")).exists():
+            deadline = args[args.index("--deadline-hours") + 1] if "--deadline-hours" in args else "24"
+            result = self.raw_cli("enqueue", args[1], "--deadline-hours", deadline)
+            if result.returncode:
+                return result
+            self.pin_ticket(args[1])
+            if args[0] == "enqueue":
+                return result
+        return self.raw_cli(*args)
+
+    def raw_cli(self, *args):
         env = dict(os.environ, HOME=str(self.home), FAKE_CALLS=str(self.calls), FAKE_MODE=str(self.mode))
         return subprocess.run([sys.executable, str(SCRIPT), "--state-dir", str(self.state),
                                "--nomac", str(self.nomac), *args], cwd=self.work,
@@ -76,6 +114,104 @@ class NoMacWaitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["session_id"], "ses_test")
 
+    def test_legacy_queued_ticket_requires_pin_without_losing_fifo(self):
+        self.assertEqual(self.raw_cli("enqueue", "ticket-a").returncode, 0)
+        path = self.state / "ticket-a.json"
+        before = path.read_bytes()
+        self.mode.write_text("ready")
+        result = self.raw_cli("wait", "ticket-a", "--slice", "0")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("pin", result.stderr)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.calls.exists())
+
+    def test_legacy_pin_preserves_fifo_and_ticket_identity(self):
+        self.raw_cli("enqueue", "ticket-a")
+        path = self.state / "ticket-a.json"
+        original = json.loads(path.read_text())
+        self.raw_cli("enqueue", "ticket-b")
+        self.pin_ticket("ticket-b")
+        self.mode.write_text("ready")
+        self.assertEqual(self.raw_cli("wait", "ticket-b", "--slice", "0").returncode, 75)
+        self.assertFalse(self.calls.exists())
+        self.pin_ticket("ticket-a")
+        after = json.loads(path.read_text())
+        self.assertEqual({key: after[key] for key in original}, original)
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 0)
+
+    def test_pinned_dirty_candidate_is_allowed_but_changed_bytes_are_not(self):
+        (self.work / "source").write_text("private changed source\n")
+        (self.work / "new-file").write_text("private untracked source\n")
+        self.run_cli("enqueue", "ticket-a")
+        record = (self.state / "ticket-a.json").read_bytes()
+        self.assertNotIn(b"private", record)
+        (self.work / "new-file").write_text("different untracked source\n")
+        result = self.raw_cli("wait", "ticket-a", "--slice", "0")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("candidate changed", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.assertEqual((self.state / "ticket-a.json").read_bytes(), record)
+        (self.work / "new-file").write_text("private untracked source\n")
+        self.mode.write_text("ready")
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 0)
+
+    def test_changed_head_or_tracked_file_requires_explicit_repin(self):
+        self.run_cli("enqueue", "ticket-a")
+        (self.work / "source").write_text("changed\n")
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 2)
+        self.pin_ticket("ticket-a")
+        self.git("add", "source")
+        self.git("commit", "-m", "changed")
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 2)
+        self.assertFalse(self.calls.exists())
+
+    def test_changed_remote_base_blocks_pinned_candidate(self):
+        self.run_cli("enqueue", "ticket-a")
+        # Advance only the fake remote, leaving the candidate untouched.
+        commit = self.git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "base advance").strip()
+        self.git("push", "origin", commit + ":refs/heads/main")
+        result = self.raw_cli("wait", "ticket-a", "--slice", "0")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("remote base changed", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.base = commit
+        self.pin_ticket("ticket-a")
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 75)
+
+    def test_source_change_during_remote_check_is_rejected(self):
+        module = runpy.run_path(str(SCRIPT))
+        verify = module["verify_proof"]
+        original = module["git_output"]
+        old_cwd = Path.cwd()
+        os.chdir(self.work)
+        self.addCleanup(os.chdir, old_cwd)
+        proof = {"candidate": module["candidate_identity"](), "remote": "origin",
+                 "base_ref": "refs/heads/main", "base_sha": self.base}
+
+        def move_source(*arguments, **kwargs):
+            output = original(*arguments, **kwargs)
+            if arguments[0] == "ls-remote":
+                (self.work / "source").write_text("changed during network lookup\n")
+            return output
+
+        with patch.dict(verify.__globals__, git_output=move_source):
+            with self.assertRaisesRegex(module["Refused"], "candidate changed"):
+                verify(proof)
+
+    def test_legacy_acquired_session_remains_inspectable_after_source_changes(self):
+        self.mode.write_text("ready")
+        self.assertEqual(self.run_cli("wait", "ticket-a", "--slice", "0").returncode, 0)
+        path = self.state / "ticket-a.json"
+        record = json.loads(path.read_text())
+        del record["proof"]
+        path.write_text(json.dumps(record))
+        (self.work / "source").write_text("changed after allocation\n")
+        self.assertEqual(self.raw_cli("wait", "ticket-a", "--slice", "0").returncode, 0)
+        self.assertEqual(self.raw_cli("pin", "ticket-a", "--candidate", "0" * 64,
+                                    "--base-sha", self.base, "--phase", "final").returncode, 2)
+        self.mode.write_text("stopped")
+        self.assertEqual(self.raw_cli("finish", "ticket-a", "--session-id", "ses_test").returncode, 0)
+
     def test_deadline_must_be_finite_and_bounded_before_ticket_creation(self):
         for value in ("nan", "inf", "-inf", "25", "1e308", "0"):
             with self.subTest(value=value):
@@ -89,7 +225,7 @@ class NoMacWaitTest(unittest.TestCase):
     def test_legacy_invalid_queued_deadline_does_not_block_next_ticket(self):
         for index, invalid in enumerate((float("nan"), float("inf"), 1e308)):
             with self.subTest(invalid=invalid):
-                self.state = self.work / f"legacy-state-{index}"
+                self.state = self.root / f"legacy-state-{index}"
                 self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)
                 path = self.state / "ticket-a.json"
                 record = json.loads(path.read_text())
@@ -245,6 +381,11 @@ class NoMacWaitTest(unittest.TestCase):
     def test_postallocation_error_keeps_session_ownership(self):
         self.mode.write_text("poststart")
         self.assertEqual(self.run_cli("wait", "ticket-a", "--slice", "0").returncode, 2)
+        # A legacy uncertain allocation must still be recoverable without proof.
+        path = self.state / "ticket-a.json"
+        record = json.loads(path.read_text())
+        del record["proof"]
+        path.write_text(json.dumps(record))
         self.assertEqual(self.run_cli("cancel", "ticket-a").returncode, 2)
         self.assertEqual(self.run_cli("wait", "ticket-b", "--slice", "0").returncode, 75)
         self.mode.write_text("ready")

@@ -54,9 +54,9 @@ pub fn log_dir() -> Option<PathBuf> {
     Some(linux::local_dir().join("Logs"))
 }
 
-/// The primary display's index in `linux::monitors()`.
+/// The primary display's stable RandR output-name atom.
 pub fn main_display_id() -> u32 {
-    0
+    linux::monitors().first().map_or(0, linux::monitor_id)
 }
 
 /// The virtual key for `ch`. Keys are bound by keysym (`keysym_for_vk`), so the key that types
@@ -416,20 +416,11 @@ fn window_target(window: &linux::WindowInfo, app: &str, id: &str) -> TargetInfo 
         bundle_id: Some(id.to_owned()),
         window_title: Some(clean_label(&window.title)).filter(|t| !t.is_empty()),
         window_id: Some(window.hwnd as u32),
-        display_id: display_index(monitor.as_ref()),
+        display_id: monitor.as_ref().map_or(0, linux::monitor_id),
         frame: frame_of(window.rect, monitor.map_or(1.0, |m| m.scale)),
     }
 }
 
-fn display_index(monitor: Option<&linux::Monitor>) -> u32 {
-    let Some(monitor) = monitor else {
-        return 0;
-    };
-    linux::monitors()
-        .iter()
-        .position(|m| m.handle == monitor.handle)
-        .unwrap_or(0) as u32
-}
 
 pub fn discover_target(window_query: Option<&str>) -> TargetInfo {
     discover_target_at(window_query, linux::cursor_position().map(|(x, y)| [x, y]))
@@ -464,7 +455,7 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
         bundle_id: frontmost.and_then(|(_, _, id)| id),
         window_title: title.map(|t| clean_label(&t)).filter(|t| !t.is_empty()),
         window_id: None,
-        display_id: index as u32,
+        display_id: monitors.get(index).map_or(0, linux::monitor_id),
         frame: frame_of(rect, scale),
     }
 }

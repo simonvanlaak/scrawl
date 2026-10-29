@@ -25,6 +25,8 @@ use crate::windows::{CursorSample, WindowSnapshot};
 
 pub const UNFINISHED: &str = "unfinished.json";
 pub const RECOVERING: &str = ".recovering";
+/// A live capture without safe screenshots must not be rebuilt from its potentially private movie.
+pub const UNSAFE_VIDEO: &str = ".unsafe-video";
 
 /// A journal younger than this may belong to a build still running in another process.
 const SETTLE: Duration = Duration::from_secs(15);
@@ -71,6 +73,34 @@ pub fn write(bundle_dir: &Path, unfinished: &Unfinished) {
 pub fn finished(bundle_dir: &Path) {
     let _ = std::fs::remove_file(bundle_dir.join(UNFINISHED));
     let _ = std::fs::remove_file(bundle_dir.join(RECOVERING));
+    let _ = std::fs::remove_file(bundle_dir.join(UNSAFE_VIDEO));
+}
+
+/// Protect a new screen recording before its movie can be written. Refuse occupied directories:
+/// an old orphan's recovery could already be in flight and must not decode the new movie.
+pub fn begin_screen_capture(bundle_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(bundle_dir)?;
+    anyhow::ensure!(
+        std::fs::read_dir(bundle_dir)?.next().is_none(),
+        "{} is not empty; use a new output directory for a screen capture",
+        bundle_dir.display()
+    );
+    use std::io::Write;
+    let mut marker = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(bundle_dir.join(UNSAFE_VIDEO))
+        .with_context(|| format!("Could not protect raw video in {}", bundle_dir.display()))?;
+    marker.write_all(b"No safe screenshots; do not recover movie frames\n")?;
+    Ok(())
+}
+
+pub fn mark_unsafe_video(bundle_dir: &Path) -> Result<()> {
+    std::fs::write(
+        bundle_dir.join(UNSAFE_VIDEO),
+        b"No safe screenshots; do not recover movie frames\n",
+    )
+    .with_context(|| format!("Could not protect raw video in {}", bundle_dir.display()))
 }
 
 pub fn read(bundle_dir: &Path) -> Result<Unfinished> {
@@ -94,6 +124,7 @@ fn orphaned(dir: &Path) -> bool {
 pub fn owed(dir: &Path) -> bool {
     !dir.join("apparent.json").exists()
         && !dir.join(RECOVERING).exists()
+        && !dir.join(UNSAFE_VIDEO).exists()
         && (dir.join(UNFINISHED).is_file() || orphaned(dir))
 }
 
@@ -179,6 +210,11 @@ impl Media {
 /// Builds one bundle in place from its journal, or from its video and audio alone, and marks it
 /// tried first so a crash here isn't repeated at every launch.
 pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
+    anyhow::ensure!(
+        !dir.join(UNSAFE_VIDEO).exists(),
+        "{} has no privacy-filtered screenshots; raw movie recovery is unsafe",
+        dir.display()
+    );
     anyhow::ensure!(
         !dir.join("apparent.json").exists(),
         "{} is already built; `apparent reprocess` rebuilds it into a new bundle",
@@ -452,6 +488,49 @@ mod tests {
         let later = now + ORPHAN_SETTLE + Duration::from_secs(1);
         assert_eq!(pending(&captures, later), vec![lost.clone(), journaled]);
         assert!(owed(&lost) && !owed(&live) && !owed(&built) && !owed(&tried) && !owed(&phone));
+    }
+
+    #[test]
+    fn interrupted_screen_recording_never_recovers_raw_movie() {
+        let captures = temp_dir("interrupted-screen");
+        let dir = captures.join("new.apparent");
+        begin_screen_capture(&dir).unwrap();
+        std::fs::write(dir.join(VIDEO), b"new raw movie").unwrap();
+        std::fs::write(dir.join(AUDIO), b"audio saved before the process crashed").unwrap();
+        // Simulate dying before screenshots are checked or a bundle can be finalized.
+        let later = SystemTime::now() + ORPHAN_SETTLE * 2;
+        assert!(!owed(&dir));
+        assert!(pending(&captures, later).is_empty());
+        let error = rebuild(&dir, &FAKE).unwrap_err().to_string();
+        assert!(error.contains("raw movie recovery is unsafe"), "{error}");
+        assert!(!dir.join("apparent.json").exists());
+        assert!(dir.join(UNSAFE_VIDEO).exists());
+    }
+
+    #[test]
+    fn screen_capture_refuses_reused_or_recoverable_directory() {
+        let captures = temp_dir("reused-screen");
+        let dir = orphan(&captures, "old.apparent");
+        let before_video = std::fs::read(dir.join(VIDEO)).unwrap();
+        let error = begin_screen_capture(&dir).unwrap_err().to_string();
+        assert!(error.contains("not empty"), "{error}");
+        assert_eq!(std::fs::read(dir.join(VIDEO)).unwrap(), before_video);
+        assert!(!dir.join(UNSAFE_VIDEO).exists());
+        assert!(owed(&dir), "the old capture can still recover");
+        let fresh = captures.join("fresh.apparent");
+        begin_screen_capture(&fresh).unwrap();
+        assert!(begin_screen_capture(&fresh).is_err());
+        assert!(fresh.join(UNSAFE_VIDEO).exists());
+    }
+
+    #[test]
+    fn completed_screen_bundle_removes_its_pre_recording_guard() {
+        let captures = temp_dir("completed-screen");
+        let dir = captures.join("complete.apparent");
+        begin_screen_capture(&dir).unwrap();
+        std::fs::write(dir.join("apparent.json"), b"{}").unwrap();
+        finished(&dir);
+        assert!(!dir.join(UNSAFE_VIDEO).exists());
     }
 
     #[test]

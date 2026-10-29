@@ -94,16 +94,19 @@ pub enum Step {
         alias = "camera"
     )]
     Permissions,
+    /// An optional chance to change Record before the first capture.
+    Shortcut,
     TryIt,
     /// After the first capture: it's on your clipboard.
     Done,
 }
 
 impl Step {
-    const TOUR: [Step; 5] = [
+    const TOUR: [Step; 6] = [
         Step::Welcome,
         Step::HowItWorks,
         Step::Permissions,
+        Step::Shortcut,
         Step::TryIt,
         Step::Done,
     ];
@@ -194,6 +197,7 @@ pub enum Input {
     Later,
     /// A permission row's button.
     Grant(Permission),
+    ChangeShortcut,
     /// The window was closed.
     Closed,
     /// "Open Settings" on the last screen.
@@ -233,6 +237,8 @@ pub enum Effect {
     Close,
     /// Close the tour and open the Settings window.
     Settings,
+    /// Open the existing recorder without dismissing the tour.
+    EditShortcut,
     /// Screen Recording works: list the screen's content once now, so macOS's "bypass the
     /// system private window picker" question comes up here, explained, rather than over the
     /// first recording.
@@ -271,6 +277,8 @@ pub struct View {
     pub tutorial: Option<Tutorial>,
     /// macOS may be asking about its private window picker: say to choose Allow.
     pub picker_note: bool,
+    /// Show the inline Record recorder, not a second Settings window.
+    pub shortcut_editing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -292,6 +300,7 @@ pub struct Flow {
     tutorial: Option<Tutorial>,
     /// The step `Effect::ConfirmScreen` was given on (once per window).
     screen_confirmed: Option<Step>,
+    shortcut_editing: bool,
 }
 
 impl Flow {
@@ -332,6 +341,7 @@ impl Flow {
             relaunching: false,
             tutorial: None,
             screen_confirmed: None,
+            shortcut_editing: false,
         }
     }
 
@@ -374,11 +384,17 @@ impl Flow {
             Input::Continue => self.primary(),
             Input::Back => {
                 self.step = self.back_from(self.step);
+                self.shortcut_editing = false;
                 Effect::None
             }
             Input::Later | Input::Closed => Effect::Close,
             Input::Settings if self.step == Step::Done => Effect::Settings,
             Input::Settings => Effect::None,
+            Input::ChangeShortcut if self.mode == Mode::Tour && self.step == Step::Shortcut => {
+                self.shortcut_editing = true;
+                Effect::EditShortcut
+            }
+            Input::ChangeShortcut => Effect::None,
             Input::Skip | Input::Watched | Input::Practiced
                 if self.step != Step::HowItWorks || self.mode == Mode::Fix =>
             {
@@ -453,6 +469,7 @@ impl Flow {
             fix: self.mode == Mode::Fix,
             tutorial: self.tutorial,
             picker_note: self.screen_confirmed == Some(self.step),
+            shortcut_editing: self.step == Step::Shortcut && self.shortcut_editing,
         }
     }
 
@@ -527,6 +544,7 @@ impl Flow {
 
     fn advance(&mut self) -> Effect {
         self.ready_at = None;
+        self.shortcut_editing = false;
         if self.mode == Mode::Fix {
             return Effect::Close;
         }
@@ -788,6 +806,8 @@ pub enum Event {
     Grants(Grants),
     /// A button: `continue`, `back`, `later`, `close`, `settings` or `grant:<permission>`.
     Action(String),
+    /// The inline recorder uses the same actions and validation as Settings.
+    Shortcut(crate::settings::Action),
     Exited,
 }
 
@@ -935,6 +955,20 @@ impl Session {
                     let Some(action) = value.get("action").and_then(|v| v.as_str()) else {
                         continue;
                     };
+                    let action = action.to_owned();
+                    if matches!(
+                        action.as_str(),
+                        "shortcut" | "cancel-shortcut" | "reset-shortcut"
+                    ) {
+                        let mut value = value;
+                        if action == "reset-shortcut" && value.get("kind").is_none() {
+                            value["kind"] = "record".into();
+                        }
+                        if let Ok(action) = serde_json::from_value(value) {
+                            events(Event::Shortcut(action));
+                        }
+                        continue;
+                    }
                     let action = match value.get("permission").and_then(|v| v.as_str()) {
                         Some(permission) => format!("{action}:{permission}"),
                         None => action.to_owned(),
@@ -1023,6 +1057,7 @@ impl Session {
             "later" => Input::Later,
             "close" => Input::Closed,
             "settings" => Input::Settings,
+            "change-shortcut" => Input::ChangeShortcut,
             "skip" => Input::Skip,
             "watched" => Input::Watched,
             "practiced" => Input::Practiced,
@@ -1044,6 +1079,19 @@ impl Session {
 
     pub fn show(&mut self) {
         self.send(&serde_json::json!({"type": "show"}));
+    }
+
+    /// Keep every step's displayed Record keys in sync with the active shortcut.
+    pub fn shortcut_changed(&mut self, label: &str) {
+        self.send(&serde_json::json!({"type": "shortcut", "label": label}));
+    }
+
+    pub fn shortcut_editor(&mut self, editor: &crate::settings::ShortcutView) {
+        self.send(&serde_json::json!({"type": "shortcut-editor", "shortcut": editor}));
+    }
+
+    pub fn editing_shortcut(&self) -> bool {
+        self.flow.step() == Step::Shortcut && self.flow.shortcut_editing
     }
 
     fn sync(&mut self) {
@@ -1203,9 +1251,35 @@ mod tests {
     }
 
     #[test]
-    fn the_tour_is_four_screens_with_every_permission_on_one() {
+    fn shortcut_step_edits_inline_and_continue_leaves_the_editor() {
         let mut flow = Flow::tour(Step::Welcome, Some(grants(&[])));
-        assert_eq!(flow.view().count, 4);
+        assert_eq!(flow.view().count, 5);
+        flow.on(Input::Continue);
+        flow.on(Input::Continue);
+        flow.on(Input::Grants {
+            grants: grants(&ALL),
+            now_ms: 0,
+        });
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Shortcut);
+        assert_eq!(flow.resume_point(), Some(Step::Shortcut));
+        assert_eq!(flow.on(Input::ChangeShortcut), Effect::EditShortcut);
+        assert_eq!(flow.step(), Step::Shortcut);
+        assert!(flow.view().shortcut_editing);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+        assert!(!flow.view().shortcut_editing);
+        flow.on(Input::Back);
+        assert_eq!(flow.step(), Step::Shortcut);
+
+        let mut fix = Flow::fix(vec![Permission::Microphone], Some(grants(&[])));
+        assert_eq!(fix.on(Input::ChangeShortcut), Effect::None);
+    }
+
+    #[test]
+    fn the_tour_has_a_shortcut_screen_with_every_permission_on_one() {
+        let mut flow = Flow::tour(Step::Welcome, Some(grants(&[])));
+        assert_eq!(flow.view().count, 5);
         assert_eq!(flow.on(Input::Continue), Effect::None);
         assert_eq!(flow.step(), Step::HowItWorks);
         assert_eq!(flow.on(Input::Continue), Effect::None);
@@ -1263,13 +1337,15 @@ mod tests {
         tick(&mut flow, &required, 0);
         assert!(flow.view().ready);
         assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Shortcut);
+        flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
     }
 
     #[test]
     fn the_demo_can_be_skipped_and_adds_no_screen() {
         let mut flow = Flow::tour(Step::HowItWorks, Some(grants(&[])));
-        assert_eq!(flow.view().count, 4);
+        assert_eq!(flow.view().count, 5);
         assert_eq!(flow.view().tutorial, None);
         // Skip goes straight on, like Continue, and is remembered.
         assert_eq!(flow.on(Input::Skip), Effect::None);
@@ -1297,7 +1373,7 @@ mod tests {
         // With every permission on, Skip passes the permissions screen too.
         let mut flow = Flow::tour(Step::HowItWorks, Some(grants(&ALL)));
         flow.on(Input::Skip);
-        assert_eq!(flow.step(), Step::TryIt);
+        assert_eq!(flow.step(), Step::Shortcut);
         // A fix never shows the demo.
         let mut fix = Flow::fix(Permission::REQUIRED.to_vec(), Some(grants(&[])));
         assert_eq!(fix.on(Input::Skip), Effect::None);
@@ -1408,8 +1484,12 @@ mod tests {
         // A granted row's button does nothing.
         assert_eq!(flow.on(Input::Grant(Microphone)), Effect::None);
         assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Shortcut);
+        flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
-        // Back from Try it passes the finished permissions screen.
+        // Back visits Shortcut, then passes the finished permissions screen.
+        flow.on(Input::Back);
+        assert_eq!(flow.step(), Step::Shortcut);
         flow.on(Input::Back);
         assert_eq!(flow.step(), Step::HowItWorks);
     }
@@ -1429,10 +1509,12 @@ mod tests {
     fn granted_permissions_pass_the_screen_and_leave_the_dots() {
         let all = grants(&ALL);
         let mut flow = Flow::tour(Step::HowItWorks, Some(all.clone()));
-        assert_eq!(flow.view().count, 3);
+        assert_eq!(flow.view().count, 4);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Shortcut);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
-        assert_eq!(flow.view().index, 2);
+        assert_eq!(flow.view().index, 3);
         // A tour resumed past the screen goes back to it while something is missing.
         let some = grants(&[Microphone]);
         assert_eq!(
@@ -1504,6 +1586,8 @@ mod tests {
             grants: grants(&Permission::REQUIRED),
             now_ms: 400,
         });
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Shortcut);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
         assert!(!flow.view().picker_note);
@@ -1599,6 +1683,8 @@ mod tests {
         let mut flow = launch_plan(&progress, &grants(&ALL)).expect("the tour");
         assert_eq!(flow.step(), Step::Permissions);
         assert!(flow.view().ready);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Shortcut);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
     }

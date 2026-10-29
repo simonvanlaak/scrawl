@@ -1071,8 +1071,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             if let Some((new_filter, _)) =
                 build_sck_filter_and_config(&sampler_target, &cur_excluded)
             {
-                // The recording must hide the same windows as the candidates, or
-                // keyframes decoded from it could show Apparent's own overlays.
+                // Keep explicit privacy exclusions consistent in movie and candidates.
                 if let Some(ref stream) = stream
                     && let Err(error) = stream.update_content_filter(&new_filter)
                 {
@@ -1140,8 +1139,6 @@ fn build_sck_filter_and_config(
             return None;
         }
     };
-    let our_pid = std::process::id() as i32;
-
     let filter = if let Some(window_id) = target.window_id
         && let Some(window) = content
             .windows()
@@ -1155,17 +1152,17 @@ fn build_sck_filter_and_config(
         .find(|d| d.display_id() == target.display_id)
         .or_else(|| content.displays().into_iter().next())
     {
-        // Exclude Apparent's floating HUD pill and Metal overlay windows by explicit window ID
-        // (and any non-layer-0 Apparent panels), while keeping Apparent's normal Review window visible.
+        // With this experiment on, only explicit picker/ink overlays and system prompts are
+        // excluded; the capsule remains in the movie and decoded full-quality keyframes.
         let excluded_overlays: Vec<SCWindow> = content
             .windows()
             .into_iter()
             .filter(|w| {
                 excluded_window_ids.contains(&w.window_id())
-                    || (w
-                        .owning_application()
-                        .as_ref()
-                        .is_some_and(|a| a.process_id() == our_pid)
+                    || (!crate::handoff::experiment("movableRecordingControls")
+                        && w.owning_application().as_ref().is_some_and(|a| {
+                            a.process_id() == std::process::id() as i32
+                        })
                         && w.window_layer() != 0)
             })
             .collect();

@@ -316,6 +316,61 @@ fn pill_point() -> Option<[f64; 2]> {
         .or_else(crate::screens::pointer)
 }
 
+struct PillDrag {
+    id: u32,
+    panel: [f64; 4],
+    pointer_down: [f64; 2],
+    display: crate::screens::Screen,
+}
+
+static PILL_DRAG: std::sync::Mutex<Option<PillDrag>> = std::sync::Mutex::new(None);
+
+/// Only the recording status/clock starts a drag, not the actionable chips.
+pub(super) fn begin_pill_drag() {
+    if !crate::handoff::experiment("movableRecordingControls") { return; }
+    let Some(id) = own_window(&PILL_WINDOW) else { return };
+    let Some(pointer) = x11::pointer_state().filter(|p| p.left) else { return };
+    let (x, y) = linux::cursor_position().unwrap_or((pointer.x, pointer.y));
+    let Some(panel) = x11::geometry(id) else { return };
+    let screens = crate::screens::displays();
+    let centre = [panel[0] + panel[2] / 2.0, panel[1] + panel[3] / 2.0];
+    let Some(display) = crate::screens::index_at(&screens, centre).map(|i| screens[i].clone()) else {
+        return;
+    };
+    *PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(PillDrag {
+        id,
+        panel,
+        pointer_down: [x, y],
+        display,
+    });
+}
+
+pub(super) fn tick_pill_drag() {
+    let mut slot = PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(drag) = slot.as_ref() else { return };
+    let Some(pointer) = x11::pointer_state() else { return };
+    if !pointer.left || own_window(&PILL_WINDOW) != Some(drag.id) {
+        *slot = None;
+        return;
+    }
+    // XWayland's root pointer freezes above native Wayland windows. Ask the
+    // compositor first; the button state still comes from the X11 press.
+    let (px, py) = linux::cursor_position().unwrap_or((pointer.x, pointer.y));
+    let [x, y] = crate::screens::drag_pill_origin(
+        &drag.display,
+        drag.panel,
+        drag.pointer_down,
+        [px, py],
+    );
+    if (x - drag.panel[0]).abs() >= 1.0 || (y - drag.panel[1]).abs() >= 1.0 {
+        x11::place(drag.id, [x, y, drag.panel[2], drag.panel[3]]);
+    }
+}
+
+pub(super) fn cancel_pill_drag() {
+    *PILL_DRAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
 /// Where the pill window opens (DIPs of GPUI's one display): below the work area's top on the
 /// monitor in use.
 pub(super) fn hud_pill_origin(display: gpui::Bounds<Pixels>) -> Point<Pixels> {

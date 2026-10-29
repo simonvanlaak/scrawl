@@ -899,6 +899,16 @@
       "docs": ["README.md#install", "docs/release.md"]
     },
     {
+      "id": "site-platform-download",
+      "group": "install",
+      "name": "Platform-aware site download",
+      "says": "The homepage looks up the newest published GitHub installer for the visitor's supported OS and starts its download. On lookup failure it opens the release list instead.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
+      "note": "Mac is Apple silicon only; if the browser cannot identify the chip or Linux architecture, the button opens the release list instead. Windows has no supported installer.",
+      "docs": ["docs/release.md"]
+    },
+    {
       "id": "sparkle",
       "group": "install",
       "name": "Automatic updates",

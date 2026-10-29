@@ -26,6 +26,9 @@ CAPACITY = "session_limit_reached"
 class Refused(Exception):
     pass
 
+class Busy(Refused):
+    pass
+
 
 def timestamp():
     return time.time()
@@ -50,7 +53,7 @@ def locked(directory):
                 break
             except BlockingIOError:
                 if time.monotonic() >= limit:
-                    raise Refused("queue busy; retry the same ticket")
+                    raise Busy("queue busy; retry the same ticket")
                 time.sleep(0.1)
         yield
     finally:
@@ -362,6 +365,15 @@ def main():
         elif args.command == "finish":
             finish(directory, args.ticket, args.session_id, args.nomac)
         return 0
+    except Busy as exc:
+        # Another worker may hold the lock through a bounded NoMac start.
+        # An existing, owned ticket is still waiting, not a failed allocation.
+        if args.command == "wait":
+            record = load(path_for(Path(args.state_dir).expanduser(), args.ticket))
+            if record and record["workdir"] == str(Path.cwd().resolve()):
+                return 75
+        print(f"nomac-wait: {exc}", file=sys.stderr)
+        return 2
     except (Refused, ValueError, KeyError, OSError) as exc:
         print(f"nomac-wait: {exc}", file=sys.stderr)
         return 2

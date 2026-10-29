@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "nomac-wait.py"
@@ -26,9 +27,10 @@ class NoMacWaitTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.nomac = self.root / "nomac"
         self.nomac.write_text("#!/usr/bin/env python3\n"
-            "import hashlib, json, os, pathlib, sys\n"
+            "import hashlib, json, os, pathlib, sys, time\n"
             "pathlib.Path(os.environ['FAKE_CALLS']).open('a').write(' '.join(sys.argv[1:])+'\\n')\n"
             "mode=pathlib.Path(os.environ['FAKE_MODE']).read_text()\n"
+            "if mode=='slow-capacity' and sys.argv[1]=='start': time.sleep(7); mode='capacity'\n"
             "if sys.argv[1]=='status':\n"
             " if mode=='no-session': print(json.dumps({'session': None})); sys.exit(0)\n"
             " print(json.dumps({'session': {'id': 'ses_test', 'state': mode, 'cleanup_confirmed': mode=='stopped'}})); sys.exit(0)\n"
@@ -73,6 +75,31 @@ class NoMacWaitTest(unittest.TestCase):
         result = self.run_cli("wait", "ticket-a", "--slice", "0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["session_id"], "ses_test")
+
+    def test_waiting_behind_an_active_start_is_not_an_error_or_second_rental(self):
+        self.mode.write_text("slow-capacity")
+        self.assertEqual(self.run_cli("enqueue", "ticket-a").returncode, 0)
+        self.assertEqual(self.run_cli("enqueue", "ticket-b").returncode, 0)
+        env = dict(os.environ, HOME=str(self.home), FAKE_CALLS=str(self.calls), FAKE_MODE=str(self.mode))
+        first = subprocess.Popen([sys.executable, str(SCRIPT), "--state-dir", str(self.state),
+                                  "--nomac", str(self.nomac), "wait", "ticket-a", "--slice", "0"],
+                                 cwd=self.work, env=env, text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+        try:
+            for _ in range(100):
+                if self.calls.exists() and "start" in self.calls.read_text():
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("first waiter never reached NoMac start")
+            second = self.run_cli("wait", "ticket-b", "--slice", "0")
+            self.assertEqual(second.returncode, 75, second.stderr)
+            self.assertEqual(second.stdout, "")
+            self.assertEqual(len([line for line in self.calls.read_text().splitlines()
+                                  if line.startswith("start")]), 1)
+        finally:
+            first.communicate(timeout=10)
+        self.assertEqual(first.returncode, 75)
 
     def test_acquired_session_is_durable_and_never_started_twice(self):
         self.mode.write_text("ready")

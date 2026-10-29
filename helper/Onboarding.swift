@@ -234,6 +234,7 @@ enum TourBrand {
   static let lilac = Color(red: 183/255, green: 165/255, blue: 216/255)
   static let signal = Color(red: 122/255, green: 88/255, blue: 199/255)
   static let success = Color(nsColor: adaptive(light: 0x146b43, dark: 0x69d89f))
+  static let negative = Color(nsColor: adaptive(light: 0xb42318, dark: 0xff6b60))
   static let buttonText = Color(red: 245/255, green: 240/255, blue: 232/255)
   static let line = carbon.opacity(0.18)
 }
@@ -646,7 +647,7 @@ struct OnboardingView: View {
               ? "This shortcut belongs to your desktop. Change it in your system settings."
               : editor.recording ? "Press your new key combination" : "Current shortcut: \(editor.label)")
               .foregroundStyle(TourBrand.carbon)
-            if let error = editor.error { Text(error).foregroundStyle(TourBrand.ink) }
+            if let error = editor.error { Text(error).foregroundStyle(TourBrand.negative) }
             if editor.recording {
               QuietButton(title: "Cancel") { model.send("cancel-shortcut") }
             }

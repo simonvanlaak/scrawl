@@ -2026,6 +2026,10 @@ impl ApparentCoordinator {
                 .active_recording
                 .as_ref()
                 .and_then(ActiveRecording::mic_warning),
+            input_activity: self.active_recording.as_ref().and_then(|recording| match &recording.source {
+                CaptureSource::Screen { audio: Some(audio), .. } => audio.input_activity(),
+                _ => None,
+            }),
             reduced_motion: self.reduced_motion,
             style: PillStyle::current(),
         }

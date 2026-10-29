@@ -340,10 +340,11 @@ pub enum ElemId {
     DividerWarning = 18,
     LiveWarning = 19,
     Whiteboard = 20,
+    InputEqualizer = 21,
 }
 
 impl ElemId {
-    pub const COUNT: usize = 21;
+    pub const COUNT: usize = 22;
     pub const ROUTES: [ElemId; 2] = [Self::Route0, Self::Route1];
     pub const ALL: [ElemId; Self::COUNT] = [
         Self::Lead,
@@ -367,6 +368,7 @@ impl ElemId {
         Self::DividerWarning,
         Self::LiveWarning,
         Self::Whiteboard,
+        Self::InputEqualizer,
     ];
 
     pub const fn trace_key(self) -> &'static str {
@@ -392,6 +394,7 @@ impl ElemId {
             Self::DividerWarning => "divider.mic",
             Self::LiveWarning => "warning:no-words",
             Self::Whiteboard => "whiteboard",
+            Self::InputEqualizer => "input.equalizer",
         }
     }
 
@@ -417,7 +420,7 @@ impl ElemId {
     pub const fn is_interactive(self) -> bool {
         !matches!(
             self,
-            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing | Self::LiveWarning
+            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing | Self::LiveWarning | Self::InputEqualizer
         )
     }
 
@@ -440,6 +443,7 @@ impl ElemId {
             Self::Inspect => "Inspect",
             Self::Route0 | Self::Route1 => "Send to session",
             Self::LiveWarning => "No words recognized yet",
+            Self::InputEqualizer => "Microphone input level (not speech recognition)",
         }
     }
 }
@@ -702,12 +706,16 @@ fn layout_of_warning(
         | Pres::RecordingWarning { chips, has_iphone } => {
             let clock_w = m.clock_width(clock);
             let lead_w = CHIP_H + clock_w + LEAD_TRAIL;
+            // Four mode chips plus a warning can reach the fixed panel edge. Keep the
+            // separators and meter legible without sacrificing the outer Close target.
+            let compact = *chips && warning.is_some();
             raw.push((ElemId::Lead, lead_w, CHIP_CORE_ROUND, 0.0, true));
-            raw.push((ElemId::DividerLead, DIVIDER_W, 0.0, 0.0, false));
+            raw.push((ElemId::DividerLead, if compact { 1.0 } else { DIVIDER_W }, 0.0, 0.0, false));
+            raw.push((ElemId::InputEqualizer, if compact { 20.0 } else { 28.0 }, 0.0, 0.0, false));
             if let Some(warning) = warning {
                 raw.push((ElemId::MicWarning, Metrics::chip_width(m.mic_warning_width(warning)),
                     CHIP_CORE_ROUND, 0.0, false));
-                raw.push((ElemId::DividerWarning, DIVIDER_W, 0.0, 0.0, false));
+                raw.push((ElemId::DividerWarning, if compact { 1.0 } else { DIVIDER_W }, 0.0, 0.0, false));
             }
             if *chips {
                 for &seg in SelectionMode::available(*has_iphone) {
@@ -885,6 +893,7 @@ pub struct FrameState {
     pub ghost: Option<Silhouette>,
     pub is_completed: bool,
     pub mic_warning: Option<InputWarning>,
+    pub input_level: f32,
     pub completed_warning: bool,
     pub content_blur: f32,
     pub content_alpha: f32,
@@ -917,6 +926,10 @@ pub struct PillModel {
     pub labels: LabelWidths,
     pub metrics: Metrics,
     pub mic_warning: Option<InputWarning>,
+    input_count: usize,
+    input_at: f32,
+    input_target: f32,
+    input_level: f32,
 }
 
 impl PillModel {
@@ -948,7 +961,30 @@ impl PillModel {
             labels: LabelWidths::default(),
             metrics,
             mic_warning: None,
+            input_count: 0,
+            input_at: 0.0,
+            input_target: 0.0,
+            input_level: 0.0,
         }
+    }
+
+    /// Captured PCM only. Sample arrival does not establish intelligibility.
+    pub fn set_input_activity(&mut self, input: Option<(usize, f32)>) -> bool {
+        let mut changed = false;
+        if input.is_none_or(|(count, _)| count < self.input_count) {
+            changed = self.input_target > 0.0 || self.input_level > 0.001;
+            self.input_count = 0;
+            self.input_target = 0.0;
+        }
+        if let Some((count, level)) = input {
+            if count > self.input_count {
+                self.input_at = self.t;
+                self.input_target = level.clamp(0.0, 1.0);
+                changed |= self.input_target > 0.0 || self.input_level > 0.001;
+            }
+            self.input_count = count;
+        }
+        changed
     }
 
     pub fn set_mic_warning(&mut self, warning: Option<InputWarning>) {
@@ -1332,6 +1368,9 @@ impl PillModel {
             return;
         }
         self.t += dt;
+        let target = if self.t - self.input_at < 0.12 && matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) { self.input_target } else { 0.0 };
+        let alpha = if self.reduced { 1.0 } else if target > self.input_level { (dt * 18.0).min(1.0) } else { (dt * 8.0).min(1.0) };
+        self.input_level += (target - self.input_level) * alpha;
         if self.geo_at <= self.t + 1e-3 && self.geo_pres != self.pres {
             self.apply_geometry();
         }
@@ -1668,6 +1707,7 @@ impl PillModel {
             ghost,
             is_completed: matches!(self.geo_pres, Pres::Completed { .. }),
             mic_warning: self.mic_warning,
+            input_level: self.input_level,
             completed_warning: matches!(self.geo_pres, Pres::Completed { warning: true, .. }),
             content_blur: max_blur,
             content_alpha: max_alpha,
@@ -1677,6 +1717,11 @@ impl PillModel {
 
     /// True once every spring has settled and no delayed geometry transition is pending.
     pub fn is_at_rest(&self) -> bool {
+        if self.input_level > 0.001
+            || (self.input_target > 0.0 && self.t - self.input_at < 0.12)
+        {
+            return false;
+        }
         if self.geo_pres != self.pres {
             return false;
         }
@@ -2242,7 +2287,7 @@ mod tests {
         let ids: Vec<ElemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(
             ids,
-            [ElemId::Lead, ElemId::DividerLead, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish]
+            [ElemId::Lead, ElemId::DividerLead, ElemId::InputEqualizer, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish]
         );
         let last = items.last().unwrap().rect;
         assert!((layout.r - (last[0] + last[2]) - ISLAND_INSET).abs() < 0.5);
@@ -2254,7 +2299,7 @@ mod tests {
             for chips in [false, true] {
                 let pres = Pres::Recording { chips, has_iphone: true };
                 let (layout, items) = layout_of_warning(
-                    &pres, "0:00", LabelWidths::default(), &Metrics::default(), Some(warning),
+                    &pres, "00:00", LabelWidths::default(), &Metrics::default(), Some(warning),
                 );
                 let ids: Vec<_> = items.iter().map(|item| item.id).collect();
                 assert_eq!(ids[0], ElemId::Lead);
@@ -2264,6 +2309,9 @@ mod tests {
                     < ids.iter().position(|id| *id == if chips { ElemId::Close } else { ElemId::Finish }).unwrap());
                 assert!(chips || ids.contains(&ElemId::Finish));
                 assert!(layout.width() < PANEL_W, "warning cut off recording controls");
+                let rightmost = items.last().unwrap().rect;
+                assert!(rightmost[0] + rightmost[2] <= PANEL_W - ISLAND_INSET,
+                    "rightmost recording control is outside the Mac panel: {warning:?}, chips={chips}");
             }
         }
         let mut model = PillModel::new(Metrics::default());
@@ -2273,6 +2321,79 @@ mod tests {
         model.set_pres(Pres::Processing);
         model.set_mic_warning(None);
         assert!(model.frame().mic_warning.is_none());
+    }
+
+    #[test]
+    fn recording_reserves_meter_beside_warning_without_stealing_finish_hit_target() {
+        let mut model = PillModel::new(Metrics::default());
+        for chips in [false, true] {
+            model.set_pres(Pres::Recording { chips, has_iphone: true });
+            model.set_mic_warning(Some(InputWarning::Unavailable));
+            for _ in 0..180 { model.advance(FRAME_DT); }
+            let (_, items) = layout_of_warning(&model.pres, "0:00", model.labels, &model.metrics, model.mic_warning);
+            let ids: Vec<_> = items.iter().map(|item| item.id.trace_key()).collect();
+            let meter = ids.iter().position(|id| *id == "input.equalizer").expect("meter slot missing");
+            let warning = ids.iter().position(|id| *id == "mic.warning").unwrap();
+            let control = if chips { "close" } else { "finish" };
+            let action = ids.iter().position(|id| *id == control).unwrap();
+            assert!(meter < warning && warning < action);
+            let frame = model.frame();
+            assert!(frame.shape.l >= 0.0 && frame.shape.r <= PANEL_W);
+            let target = items[action].rect;
+            assert_eq!(model.hit_element(target[0] + target[2] / 2.0, target[1] + target[3] / 2.0), Some(items[action].id));
+        }
+    }
+
+    #[test]
+    fn input_meter_tracks_new_pcm_and_settles_on_silence_or_stalled_samples() {
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+        for _ in 0..180 { model.advance(FRAME_DT); }
+        assert!(model.is_at_rest());
+        assert!(model.set_input_activity(Some((1280, 0.8))));
+        assert!(!model.is_at_rest(), "new PCM must wake a settled pill");
+        model.advance(0.05);
+        assert!(model.frame().input_level > 0.0);
+
+        model.set_input_activity(Some((2560, 0.0)));
+        for _ in 0..50 { model.advance(0.02); }
+        assert!(model.frame().input_level < 0.01, "silence must settle the bars");
+
+        model.set_input_activity(Some((3840, 0.9)));
+        model.advance(0.05);
+        assert!(model.frame().input_level > 0.0);
+        for _ in 0..50 {
+            model.set_input_activity(Some((3840, 0.9)));
+            model.advance(0.02);
+        }
+        assert!(model.frame().input_level < 0.01, "a repeated sample count cannot hold a peak");
+    }
+
+    #[test]
+    fn recording_meter_and_controls_survive_sixteen_tile_transition_limit() {
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::Completed {
+            label: "Copied".into(), routes: vec!["Editor".into(), "Notes".into()],
+            warning: false,
+        });
+        for _ in 0..180 { model.advance(FRAME_DT); }
+        model.set_pres(Pres::Recording { chips: true, has_iphone: true });
+        model.set_mic_warning(Some(InputWarning::Unavailable));
+        let mut saw_meter = false;
+        for _ in 0..60 {
+            model.advance(FRAME_DT);
+            let frame = model.frame();
+            if let Some(index) = frame.elems.iter().position(|elem| elem.id == ElemId::InputEqualizer) {
+                saw_meter = true;
+                assert!(index < 16, "Metal compositor would discard meter tile");
+            }
+            for control in [ElemId::Close, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish] {
+                if let Some(index) = frame.elems.iter().position(|elem| elem.id == control) {
+                    assert!(index < 16, "Metal compositor would discard {control:?}");
+                }
+            }
+        }
+        assert!(saw_meter);
     }
 
     #[test]

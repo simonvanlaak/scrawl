@@ -2310,7 +2310,10 @@ impl ApparentCoordinator {
         let dt = (real * motion::time_scale()).min(0.025);
         if let IslandPhase::Completed { finished_at, .. } = self.island_phase
             && finished_at.elapsed() >= Duration::from_millis(25_000)
-            && self.completed_note.as_deref() != Some("Saved · check draft")
+            && !matches!(
+                self.completed_note.as_deref(),
+                Some("Saved · paste manually" | "Saved · open bundle (copy failed)")
+            )
         {
             self.set_island_phase(IslandPhase::Dismissing);
         }
@@ -3087,22 +3090,30 @@ impl ApparentCoordinator {
                         }
                     }
                     // Feedback stays local until the user explicitly copies or attaches it.
+                    // For the blocked automatic trial, leave only text on Ctrl+V even if
+                    // the independent clipboardImage experiment is enabled.
                     let clipboard_ready = !feedback_capture
-                        && crate::handoff::copy_bundle_to_clipboard(&dir)
-                            .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
-                            .is_ok();
+                        && (if auto_active {
+                            #[cfg(target_os = "linux")]
+                            { crate::handoff::copy_bundle_text_to_clipboard(&dir) }
+                            #[cfg(not(target_os = "linux"))]
+                            { crate::handoff::copy_bundle_to_clipboard(&dir) }
+                        } else {
+                            crate::handoff::copy_bundle_to_clipboard(&dir)
+                        })
+                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                        .is_ok();
                     #[cfg(target_os = "linux")]
                     if auto_active && clipboard_ready {
-                        let handoff_dir = dir.clone();
-                        std::thread::spawn(move || {
-                            if let Err(error) = crate::linux::auto_paste::paste_bundle(&handoff_dir) {
-                                apparent_log(format!("Automatic draft paste skipped: {error:#}"));
-                                crate::linux::shell::notify(
-                                    "Draft paste skipped",
-                                    &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", handoff_dir.display()),
-                                );
-                            }
-                        });
+                        // Do not dispatch a paste until the receiver can prove its
+                        // draft identity and acknowledge the image attachment.
+                        if let Err(error) = crate::linux::auto_paste::auto_receiver_preflight() {
+                            apparent_log(format!("Automatic draft paste skipped: {error:#}"));
+                            crate::linux::shell::notify(
+                                "Draft paste skipped",
+                                &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", dir.display()),
+                            );
+                        }
                     } else if auto_active {
                         crate::linux::shell::notify("Draft paste skipped", "Could not copy the handoff. Use the saved bundle from the paper tile.");
                     }
@@ -3112,10 +3123,11 @@ impl ApparentCoordinator {
                         // No automatic clipboard write: the completed pill must not claim
                         // that this private capture was copied.
                         coord.completed_note = Some("Saved · review".into());
-                    } else if auto_active {
-                        // A dispatched shortcut is not proof that the editor accepted either
-                        // paste. Keep the paper tile and give the user the final say.
-                        coord.completed_note = Some("Saved · check draft".into());
+                    }
+                    #[cfg(target_os = "linux")]
+                    if auto_active {
+                        // No receiver receipt: keep the manual handoff visible.
+                        coord.completed_note = Some(crate::linux::auto_paste::completion_note(clipboard_ready).into());
                     }
                     coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
                     if feedback_capture {

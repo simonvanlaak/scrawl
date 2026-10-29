@@ -314,6 +314,12 @@ pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
     )
 }
 
+#[cfg(target_os = "linux")]
+pub fn copy_bundle_text_to_clipboard(bundle_dir: &Path) -> Result<()> {
+    let (directory, bundle) = load_bundle(bundle_dir)?;
+    copy_string_to_clipboard(&clipboard_summary(&bundle, &directory))
+}
+
 // Only fall back if no image was offered. An error after publication may mean another
 // app took the selection; replacing it with our summary would steal the user's copy.
 fn offer_image_handoff(

@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, Context, Div, FontWeight, Image, ImageFormat,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Stateful,
+    AnyElement, App, Bounds, BoxShadow, Context, Div, FocusHandle, FontWeight, Image, ImageFormat,
+    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Transformation, Window, WindowBackgroundAppearance,
     WindowBounds, WindowControlArea, WindowKind, WindowOptions, div, hsla, img, linear_color_stop,
     linear_gradient, point, prelude::*, px, radians, relative, rgb, rgba, size, svg,
@@ -147,6 +147,18 @@ struct ViewState {
     rows: Vec<RowState>,
     ready: bool,
     fix: bool,
+    #[serde(default)]
+    shortcut_editing: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorState {
+    recording: bool,
+    externally_managed: bool,
+    label: String,
+    is_default: bool,
+    error: Option<String>,
 }
 
 /// Permissions this platform asks for. Windows has no Screen Recording, Input Monitoring or
@@ -238,6 +250,8 @@ fn open(request: Request, cx: &mut App) {
                 let mut view = OnboardingWindow {
                     state: None,
                     shortcut,
+                    editor: None,
+                    focus: Some(cx.focus_handle()),
                     events,
                     step_since: Instant::now(),
                     forward: true,
@@ -270,6 +284,16 @@ fn open(request: Request, cx: &mut App) {
                                         window.remove_window();
                                         return false;
                                     }
+                                }
+                                if !window.is_window_active()
+                                    && view.editor.as_ref().is_some_and(|editor| editor.recording)
+                                {
+                                    if let Some(editor) = view.editor.as_mut() {
+                                        editor.recording = false;
+                                    }
+                                    (view.events)(Event::Shortcut(
+                                        crate::settings::Action::CancelShortcut,
+                                    ));
                                 }
                                 if disconnected {
                                     window.remove_window();
@@ -310,6 +334,8 @@ fn open(request: Request, cx: &mut App) {
 pub struct OnboardingWindow {
     state: Option<ViewState>,
     shortcut: String,
+    editor: Option<EditorState>,
+    focus: Option<FocusHandle>,
     events: Events,
     step_since: Instant,
     forward: bool,
@@ -321,6 +347,14 @@ impl OnboardingWindow {
     /// Applies one message from the session; `false` when the window should close.
     fn handle(&mut self, message: serde_json::Value, window: Option<&mut Window>) -> bool {
         match message["type"].as_str().unwrap_or_default() {
+            "shortcut" => {
+                if let Some(label) = message["label"].as_str() {
+                    self.shortcut = label.to_owned();
+                }
+            }
+            "shortcut-editor" => {
+                self.editor = serde_json::from_value(message["shortcut"].clone()).ok();
+            }
             "state" => {
                 let Ok(next) = serde_json::from_value::<ViewState>(message).inspect_err(|error| {
                     crate::capture::apparent_log(format!(
@@ -1064,6 +1098,7 @@ impl OnboardingWindow {
                 "continue",
                 state.ready,
             )),
+            Step::Shortcut => Some(("Continue", "continue", true)),
             Step::Done => Some(("Done", "continue", true)),
             Step::TryIt => None,
         };
@@ -1175,6 +1210,47 @@ impl Render for OnboardingWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let phase = self.opened.elapsed().as_secs_f32();
         let root = div()
+            .id("onboarding-root")
+            .when_some(self.focus.as_ref(), |d, focus| d.track_focus(focus))
+            .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+                if !view
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| state.shortcut_editing)
+                    || !view.editor.as_ref().is_some_and(|editor| editor.recording)
+                {
+                    return;
+                }
+                let key = &event.keystroke.key;
+                if key == "escape" {
+                    (view.events)(Event::Shortcut(crate::settings::Action::CancelShortcut));
+                } else if let Some(key_code) = crate::settings_window::key_code(key) {
+                    let m = event.keystroke.modifiers;
+                    let modifiers = [
+                        (m.platform, crate::capture::CARBON_CMD_KEY),
+                        (m.control, crate::capture::CARBON_CONTROL_KEY),
+                        (m.alt, crate::capture::CARBON_OPTION_KEY),
+                        (m.shift, crate::capture::CARBON_SHIFT_KEY),
+                    ]
+                    .into_iter()
+                    .filter(|(held, _)| *held)
+                    .fold(0, |bits, (_, bit)| bits | bit);
+                    (view.events)(Event::Shortcut(crate::settings::Action::Shortcut {
+                        kind: crate::capture::ShortcutKind::Record,
+                        pressed: crate::settings::Pressed {
+                            key_code,
+                            modifiers,
+                            key: if key.chars().count() == 1 {
+                                key.clone()
+                            } else {
+                                String::new()
+                            },
+                            reserved: false,
+                        },
+                    }));
+                }
+                cx.stop_propagation();
+            }))
             .relative()
             .size_full()
             .flex()
@@ -1221,6 +1297,64 @@ impl Render for OnboardingWindow {
                 .into_any_element(),
             Step::HowItWorks => self.how_it_works().into_any_element(),
             Step::Permissions => self.permissions(&state, phase, cx).into_any_element(),
+            Step::Shortcut => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(self.centered(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(keycaps(&self.shortcut, true, 52.0))
+                        .into_any_element(),
+                    200.0,
+                    "Choose your shortcut",
+                    if state.shortcut_editing {
+                        if self.editor.as_ref().is_some_and(|editor| editor.recording) {
+                            "Press the new shortcut now. Esc cancels; Continue keeps the current one.".to_owned()
+                        } else {
+                            "Continue to try it, or change it again.".to_owned()
+                        }
+                    } else {
+                        format!("Record with {s}. You can change it now, or keep it and move on.")
+                    },
+                ))
+                .when(state.shortcut_editing, |d| d.child(
+                    div().flex().flex_col().items_center().gap(px(10.0))
+                        .when_some(self.editor.as_ref(), |d, editor| d.child(
+                            div().px(px(18.0)).py(px(10.0))
+                                .bg(rgb(colors().raised)).border_1().border_color(rgba(colors().line))
+                                .child(keycaps(&editor.label, editor.recording, 32.0))
+                        ))
+                        .child(self.editor.as_ref().map_or_else(
+                            || "Waiting for recorder…".to_owned(),
+                            |editor| if editor.externally_managed {
+                                "This shortcut belongs to your desktop. Change it in your compositor settings.".to_owned()
+                            } else if editor.recording {
+                                "Press your new key combination".to_owned()
+                            } else {
+                                format!("Current shortcut: {}", editor.label)
+                            },
+                        ))
+                        .children(self.editor.as_ref().and_then(|editor| editor.error.clone()))
+                        .when(self.editor.as_ref().is_some_and(|editor| editor.recording), |d| {
+                            d.child(quiet_button("onboarding-cancel-shortcut", "Cancel")
+                                .on_click(cx.listener(|view, _, _, _| (view.events)(Event::Shortcut(crate::settings::Action::CancelShortcut)))))
+                        })
+                        .when(self.editor.as_ref().is_some_and(|editor| !editor.is_default && !editor.externally_managed), |d| {
+                            d.child(quiet_button("onboarding-reset-shortcut", "Reset to default")
+                                .on_click(cx.listener(|view, _, _, _| (view.events)(Event::Shortcut(crate::settings::Action::ResetShortcut { kind: crate::capture::ShortcutKind::Record })))))
+                        }),
+                ))
+                .child(
+                    quiet_button("onboarding-change-shortcut", "Change shortcut")
+                        .on_click(cx.listener(|view, _, window, _| {
+                            if let Some(focus) = &view.focus { window.focus(focus); }
+                            view.act("change-shortcut");
+                        })),
+                )
+                .into_any_element(),
             Step::TryIt => self
                 .centered(
                     self.try_art(phase),
@@ -1278,6 +1412,8 @@ mod tests {
         let mut window = OnboardingWindow {
             state: None,
             shortcut: "Alt+Shift+S".into(),
+            editor: None,
+            focus: None,
             events: Arc::new(|_| {}),
             step_since: now,
             forward: true,
@@ -1304,6 +1440,7 @@ mod tests {
                 },
             ),
             (Step::Permissions, true, Input::Continue),
+            (Step::Shortcut, true, Input::Continue),
             (Step::TryIt, true, Input::CaptureEnded { completed: true }),
             (Step::Done, true, Input::Continue),
         ] {
@@ -1330,5 +1467,10 @@ mod tests {
             }
             flow.on(input);
         }
+        assert!(window.handle(
+            serde_json::json!({"type": "shortcut", "label": "Ctrl+Alt+K"}),
+            None
+        ));
+        assert_eq!(window.shortcut, "Ctrl+Alt+K");
     }
 }

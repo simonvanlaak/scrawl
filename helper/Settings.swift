@@ -321,8 +321,8 @@ struct SettingsTheme {
   var key: Color { dark ? Color.black.opacity(0.28) : Color.black.opacity(0.035) }
   var keyLine: Color { ink(dark ? 0.08 : 0.09) }
   var accent: Color { Color(red: 0.478, green: 0.345, blue: 0.78) }
-  var positive: Color { Color(red: 0.078, green: 0.42, blue: 0.263) }
-  var negative: Color { Color(red: 0.706, green: 0.137, blue: 0.094) }
+  var positive: Color { dark ? Color(red: 0.467, green: 0.839, blue: 0.647) : Color(red: 0.078, green: 0.42, blue: 0.263) }
+  var negative: Color { dark ? Color(red: 1, green: 0.506, blue: 0.459) : Color(red: 0.706, green: 0.137, blue: 0.094) }
 }
 
 private struct ThemeKey: EnvironmentKey {
@@ -796,7 +796,7 @@ struct SettingsView: View {
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
-    let theme = SettingsTheme(.light)
+    let theme = SettingsTheme(scheme)
     HStack(spacing: 0) {
       sidebar
         .frame(width: SettingsMetrics.sidebar)
@@ -814,7 +814,6 @@ struct SettingsView: View {
     }
     .frame(width: SettingsMetrics.width, height: SettingsMetrics.height)
     .environment(\.settingsTheme, theme)
-    .preferredColorScheme(.light)
   }
 
   // Sidebar
@@ -1401,6 +1400,7 @@ final class SettingsWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
     window.toolbar = toolbar
     window.toolbarStyle = .unified
     window.titlebarAppearsTransparent = true
+    window.backgroundColor = TourBrand.paperNS
     window.titleVisibility = .hidden
     window.title = "Apparent Settings"
     window.isMovableByWindowBackground = true

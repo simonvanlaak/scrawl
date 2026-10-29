@@ -18,6 +18,76 @@ use crate::model::{
 mod platform;
 pub use platform::*;
 
+/// Resolve a CLI recording target before creating a bundle or starting any recorder.
+pub fn record_target(window_query: Option<&str>) -> Result<TargetInfo> {
+    resolve_record_target(window_query, list_recordable_windows, || discover_target(None))
+}
+
+fn resolve_record_target(
+    window_query: Option<&str>,
+    windows: impl FnOnce() -> Vec<TargetInfo>,
+    display: impl FnOnce() -> TargetInfo,
+) -> Result<TargetInfo> {
+    let Some(query) = window_query else {
+        return Ok(display());
+    };
+    let query = query.trim();
+    anyhow::ensure!(!query.is_empty(), "--window needs a non-empty window name");
+    let query_lower = query.to_lowercase();
+    let mut matches = windows().into_iter().filter(|target| {
+        target.mode == CaptureMode::Window
+            && target.window_id.is_some()
+            && (target.window_title.as_deref().is_some_and(|title| title.to_lowercase().contains(&query_lower))
+                || target.app.as_deref().is_some_and(|app| app.to_lowercase().contains(&query_lower)))
+    });
+    let first = matches.next();
+    anyhow::ensure!(first.is_some(), "No selectable window matches --window {query:?}");
+    anyhow::ensure!(matches.next().is_none(), "More than one window matches --window {query:?}; use a more specific name");
+    Ok(first.expect("checked above"))
+}
+
+#[cfg(test)]
+mod record_target_tests {
+    use super::*;
+
+    fn target(mode: CaptureMode, title: &str, app: &str) -> TargetInfo {
+        TargetInfo {
+            mode,
+            app: Some(app.into()),
+            bundle_id: None,
+            window_title: Some(title.into()),
+            window_id: (mode == CaptureMode::Window).then_some(42),
+            display_id: 0,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
+        }
+    }
+
+    #[test]
+    fn requested_window_must_be_unique_and_never_fall_back_to_display() {
+        let windows = || vec![target(CaptureMode::Window, "Project", "Editor"), target(CaptureMode::Window, "Other", "Browser")];
+        for query in ["missing", "", "   ", "e"] {
+            let result = resolve_record_target(Some(query), windows, || panic!("display capture must not start"));
+            assert!(result.is_err(), "{query:?} must be rejected");
+        }
+        let selected = resolve_record_target(Some("project"), windows, || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_id, Some(42));
+        assert_eq!(resolve_record_target(Some("browser"), windows, || panic!("display capture must not start")).unwrap().window_title.as_deref(), Some("Other"));
+        assert!(resolve_record_target(Some("project"), || vec![target(CaptureMode::Display, "Project", "Editor")], || panic!("display capture must not start")).is_err());
+        let display = resolve_record_target(None, || panic!("window lookup must not run"), || target(CaptureMode::Display, "", "")).unwrap();
+        assert_eq!(display.mode, CaptureMode::Display);
+    }
+
+    #[test]
+    fn long_window_titles_are_matched_and_checked_for_ambiguity() {
+        let title = "A window title longer than the picker label with UNIQUE_SUFFIX";
+        let selected = resolve_record_target(Some("UNIQUE_SUFFIX"), || vec![target(CaptureMode::Window, title, "Browser")], || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_title.as_deref(), Some(title));
+        let other = "A window title longer than the picker label with OTHER_SUFFIX";
+        let result = resolve_record_target(Some("A window title longer"), || vec![target(CaptureMode::Window, title, "Browser"), target(CaptureMode::Window, other, "Browser")], || panic!("display capture must not start"));
+        assert!(result.is_err(), "truncated picker labels must not hide ambiguity");
+    }
+}
+
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// Candidate frames only feed scene diffs and keyframe selection; the keyframes themselves are
 /// decoded from `recording.mp4` at full size afterwards.

@@ -27,6 +27,7 @@
       "name": "Give Feedback…",
       "says": "Start a capture from the menu, review it locally, then open a GitHub feedback form. No capture data is added to the URL or uploaded automatically.",
       "status": "experiment:feedbackIssue",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "docs": ["docs/capture.md"]
     },
@@ -102,6 +103,7 @@
       "name": "Output-bound Region on Hyprland",
       "says": "A multi-output Hyprland capture checks that the sharing portal selected the chosen output, and a Region is cropped within its stream.",
       "status": "main",
+      "added": "2026-10-28",
       "platforms": ["linux"],
       "note": "Mixed-scale Region and separate Cancel/Finish actions after output crossings were verified on an Omarchy VM and X1. A Region selected on the VM's 1.25x output also saved visible content in its movie and keyframe. The earlier X1 synthetic Cancel-to-Finish misdispatch did not recur; other Wayland portal backends and mirrored layouts are unverified.",
       "docs": ["docs/linux.md", "docs/capture.md"]
@@ -263,6 +265,7 @@
       "name": "Move recording controls while recording",
       "says": "Drag the recording capsule by its clock to expose the screen beneath it. The capsule stays visible in the captured movie and delivered full-quality keyframes.",
       "status": "experiment:movableRecordingControls",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "docs": ["docs/recording-capsule-drag.md", "docs/capture.md"]
     },
@@ -859,7 +862,7 @@
       "id": "cli-copy",
       "group": "cli",
       "name": "copy",
-      "says": "Copy a saved capture to the clipboard without selecting or contacting an agent session.",
+      "says": "Copy a saved capture to the clipboard without contacting an agent session. The confirmation explains that copy is text-only by default and points to the contact sheet; the user checks the unsent draft for an image.",
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["mac", "linux"],
@@ -900,6 +903,7 @@
       "name": "apparent export on Linux",
       "says": "The CLI burns ink, pins and click ripples into an MP4, with optional auto-zoom and aligned WAV audio, using FFmpeg and ffprobe.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["linux"],
       "note": "The menu export experiment remains Mac-only. Requires FFmpeg with H.264/AAC encoders; the timed CLI recorder does not collect click or ink telemetry.",
       "docs": ["docs/export-and-retention.md", "docs/linux.md"]
@@ -920,7 +924,7 @@
       "id": "agent-install-prompt",
       "group": "install",
       "name": "Copy an agent install prompt",
-      "says": "The landing page and README offer a one-sentence prompt asking an agent to install and launch the supported desktop app from official releases.",
+      "says": "The README offers a one-sentence prompt asking an agent to install and launch the supported desktop app from official releases.",
       "status": "main",
       "platforms": ["mac", "linux"],
       "added": "2026-10-28",
@@ -936,6 +940,17 @@
       "added": "2026-10-28",
       "note": "No branded download or Homebrew cask has been published.",
       "docs": ["README.md#install", "docs/release.md"]
+    },
+    {
+      "id": "site-platform-download",
+      "group": "install",
+      "name": "Platform-aware site download",
+      "says": "The homepage looks up the newest published GitHub installer for the visitor's supported OS and starts its download. On lookup failure it opens the release list instead.",
+      "status": "main",
+      "added": "2026-10-29",
+      "platforms": ["mac", "linux"],
+      "note": "Mac is Apple silicon only; if the browser cannot identify the chip or Linux architecture, the button opens the release list instead. Windows has no supported installer.",
+      "docs": ["docs/release.md"]
     },
     {
       "id": "sparkle",
@@ -985,8 +1000,8 @@
       "id": "onboarding",
       "group": "install",
       "name": "Welcome tour",
-      "says": "A welcome, an 11 s demo of ⌥⇧S, one permissions checklist and a first capture; it resumes where any quit left it.",
-      "status": "stable@0.3.4",
+      "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",
+      "status": "main",
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]

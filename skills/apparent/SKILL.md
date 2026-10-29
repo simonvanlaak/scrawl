@@ -34,6 +34,8 @@ When you answer, refer to moments the same way, as in "#3 (0:10)", so the person
 2. Read the transcript lines next to it. Speech recognition mishears names and code terms, so trust the screen when the two disagree.
 3. Open `frames/frame-NN.png` for any keyframe you need at full size (`frame-03.png` is #3). When the summary says `Cropped to:`, the uncropped screens are in `frames-full/`.
 
+If the contact sheet is not attached, try opening it at the bundle path in the first line. A plain `apparent copy` is text-only by default; the Paste control offers the image first and the text second, but a paste keystroke does not prove the composer accepted either. If you cannot open the local path (for example, the capture is on another machine), ask for `contact-sheet.png` as an attachment and check that you can actually view it. Do not claim to know what a click or mark targeted from “element unavailable” or coordinates alone; wait for the image when that target matters to the request. Never send a draft on the user's behalf.
+
 What the drawings mean:
 
 - Red strokes, circles, underlines and arrows are the person's marks, and they point at the problem. Marks drawn on the same screen all show on one keyframe. When there are several, the text numbers them in drawing order (`✎① 0:06 …`, `✎② 0:09 …`); the image shows only the ink, so use `apparent zoom --mark` to see which ink is which.

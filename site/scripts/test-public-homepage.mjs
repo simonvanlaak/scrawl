@@ -36,6 +36,7 @@ test("the first screen has a full-size reversible frog and one wave button", () 
   assert.match(body, /Visual feedback gets lost<br\/>in .*text\./)
   assert.equal(body.match(/class="pond-cover-frog"/g)?.length, 1)
   assert.equal(body.match(/class="pond-lounging-frog"/g)?.length, 1)
+  assert.match(body, /lily-clean\.png\?v=1/, "lily bypasses a cached pre-deploy 404")
   for (const asset of ["lily-clean", "frog-rest-cohesive", "frog-air-cohesive", "frog-lounge-cohesive", "frog-wave-cohesive"]) {
     assert.equal(existsSync(join(publicDir, "pond", `${asset}.png`)), true)
   }

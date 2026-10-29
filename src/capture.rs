@@ -688,10 +688,7 @@ impl ScreenCaptureSession {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
             CandidateBuffer::new(0),
         );
-        let mut collected = buffer.into_frames();
-        if !cfg!(target_os = "linux") && collected.is_empty() {
-            collected.push(crate::render::render_synthetic_demo_frame(1280, 800, 0, 0));
-        }
+        let collected = buffer.into_frames();
         let valid_video =
             video_path.filter(|path| path.exists() && path.metadata().is_ok_and(|m| m.len() > 0));
         ScreenRecording {
@@ -2094,6 +2091,21 @@ mod tests {
         buffer.push(RgbaFrame::new(500, 4, 4, vec![0; 64]), false);
         buffer.drop_since(0);
         assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn stopped_capture_without_real_frames_stays_empty() {
+        let session = ScreenCaptureSession {
+            started_at: Instant::now(),
+            stopping: Arc::new(AtomicBool::new(false)),
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: None,
+            _recording: crate::retention::Recording::start(),
+        };
+        assert!(session.stop().frames.is_empty());
     }
 
     #[test]

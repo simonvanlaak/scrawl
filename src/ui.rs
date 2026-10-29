@@ -519,7 +519,28 @@ enum MenuAction {
 
 /// Text beside the menu bar icon while a video export runs (`None` goes back to the inbox count).
 static EXPORT_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Remains visible beside the menu icon until the next recording; a failed capture has no paper tile.
+static CAPTURE_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static EXPORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn status_bar_text(export: Option<String>, capture: Option<String>) -> Option<String> {
+    export.or(capture)
+}
+
+fn current_status_bar_text() -> Option<String> {
+    status_bar_text(
+        EXPORT_STATUS.lock().ok().and_then(|status| status.clone()),
+        CAPTURE_STATUS.lock().ok().and_then(|status| status.clone()),
+    )
+}
+
+fn refresh_status_bar(inbox_count: usize) {
+    if let Some(text) = current_status_bar_text() {
+        set_status_text(&text);
+    } else {
+        set_status_inbox_count(inbox_count);
+    }
+}
 
 /// Exports the newest bundle to `~/Movies/Apparent/<name>.mp4` off the main thread, reporting
 /// through `EXPORT_STATUS`, then reveals the file in Finder.
@@ -947,7 +968,7 @@ impl ApparentCoordinator {
     /// Kit opened, copied, pasted or dismissed `dir`, so it leaves the inbox.
     fn mark_handled(&mut self, dir: &std::path::Path) {
         if self.inbox.remove(dir) {
-            set_status_inbox_count(self.inbox.len());
+            refresh_status_bar(self.inbox.len());
         }
     }
 
@@ -2529,6 +2550,9 @@ impl ApparentCoordinator {
             self.agent_capture_id = Some(id);
         }
         self.begin_playback();
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
+        }
         let started = Instant::now();
         apparent_log(format!(
             "start_recording_with_target invoked: mode={:?} frame={:?}",
@@ -2553,7 +2577,14 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
-        let _ = std::fs::create_dir_all(&bundle_dir);
+        if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
+            apparent_log(format!("Capture could not protect raw video: {error:#}"));
+            self.cancel_recording(cx);
+            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                *status = Some("Capture failed — could not protect raw video".into());
+            }
+            return;
+        }
         let video_path = bundle_dir.join("recording.mp4");
 
         self.telemetry.set_capture_mode(target.mode);
@@ -2700,6 +2731,9 @@ impl ApparentCoordinator {
     pub fn start_recording_iphone(&mut self, cx: &mut Context<Self>) {
         if self.is_recording() || self.is_processing() {
             return;
+        }
+        if let Ok(mut status) = CAPTURE_STATUS.lock() {
+            *status = None;
         }
         apparent_log("start_recording_iphone invoked");
         if self.lab {
@@ -2969,12 +3003,22 @@ impl ApparentCoordinator {
                             apparent_log(format!("Capture failed: {error:#}"));
                             #[cfg(target_os = "linux")]
                             crate::linux::shell::notify("Capture failed", &error.to_string());
+                            if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                                *status = Some(if error.to_string().starts_with("No screen frames were captured") {
+                                    "Capture failed — no screen frames".into()
+                                } else {
+                                    "Capture failed".into()
+                                });
+                            }
                             coord.set_island_phase(IslandPhase::Dismissing);
                             cx.notify();
                             return;
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                        *status = None;
+                    }
                     #[cfg(target_os = "linux")]
                     if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
                         if summary.contains("Image quality: ") {
@@ -5927,12 +5971,9 @@ pub fn run_app(
                         crate::settings::reconcile_login_item();
                         last_login_check = std::time::Instant::now();
                     }
-                    let status = EXPORT_STATUS.lock().ok().and_then(|s| s.clone());
+                    let status = current_status_bar_text();
                     if status != shown_status {
-                        match &status {
-                            Some(text) => set_status_text(text),
-                            None => set_status_inbox_count(loop_coord.read(cx).inbox.len()),
-                        }
+                        refresh_status_bar(loop_coord.read(cx).inbox.len());
                         shown_status = status;
                     }
                     platform::poll_status_bar();
@@ -6054,6 +6095,13 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_failure_status_survives_inbox_changes() {
+        let failure = Some("Capture failed — no screen frames".to_owned());
+        assert_eq!(status_bar_text(None, failure.clone()), failure);
+        assert_eq!(status_bar_text(Some("Exporting…".into()), failure), Some("Exporting…".into()));
+    }
 
     #[test]
     fn picker_exclusion_survives_session_reset_until_deferred_close() {

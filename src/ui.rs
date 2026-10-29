@@ -1549,9 +1549,9 @@ impl ApparentCoordinator {
     /// Stops the active recording and deletes its bundle, leaving the island as it is. Returns
     /// its target and overlay.
     fn discard_recording(&mut self) -> Option<(TargetInfo, Option<LaserOverlay>)> {
-        let rec = self.active_recording.take()?;
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         { self.agent_capture_id = None; }
+        let rec = self.active_recording.take()?;
         let _ = self.telemetry.finish_session();
         match rec.source {
             CaptureSource::Screen { session, audio, .. } => {
@@ -6162,6 +6162,17 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn failed_capture_start_discards_its_identity_without_an_active_recording() {
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        coordinator.agent_capture_id = Some("pending-capture".into());
+
+        assert!(coordinator.discard_recording().is_none());
+        assert_eq!(coordinator.agent_state().capture_id, None);
+    }
 
     #[test]
     fn feedback_issue_url_opens_a_public_template_without_capture_data() {

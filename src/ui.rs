@@ -834,6 +834,7 @@ pub struct ApparentCoordinator {
     open_iphone_when_found: bool,
     /// The welcome window, while it's open (`crate::onboarding`).
     onboarding: Option<crate::onboarding::Session>,
+    onboarding_editor: crate::settings::Panel,
     /// The Settings window, while it's open (`crate::settings`).
     settings: Option<crate::settings::Session>,
     /// The last fresh read of what macOS has granted (at launch, then while onboarding is open).
@@ -919,6 +920,7 @@ impl ApparentCoordinator {
             last_mode: SelectionMode::load_last_used(),
             open_iphone_when_found: false,
             onboarding: None,
+            onboarding_editor: crate::settings::Panel::default(),
             settings: None,
             grants: None,
             gate: crate::onboarding::Gate::default(),
@@ -1036,6 +1038,7 @@ impl ApparentCoordinator {
 
     pub fn open_onboarding(&mut self, flow: crate::onboarding::Flow) {
         // Drop the old window before the new one opens.
+        self.cancel_onboarding_editor();
         self.onboarding = None;
         let sender = self.telemetry.ui_sender.clone();
         let events = move |event| {
@@ -1214,14 +1217,36 @@ impl ApparentCoordinator {
                 .onboarding
                 .as_mut()
                 .map_or(Effect::None, |session| session.action(&action)),
+            Event::Shortcut(action) => {
+                if self.onboarding.as_ref().is_some_and(|session| session.editing_shortcut())
+                    && matches!(action,
+                        crate::settings::Action::Shortcut { kind: crate::capture::ShortcutKind::Record, .. }
+                        | crate::settings::Action::ResetShortcut { kind: crate::capture::ShortcutKind::Record }
+                        | crate::settings::Action::CancelShortcut)
+                {
+                    let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
+                    self.onboarding_editor.on(action, &mut host);
+                    self.sync_onboarding_editor();
+                }
+                Effect::None
+            }
             Event::Exited => {
+                self.cancel_onboarding_editor();
                 self.onboarding = None;
                 Effect::None
             }
         };
         match effect {
-            Effect::EditShortcut => self.open_settings(Some(crate::settings::Pane::General)),
+            Effect::EditShortcut => {
+                let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
+                self.onboarding_editor.on(
+                    crate::settings::Action::RecordShortcut { kind: crate::capture::ShortcutKind::Record },
+                    &mut host,
+                );
+                self.sync_onboarding_editor();
+            }
             Effect::Close | Effect::Settings => {
+                self.cancel_onboarding_editor();
                 if effect == Effect::Settings {
                     self.open_settings(None);
                 }
@@ -1232,6 +1257,7 @@ impl ApparentCoordinator {
                 self.onboarding = None;
             }
             Effect::Relaunch { resume } => {
+                self.cancel_onboarding_editor();
                 apparent_log(format!(
                     "Screen Recording granted but not usable here; relaunching (resume {resume:?})"
                 ));
@@ -1244,6 +1270,23 @@ impl ApparentCoordinator {
             }
             _ => {}
         }
+        if self.onboarding.as_ref().is_some_and(|session| !session.editing_shortcut()) {
+            self.cancel_onboarding_editor();
+        }
+    }
+
+    fn sync_onboarding_editor(&mut self) {
+        use crate::settings::Host as _;
+        let host = crate::settings::AppHost { telemetry: &self.telemetry };
+        if let Some(session) = self.onboarding.as_mut() {
+            session.shortcut_changed(&host.shortcuts().record.label);
+            session.shortcut_editor(&self.onboarding_editor.record_shortcut(&host));
+        }
+    }
+
+    fn cancel_onboarding_editor(&mut self) {
+        let mut host = crate::settings::AppHost { telemetry: &self.telemetry };
+        self.onboarding_editor.on(crate::settings::Action::CancelShortcut, &mut host);
     }
 
     fn activity(&self) -> crate::shortcut::Activity {

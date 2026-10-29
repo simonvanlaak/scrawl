@@ -144,6 +144,7 @@ struct OnboardingState: Decodable, Equatable {
   var rows: [PermissionRow] = []
   var ready = false
   var fix = false
+  var shortcutEditing = false
   var pickerNote = false
   var speech: SpeechStatus?
   /// The demo on how-it-works: nil, "skipped", "watched" or "practiced".
@@ -162,6 +163,15 @@ struct OnboardingState: Decodable, Equatable {
   }
 }
 
+/// The Record row sent by the same Settings panel that validates and saves shortcuts.
+struct OnboardingShortcut: Decodable {
+  var label: String
+  var recording: Bool
+  var externallyManaged: Bool
+  var isDefault: Bool
+  var error: String?
+}
+
 let stepOrder = ["welcome", "how-it-works", "permissions", "shortcut", "try-it", "done"]
 
 final class OnboardingModel: ObservableObject {
@@ -169,6 +179,7 @@ final class OnboardingModel: ObservableObject {
   /// The last step change went forward, so pages slide in from the trailing edge.
   @Published var forward = true
   @Published var shortcut: String
+  @Published var shortcutEditor: OnboardingShortcut?
   let paste: String
   let icon: NSImage?
   var send: (String) -> Void = { _ in }
@@ -591,7 +602,11 @@ struct OnboardingView: View {
     let (title, body): (String, String) = switch state.step {
     case "try-it": ("Make your first capture", "Tap \(s) now. Talk, point at something, then tap \(s) again.")
     case "done": ("It's on your clipboard", "Press ⌘V in your agent. apparent stays in the menu bar; tap \(s) whenever you want to show something.")
-    case "shortcut": ("Choose your shortcut", "Record with \(s). You can change it now, or keep it and move on.")
+    case "shortcut": ("Choose your shortcut", state.shortcutEditing
+      ? (model.shortcutEditor?.recording == true
+          ? "Press the new shortcut now. Esc cancels; Continue keeps the current one."
+          : "Continue to try it, or change it again.")
+      : "Record with \(s). You can change it now, or keep it and move on.")
     default: ("Welcome to apparent", "Record your screen and voice. Mark what matters, then paste the capture into your agent.")
     }
     return VStack(spacing: 0) {
@@ -619,6 +634,27 @@ struct OnboardingView: View {
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, 10)
       if state.step == "shortcut" {
+        if state.shortcutEditing, let editor = model.shortcutEditor {
+          VStack(spacing: 8) {
+            Keycaps(shortcut: editor.label, litMods: editor.recording, size: 30)
+              .padding(.horizontal, 18)
+              .padding(.vertical, 10)
+              .background(TourBrand.stock)
+              .overlay(Rectangle().strokeBorder(TourBrand.line, lineWidth: 1))
+            Text(editor.externallyManaged
+              ? "This shortcut belongs to your desktop. Change it in your system settings."
+              : editor.recording ? "Press your new key combination" : "Current shortcut: \(editor.label)")
+              .foregroundStyle(TourBrand.carbon)
+            if let error = editor.error { Text(error).foregroundStyle(TourBrand.ink) }
+            if editor.recording {
+              QuietButton(title: "Cancel") { model.send("cancel-shortcut") }
+            }
+            if !editor.isDefault && !editor.externallyManaged {
+              QuietButton(title: "Reset to default") { model.send("reset-shortcut") }
+            }
+          }
+          .padding(.top, 12)
+        }
         QuietButton(title: "Change shortcut") { model.send("change-shortcut") }
           .padding(.top, 18)
       }
@@ -897,6 +933,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   let model: OnboardingModel
   var window: NSWindow?
+  private var shortcutMonitor: Any?
   private lazy var keys = HelperWindowKeys(window: { [weak self] in self?.window })
 
   init(model: OnboardingModel) {
@@ -930,6 +967,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
   }
 
   func windowWillClose(_: Notification) {
+    listenForShortcut(false)
     emit(["action": "close"])
     keys.handBack()
     exit(0)
@@ -937,6 +975,32 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
   private func present() {
     keys.bringForward(window)
+  }
+
+  func windowDidResignKey(_: Notification) {
+    if model.shortcutEditor?.recording == true { emit(["action": "cancel-shortcut"]) }
+  }
+
+  private func listenForShortcut(_ on: Bool) {
+    if on, shortcutMonitor == nil {
+      shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        guard let self, self.model.shortcutEditor?.recording == true else { return event }
+        if event.keyCode == UInt16(kVK_Escape) {
+          emit(["action": "cancel-shortcut"])
+          return nil
+        }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let typed = event.characters(byApplyingModifiers: []) ?? ""
+        let modifiers = ShortcutKeys.carbon(flags)
+        emit(["action": "shortcut", "kind": "record", "keyCode": Int(event.keyCode),
+              "modifiers": modifiers, "key": typed,
+              "reserved": ShortcutKeys.reserved(keyCode: Int(event.keyCode), modifiers: modifiers)])
+        return nil
+      }
+    } else if !on, let shortcutMonitor {
+      NSEvent.removeMonitor(shortcutMonitor)
+      self.shortcutMonitor = nil
+    }
   }
 
   private func apply(_ state: OnboardingState) {
@@ -975,6 +1039,7 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
           switch type {
           case "state":
             guard let state else { return }
+            if state.step != "shortcut" || !state.shortcutEditing { self.listenForShortcut(false) }
             if !self.presented {
               self.model.state = state
               self.window?.setContentSize(NSSize(width: 620, height: state.height))
@@ -994,6 +1059,13 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Permissions.openSettings(permission, from: self.screenFrame(of: permission))
           case "shortcut":
             if let label = object["label"] as? String { self.model.shortcut = label }
+          case "shortcut-editor":
+            if let shortcut = object["shortcut"],
+               let data = try? JSONSerialization.data(withJSONObject: shortcut),
+               let editor = try? JSONDecoder().decode(OnboardingShortcut.self, from: data) {
+              self.model.shortcutEditor = editor
+              self.listenForShortcut(editor.recording)
+            }
           case "hide": self.window?.orderOut(nil)
           case "show": self.present()
           case "close":

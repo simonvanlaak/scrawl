@@ -946,7 +946,7 @@
       "id": "onboarding",
       "group": "install",
       "name": "Welcome tour",
-      "says": "A welcome, an 11 s demo, one permissions checklist, an optional Record shortcut change via Settings, and a first capture; it resumes where any quit left it.",
+      "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",
       "status": "main",
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],

@@ -276,6 +276,8 @@ pub struct View {
     pub tutorial: Option<Tutorial>,
     /// macOS may be asking about its private window picker: say to choose Allow.
     pub picker_note: bool,
+    /// Show the inline Record recorder, not a second Settings window.
+    pub shortcut_editing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -297,6 +299,7 @@ pub struct Flow {
     tutorial: Option<Tutorial>,
     /// The step `Effect::ConfirmScreen` was given on (once per window).
     screen_confirmed: Option<Step>,
+    shortcut_editing: bool,
 }
 
 impl Flow {
@@ -337,6 +340,7 @@ impl Flow {
             relaunching: false,
             tutorial: None,
             screen_confirmed: None,
+            shortcut_editing: false,
         }
     }
 
@@ -379,12 +383,14 @@ impl Flow {
             Input::Continue => self.primary(),
             Input::Back => {
                 self.step = self.back_from(self.step);
+                self.shortcut_editing = false;
                 Effect::None
             }
             Input::Later | Input::Closed => Effect::Close,
             Input::Settings if self.step == Step::Done => Effect::Settings,
             Input::Settings => Effect::None,
             Input::ChangeShortcut if self.mode == Mode::Tour && self.step == Step::Shortcut => {
+                self.shortcut_editing = true;
                 Effect::EditShortcut
             }
             Input::ChangeShortcut => Effect::None,
@@ -462,6 +468,7 @@ impl Flow {
             fix: self.mode == Mode::Fix,
             tutorial: self.tutorial,
             picker_note: self.screen_confirmed == Some(self.step),
+            shortcut_editing: self.step == Step::Shortcut && self.shortcut_editing,
         }
     }
 
@@ -536,6 +543,7 @@ impl Flow {
 
     fn advance(&mut self) -> Effect {
         self.ready_at = None;
+        self.shortcut_editing = false;
         if self.mode == Mode::Fix {
             return Effect::Close;
         }
@@ -797,6 +805,8 @@ pub enum Event {
     Grants(Grants),
     /// A button: `continue`, `back`, `later`, `close`, `settings` or `grant:<permission>`.
     Action(String),
+    /// The inline recorder uses the same actions and validation as Settings.
+    Shortcut(crate::settings::Action),
     Exited,
 }
 
@@ -924,6 +934,17 @@ impl Session {
                     let Some(action) = value.get("action").and_then(|v| v.as_str()) else {
                         continue;
                     };
+                    let action = action.to_owned();
+                    if matches!(action.as_str(), "shortcut" | "cancel-shortcut" | "reset-shortcut") {
+                        let mut value = value;
+                        if action == "reset-shortcut" && value.get("kind").is_none() {
+                            value["kind"] = "record".into();
+                        }
+                        if let Ok(action) = serde_json::from_value(value) {
+                            events(Event::Shortcut(action));
+                        }
+                        continue;
+                    }
                     let action = match value.get("permission").and_then(|v| v.as_str()) {
                         Some(permission) => format!("{action}:{permission}"),
                         None => action.to_owned(),
@@ -1036,9 +1057,17 @@ impl Session {
         self.send(&serde_json::json!({"type": "show"}));
     }
 
-    /// Settings can change Record while this tour is still open.
+    /// Keep every step's displayed Record keys in sync with the active shortcut.
     pub fn shortcut_changed(&mut self, label: &str) {
         self.send(&serde_json::json!({"type": "shortcut", "label": label}));
+    }
+
+    pub fn shortcut_editor(&mut self, editor: &crate::settings::ShortcutView) {
+        self.send(&serde_json::json!({"type": "shortcut-editor", "shortcut": editor}));
+    }
+
+    pub fn editing_shortcut(&self) -> bool {
+        self.flow.step() == Step::Shortcut && self.flow.shortcut_editing
     }
 
     fn sync(&mut self) {
@@ -1198,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_step_can_open_the_existing_editor_and_resume_before_first_capture() {
+    fn shortcut_step_edits_inline_and_continue_leaves_the_editor() {
         let mut flow = Flow::tour(Step::Welcome, Some(grants(&[])));
         assert_eq!(flow.view().count, 5);
         flow.on(Input::Continue);
@@ -1209,8 +1238,10 @@ mod tests {
         assert_eq!(flow.resume_point(), Some(Step::Shortcut));
         assert_eq!(flow.on(Input::ChangeShortcut), Effect::EditShortcut);
         assert_eq!(flow.step(), Step::Shortcut);
+        assert!(flow.view().shortcut_editing);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
+        assert!(!flow.view().shortcut_editing);
         flow.on(Input::Back);
         assert_eq!(flow.step(), Step::Shortcut);
 

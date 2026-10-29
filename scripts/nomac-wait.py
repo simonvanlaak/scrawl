@@ -135,6 +135,92 @@ def enqueue(directory, ticket, deadline):
         return record
 
 
+def proof_time_left(deadline):
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise Refused("Git proof check timed out; no allocation attempted")
+    return left
+
+
+def git_output(*arguments, deadline=None):
+    # Do not inherit hook/repository overrides or disclose Git's stderr (which
+    # can contain a credential-bearing remote URL). No diff bytes leave here.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    try:
+        result = subprocess.run(["git", *arguments], capture_output=True,
+                                timeout=min(30, proof_time_left(deadline)) if deadline else 30, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Refused("cannot verify Git proof identity") from exc
+    if result.returncode:
+        raise Refused("cannot verify Git proof identity")
+    return result.stdout
+
+
+def candidate_identity(deadline=None):
+    deadline = deadline or time.monotonic() + 15
+    root = Path(os.fsdecode(git_output("rev-parse", "--show-toplevel", deadline=deadline)).strip()).resolve()
+    if root != Path.cwd().resolve():
+        raise Refused("pin and wait must run from the Git checkout root")
+    digest = hashlib.sha256()
+    digest.update(git_output("rev-parse", "HEAD", deadline=deadline))
+    paths = git_output("ls-files", "--cached", "--others", "--exclude-standard", "-z", deadline=deadline)
+    for name in sorted(set(paths.split(b"\0")) - {b""}):
+        proof_time_left(deadline)
+        digest.update(len(name).to_bytes(8, "big") + name)
+        path = root / os.fsdecode(name)
+        if path.is_symlink():
+            digest.update(b"link\0" + os.fsencode(os.readlink(path)))
+        elif not path.exists():
+            digest.update(b"deleted\0")
+        elif path.is_file():
+            digest.update(b"executable\0" if path.stat().st_mode & 0o111 else b"file\0")
+            content = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    proof_time_left(deadline)
+                    content.update(chunk)
+            digest.update(content.digest())
+        else:
+            raise Refused("candidate contains a submodule or unsupported file; cannot pin")
+    return digest.hexdigest()
+
+
+def verify_proof(proof):
+    if not proof:
+        raise Refused("queued ticket needs an explicit proof pin before allocation")
+    deadline = time.monotonic() + 15
+    if candidate_identity(deadline) != proof["candidate"]:
+        raise Refused("candidate changed since proof pin; review and pin again")
+    remote = proof["remote"]
+    ref = proof["base_ref"]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", remote) or not ref.startswith("refs/heads/"):
+        raise Refused("invalid proof remote or base ref")
+    # Require a configured remote name, not an arbitrary URL supplied in state.
+    git_output("remote", "get-url", remote, deadline=deadline)
+    rows = git_output("ls-remote", "--exit-code", remote, ref, deadline=deadline).decode().splitlines()
+    if rows != [proof["base_sha"] + "\t" + ref]:
+        raise Refused("remote base changed since proof pin; review and pin again")
+    if candidate_identity(deadline) != proof["candidate"]:
+        raise Refused("candidate changed during base check; review and pin again")
+
+
+def pin(directory, args):
+    if not re.fullmatch(r"[0-9a-f]{64}", args.candidate) or not re.fullmatch(r"[0-9a-f]{40}", args.base_sha):
+        raise Refused("pin requires a full candidate SHA-256 and base commit SHA")
+    proof = {"candidate": args.candidate, "base_sha": args.base_sha,
+             "remote": args.remote, "base_ref": args.base_ref, "phase": args.phase}
+    with locked(directory):
+        path = path_for(directory, args.ticket)
+        record = load(path)
+        if not record or record["workdir"] != str(Path.cwd().resolve()):
+            raise Refused("pin requires an existing ticket in its original checkout")
+        if record["state"] != "queued" or record.get("session_id"):
+            raise Refused("only a queued ticket without a session can be pinned")
+        verify_proof(proof)
+        record["proof"] = proof
+        save(path, record)
+
+
 def start(nomac, workdir, duration, idle, cost, request_key):
     command = [*nomac, "start", "--parallel", "--drive", "none", "--max-duration",
                str(duration), "--idle-timeout", str(idle), "--max-cost", str(cost),
@@ -243,8 +329,11 @@ def wait(args):
                 save(path, record)
                 raise Refused("ticket deadline expired")
             queue = records(directory)
-            # At most 400s of waiting + a 165s start + 5s lock < 590s.
+            # Proof checks run before marking an allocation as uncertain.
             if record["state"] == "queued" and queue and queue[0]["ticket"] == args.ticket and now >= record["next_attempt"]:
+                verify_proof(record.get("proof"))
+                if timestamp() >= record["deadline"]:
+                    raise Refused("ticket deadline expired during proof check")
                 # Save before calling the provider: after a crash, don't automatically
                 # repeat an allocation with an unknown outcome.
                 record["state"] = "starting"
@@ -304,6 +393,14 @@ def main():
     waiter.add_argument("--idle-timeout", type=int, default=300)
     waiter.add_argument("--max-cost", type=float, default=0.50)
     sub.add_parser("status")
+    sub.add_parser("candidate", help="print the local source fingerprint, never source content")
+    pinned = sub.add_parser("pin", help="explicitly approve the exact candidate/base for a queued ticket")
+    pinned.add_argument("ticket")
+    pinned.add_argument("--candidate", required=True)
+    pinned.add_argument("--base-sha", required=True)
+    pinned.add_argument("--remote", default="origin")
+    pinned.add_argument("--base-ref", default="refs/heads/main")
+    pinned.add_argument("--phase", choices=("final", "diagnostic"), required=True)
     cancel = sub.add_parser("cancel")
     cancel.add_argument("ticket")
     recover = sub.add_parser("recover", help="reconcile an uncertain start with its original idempotency key")
@@ -324,7 +421,11 @@ def main():
                 raise Refused("explicit session caps exceeded (30m, $0.50)")
             return wait(args)
         directory = Path(args.state_dir).expanduser()
-        if args.command == "enqueue":
+        if args.command == "candidate":
+            print(candidate_identity())
+        elif args.command == "pin":
+            pin(directory, args)
+        elif args.command == "enqueue":
             print(json.dumps(enqueue(directory, args.ticket, timestamp() + args.deadline_hours * 3600)))
         elif args.command == "status":
             with locked(directory):

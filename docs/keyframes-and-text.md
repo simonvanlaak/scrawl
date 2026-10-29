@@ -85,6 +85,7 @@ Every successfully built bundle has `finish-trace.json` beside `apparent.json`, 
 ## Click-based visual handoff (`src/handoff.rs`, `src/sketch.rs`)
 
 The old automatic OpenCode attachment policy is inactive. The full capture, keyframes, contact sheet, and video are still built and saved. Manual Paste remains image-first; `apparent zoom` is available for closer inspection.
+`apparent copy` is text-only by default, and its confirmation points to the contact sheet. Copying or dispatching Paste does not prove a receiving composer accepted the image. Check the unsent draft; if the image is absent, attach the saved `contact-sheet.png` manually. An agent that cannot open an unattached local path must ask for the image instead of guessing a click target from coordinates or “element unavailable.”
 
 ## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
 

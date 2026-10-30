@@ -1,0 +1,43 @@
+name: Linux updater harness
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-updater-harness.yml'
+      - 'scripts/linux/*gui*'
+      - 'scripts/linux/updater-fixture.py'
+      - 'src/linux/update.rs'
+      - 'src/settings.rs'
+      - 'src/settings_window.rs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux-updater-harness.yml'
+      - 'scripts/linux/*gui*'
+      - 'scripts/linux/updater-fixture.py'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Harness contracts (not GUI proof)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install disk-image contract dependency (no KVM required)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-utils
+      - name: Install OCR preprocessing dependency
+        run: python3 -m pip install Pillow
+      - name: Test OCR, release fixture and disposable-runner contracts
+        run: |
+          python3 scripts/linux/test-updater-gui.py
+          python3 scripts/linux/test-gui-vm.py
+      - name: Check driver syntax
+        run: |
+          python3 -m py_compile scripts/linux/gui-vm.py scripts/linux/gui-vm-reaper.py scripts/linux/updater-gui.py scripts/linux/updater-fixture.py scripts/linux/test-gui-vm.py
+          bash -n scripts/linux/updater-gui-scenario.sh

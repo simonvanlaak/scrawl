@@ -236,6 +236,10 @@ In Settings, a manual check immediately changes the button to “Checking…” 
 
 Stable reads the newest non-prerelease GitHub release on `tryapparent/apparent`, which must include the Linux AppImage and its `.sha256` asset. **There is no such stable Linux release yet**, so Stable currently has nothing to install. Main reads the latest published `linux-main-<sha>` prerelease from that repository's Releases API; it no longer depends on the old feed branch. The Linux release workflow runs nightly on `main` at 03:17 UTC, skipping a commit that already has a preview. It builds both architectures, runs the full Rust suite and packaged CPU smoke checks, and checks both AppImages and checksums locally and on a private draft before making the prerelease public. If main moves during the build, the superseded run fails visibly and dispatches a replacement for current main instead of reporting success without publishing. A failed dispatch also fails the run; the nightly schedule remains a fallback. To publish one manually, dispatch the workflow on `main` with `publish_main=true` and an empty `tag`. Main therefore tracks the latest *published* preview, not every commit. If a nightly build fails, the previous preview stays available. A user choosing Main accepts unreviewed code; channel changes install the chosen channel even if its version is lower.
 
+Repeatable packaged Settings click-through, controlled guest-local release responses,
+isolation requirements and private video evidence: [Linux updater GUI acceptance](linux-updater-gui-test.md).
+This checks the GUI and release contract; it does not establish GitHub publication.
+
 ## Building and testing
 
 Build dependencies (Ubuntu/Debian; CI installs the same):

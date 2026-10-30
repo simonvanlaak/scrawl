@@ -16,8 +16,12 @@ pub fn request_open() {
     OPEN.store(true, Ordering::Release);
 }
 
-pub fn take_open() -> bool {
-    OPEN.swap(false, Ordering::AcqRel)
+pub fn take_open(onboarding_initialized: bool) -> bool {
+    take_open_when_ready(&OPEN, onboarding_initialized)
+}
+
+fn take_open_when_ready(pending: &AtomicBool, onboarding_initialized: bool) -> bool {
+    onboarding_initialized && pending.swap(false, Ordering::AcqRel)
 }
 
 pub fn request_url(url: &str) -> Result<()> {
@@ -219,6 +223,15 @@ fn connect_nonblocking(path: &Path) -> std::io::Result<UnixStream> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cold_open_waits_for_onboarding_without_losing_the_request() {
+        let pending = AtomicBool::new(true);
+        assert!(!take_open_when_ready(&pending, false));
+        assert!(pending.load(Ordering::Acquire));
+        assert!(take_open_when_ready(&pending, true));
+        assert!(!take_open_when_ready(&pending, true));
+    }
 
     #[test]
     fn forwarding_requires_the_exact_acknowledgement() {
@@ -428,14 +441,15 @@ mod tests {
 
     #[test]
     fn only_valid_enabled_urls_enqueue_an_open() {
-        assert!(!take_open());
+        assert!(!take_open(true));
         assert!(request_url("apparent://open").is_err());
-        assert!(!take_open());
+        assert!(!take_open(true));
         crate::handoff::enable_experiment("nativeLaunch");
         assert!(request_url("apparent://record").is_err());
-        assert!(!take_open());
+        assert!(!take_open(true));
         request_url("apparent://open").unwrap();
-        assert!(take_open());
-        assert!(!take_open());
+        assert!(!take_open(false));
+        assert!(take_open(true));
+        assert!(!take_open(true));
     }
 }

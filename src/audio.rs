@@ -117,6 +117,40 @@ fn input_level(samples: &[f32]) -> f32 {
     (mean_square.sqrt() * 4.0).clamp(0.0, 1.0)
 }
 
+/// One coherent publication from a successful PCM append, never a UI observation time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InputActivity {
+    pub count: usize,
+    pub level: f32,
+    pub captured_at: Instant,
+}
+
+impl InputActivity {
+    pub fn is_recent(self, now: Instant) -> bool {
+        self.count > 0 && now.checked_duration_since(self.captured_at)
+            .is_some_and(|age| age < Duration::from_millis(120))
+    }
+}
+
+/// Keep the shared PCM buffer for transcription. Producers lock samples -> activity;
+/// meter readers take activity alone, never samples or health. Publication is indivisible.
+fn append_pcm(
+    samples: &Mutex<Vec<f32>>,
+    activity: &Mutex<Option<InputActivity>>,
+    captured_at: Instant,
+    append: impl FnOnce(&mut Vec<f32>),
+) {
+    let Ok(mut output) = samples.lock() else { return; };
+    let before = output.len();
+    append(&mut output);
+    if output.len() > before {
+        let Ok(mut activity) = activity.lock() else { return; };
+        *activity = Some(InputActivity {
+            count: output.len(), level: input_level(&output), captured_at,
+        });
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RecordedAudio {
     pub sample_count: usize,
@@ -132,6 +166,7 @@ pub struct AudioRecorder {
     worker: Option<std::thread::JoinHandle<Result<()>>>,
     stop_sender: Option<std::sync::mpsc::Sender<()>>,
     samples: Arc<Mutex<Vec<f32>>>,
+    activity: Arc<Mutex<Option<InputActivity>>>,
     error: Arc<Mutex<Option<String>>>,
     health: Arc<Mutex<InputHealth>>,
     live: Option<crate::live_transcribe::Live>,
@@ -149,26 +184,26 @@ enum InputStream {
 }
 
 impl AudioRecorder {
-    /// A read-only view of recorded samples. A repeated count means no new input arrived.
-    #[cfg(target_os = "linux")]
-    pub fn input_activity(&self) -> Option<(usize, f32)> {
-        let samples = self.samples.lock().ok()?;
-        Some((samples.len(), input_level(&samples)))
+    /// No PCM is None; repeated reads preserve the producer count, level and timestamp.
+    pub fn input_activity(&self) -> Option<InputActivity> {
+        *self.activity.lock().ok()?
     }
     pub fn start() -> Result<Self> {
         let started = std::time::Instant::now();
         let samples = Arc::new(Mutex::new(Vec::new()));
+        let activity = Arc::new(Mutex::new(None));
         let error = Arc::new(Mutex::new(None));
         let health = Arc::new(Mutex::new(InputHealth::new(started)));
         let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
         let worker_samples = Arc::clone(&samples);
+        let worker_activity = Arc::clone(&activity);
         let worker_error = Arc::clone(&error);
         let worker_health = Arc::clone(&health);
         let worker = std::thread::Builder::new()
             .name("apparent-audio".into())
             .spawn(move || {
                 let stream =
-                    Self::open_stream(worker_samples, worker_error, Arc::clone(&worker_health)).inspect_err(|error| {
+                    Self::open_stream(worker_samples, worker_activity, worker_error, Arc::clone(&worker_health)).inspect_err(|error| {
                         if let Ok(mut health) = worker_health.lock() { health.open_failed(); }
                         crate::capture::apparent_log(format!("Microphone startup failed: {error:#}"));
                     })?;
@@ -190,6 +225,8 @@ impl AudioRecorder {
         let word_probe = crate::handoff::experiment("liveWordWarning")
             .then(|| crate::live_word_probe::Probe::start(Arc::clone(&samples)));
         #[cfg(target_os = "linux")]
+        crate::warm_recognizer::clear_if_disabled();
+        #[cfg(target_os = "linux")]
         let pause = crate::pause_transcribe::wanted()
             .then(|| crate::pause_transcribe::Pause::start(Arc::clone(&samples)))
             .and_then(|result| {
@@ -199,6 +236,7 @@ impl AudioRecorder {
             worker: Some(worker),
             stop_sender: Some(stop_sender),
             samples,
+            activity,
             error,
             health,
             live,
@@ -216,6 +254,7 @@ impl AudioRecorder {
     /// won't open never stops the recording.
     fn open_stream(
         samples: Arc<Mutex<Vec<f32>>>,
+        activity: Arc<Mutex<Option<InputActivity>>>,
         error: Arc<Mutex<Option<String>>>,
         health: Arc<Mutex<InputHealth>>,
     ) -> Result<InputStream> {
@@ -228,7 +267,7 @@ impl AudioRecorder {
         if let crate::mic::Pick::Chosen(input) = pick {
             #[cfg(target_os = "linux")]
             if let Some(source) = crate::linux::microphone::source(&input.id) {
-                match Self::open_pulse(source, samples.clone(), health.clone()) {
+                match Self::open_pulse(source, samples.clone(), activity.clone(), health.clone()) {
                     Ok(stream) => {
                         crate::capture::apparent_log(format!("Microphone: {}", input.name));
                         return Ok(stream);
@@ -240,7 +279,7 @@ impl AudioRecorder {
                 }
             }
             if let Some(device) = crate::mic::device(&input.id) {
-                match Self::open_device(&device, samples.clone(), error.clone(), health.clone()) {
+                match Self::open_device(&device, samples.clone(), activity.clone(), error.clone(), health.clone()) {
                     Ok(stream) => {
                         crate::capture::apparent_log(format!("Microphone: {}", input.name));
                         return Ok(InputStream::Cpal(stream));
@@ -258,7 +297,7 @@ impl AudioRecorder {
         {
             let source = crate::linux::microphone::source(&default.id)
                 .expect("Pulse enumeration always returns Pulse source ids");
-            match Self::open_pulse(source, samples.clone(), health.clone()) {
+            match Self::open_pulse(source, samples.clone(), activity.clone(), health.clone()) {
                 Ok(stream) => {
                     crate::capture::apparent_log(format!("Microphone: {} (default)", default.name));
                     return Ok(stream);
@@ -272,7 +311,7 @@ impl AudioRecorder {
         let device = cpal::default_host()
             .default_input_device()
             .context("No microphone is available")?;
-        let stream = Self::open_device(&device, samples, error, health)?;
+        let stream = Self::open_device(&device, samples, activity, error, health)?;
         crate::capture::apparent_log(format!(
             "Microphone: {} (default)",
             device_name(&device).unwrap_or_default()
@@ -284,12 +323,12 @@ impl AudioRecorder {
     fn open_pulse(
         source: &str,
         samples: Arc<Mutex<Vec<f32>>>,
+        activity: Arc<Mutex<Option<InputActivity>>>,
         health: Arc<Mutex<InputHealth>>,
     ) -> Result<InputStream> {
         let stream = crate::linux::microphone::Stream::start(source, move |data| {
-            if let Ok(mut output) = samples.lock() {
-                output.extend_from_slice(data);
-            }
+            let captured_at = Instant::now();
+            append_pcm(&samples, &activity, captured_at, |output| output.extend_from_slice(data));
             let peak = data.iter().map(|value| value.abs()).fold(0.0_f32, f32::max);
             if let Ok(mut health) = health.lock() {
                 health.sample(Instant::now(), peak);
@@ -301,6 +340,7 @@ impl AudioRecorder {
     fn open_device(
         device: &cpal::Device,
         samples: Arc<Mutex<Vec<f32>>>,
+        activity: Arc<Mutex<Option<InputActivity>>>,
         error: Arc<Mutex<Option<String>>>,
         health: Arc<Mutex<InputHealth>>,
     ) -> Result<cpal::Stream> {
@@ -318,7 +358,7 @@ impl AudioRecorder {
         );
         macro_rules! stream {
             ($ty:ty) => {
-                input_stream::<$ty>(&device, config, samples.clone(), error.clone(), health.clone())?
+                input_stream::<$ty>(&device, config, samples.clone(), activity.clone(), error.clone(), health.clone())?
             };
         }
         let stream = match supported.sample_format() {
@@ -400,10 +440,44 @@ fn device_name(device: &cpal::Device) -> Option<String> {
     Some(device.description().ok()?.name().to_owned())
 }
 
+fn convert_pcm<T>(
+    data: &[T], channels: usize, rate: u32, phase: &mut u32, sum: &mut f64,
+    output: &mut Vec<f32>,
+) -> f32
+where
+    T: cpal::SizedSample,
+    f32: cpal::FromSample<T>,
+{
+    let mut peak = 0.0_f32;
+    for frame in data.chunks_exact(channels) {
+        let mono = frame.iter().map(|sample| sample.to_sample::<f32>() as f64)
+            .sum::<f64>() / channels as f64;
+        let mono = if mono.is_finite() { mono } else { 0.0 };
+        // Area averaging gives a continuous-phase downmix/decimator,
+        // including non-integer ratios such as 44.1 kHz -> 16 kHz.
+        let mut remaining = SAMPLE_RATE;
+        while remaining > 0 {
+            let weight = remaining.min(rate - *phase);
+            *sum += mono * weight as f64;
+            *phase += weight;
+            remaining -= weight;
+            if *phase == rate {
+                let value = (*sum / rate as f64) as f32;
+                peak = peak.max(value.abs());
+                output.push(value);
+                *phase = 0;
+                *sum = 0.0;
+            }
+        }
+    }
+    peak
+}
+
 fn input_stream<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     samples: Arc<Mutex<Vec<f32>>>,
+    activity: Arc<Mutex<Option<InputActivity>>>,
     error: Arc<Mutex<Option<String>>>,
     health: Arc<Mutex<InputHealth>>,
 ) -> Result<cpal::Stream>
@@ -419,36 +493,15 @@ where
     Ok(device.build_input_stream::<T, _, _>(
         config,
         move |data, _| {
-            let Ok(mut output) = samples.lock() else {
-                return;
-            };
-            let before = output.len();
+            let captured_at = Instant::now();
             let mut peak = 0.0_f32;
-            for frame in data.chunks_exact(channels) {
-                let mono = frame
-                    .iter()
-                    .map(|sample| sample.to_sample::<f32>() as f64)
-                    .sum::<f64>()
-                    / channels as f64;
-                let mono = if mono.is_finite() { mono } else { 0.0 };
-                // Area averaging gives a continuous-phase downmix/decimator,
-                // including non-integer ratios such as 44.1 kHz -> 16 kHz.
-                let mut remaining = SAMPLE_RATE;
-                while remaining > 0 {
-                    let weight = remaining.min(rate - phase);
-                    sum += mono * weight as f64;
-                    phase += weight;
-                    remaining -= weight;
-                    if phase == rate {
-                        let value = (sum / rate as f64) as f32;
-                        peak = peak.max(value.abs());
-                        output.push(value);
-                        phase = 0;
-                        sum = 0.0;
-                    }
-                }
-            }
-            if output.len() > before {
+            let mut appended = false;
+            append_pcm(&samples, &activity, captured_at, |output| {
+                let before = output.len();
+                peak = convert_pcm(data, channels, rate, &mut phase, &mut sum, output);
+                appended = output.len() > before;
+            });
+            if appended {
                 if let Ok(mut health) = callback_health.lock() {
                     health.sample(Instant::now(), peak);
                 }
@@ -639,6 +692,111 @@ mod tests {
         assert_eq!(input_level(&samples), 0.0, "old sound must leave the window");
         assert!(input_level(&vec![0.2; 1280]) > 0.0);
     }
+    #[test]
+    fn recorder_activity_reports_recent_pcm_without_draining_samples() {
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let activity = Arc::new(Mutex::new(None));
+        let produced = Instant::now();
+        let recorder = AudioRecorder {
+            worker: None,
+            stop_sender: None,
+            samples: Arc::clone(&samples),
+            activity: Arc::clone(&activity),
+            error: Arc::new(Mutex::new(None)),
+            health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
+            live: None,
+            word_probe: None,
+            #[cfg(target_os = "linux")]
+            pause: None,
+        };
+        assert_eq!(recorder.input_activity(), None);
+        append_pcm(&samples, &activity, produced, |out| out.extend([0.5; 1280]));
+        let active = InputActivity { count: 1280, level: 1.0, captured_at: produced };
+        assert_eq!(recorder.input_activity(), Some(active));
+        let later = produced + Duration::from_secs(1);
+        append_pcm(&samples, &activity, later, |_| {});
+        // Health can advance independently, including an empty Pulse callback. It
+        // must not lend its timestamp to the old count/level.
+        recorder.health.lock().unwrap().sample(later, 0.9);
+        assert_eq!(recorder.input_activity(), Some(active));
+        append_pcm(&samples, &activity, later, |out| out.extend([0.0; 1280]));
+        assert_eq!(recorder.input_activity(), Some(InputActivity {
+            count: 2560, level: 0.0, captured_at: later,
+        }));
+        assert_eq!(samples.lock().unwrap().len(), 2560);
+    }
+
+    #[test]
+    fn recorder_activity_only_stamps_appended_rate_converted_pcm() {
+        for rate in [16_000, 44_100, 48_000] {
+            let samples = Mutex::new(Vec::new());
+            let activity = Mutex::new(None);
+            let mut phase = 0;
+            let mut sum = 0.0;
+            let first = Instant::now();
+            let mut append = |data: &[f32], at| append_pcm(&samples, &activity, at, |out| {
+                convert_pcm(data, 2, rate, &mut phase, &mut sum, out);
+            });
+            append(&[], first);
+            append(&[0.5], first); // incomplete stereo frame is not output PCM
+            assert_eq!(*activity.lock().unwrap(), None);
+            append(&vec![0.5; rate as usize / 50], first); // 10 ms stereo -> 160 mono
+            let active = activity.lock().unwrap().unwrap();
+            assert_eq!(active.count, 160);
+            assert_eq!(active.level, 1.0);
+            assert_eq!(active.captured_at, first);
+            let later = first + Duration::from_secs(1);
+            append(&[], later);
+            if rate > SAMPLE_RATE {
+                append(&[0.5, 0.5], later); // converter retains a fractional sample
+            }
+            assert_eq!(*activity.lock().unwrap(), Some(active), "no output means no timestamp renewal");
+            append(&vec![0.0; rate as usize / 5], later); // silence really appends
+            let quiet = activity.lock().unwrap().unwrap();
+            assert!(quiet.count > active.count);
+            assert_eq!(quiet.level, 0.0);
+            assert_eq!(quiet.captured_at, later);
+            let output = samples.lock().unwrap();
+            assert_eq!(quiet.count, output.len());
+            assert_eq!(quiet.level, input_level(&output));
+        }
+    }
+
+    #[test]
+    fn recorder_activity_publication_is_coherent_across_interleaved_append_and_failed_append() {
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let activity = Arc::new(Mutex::new(None));
+        let first = Instant::now();
+        append_pcm(&samples, &activity, first, |out| out.extend([0.5; 1280]));
+        let old = *activity.lock().unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_samples = samples.clone();
+        let worker_activity = activity.clone();
+        let later = first + Duration::from_secs(1);
+        let worker = std::thread::spawn(move || {
+            append_pcm(&worker_samples, &worker_activity, later, |out| {
+                out.extend([0.0; 1280]);
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            });
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // PCM is already extended, but publication has not happened. The reader
+        // sees the entire old snapshot, never old level + new count/time.
+        assert_eq!(*activity.lock().unwrap(), old);
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let published = *activity.lock().unwrap();
+        assert_eq!(published, Some(InputActivity { count: 2560, level: 0.0, captured_at: later }));
+        let poisoned = samples.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("synthetic append failure");
+        }).join().is_err());
+        append_pcm(&samples, &activity, later + Duration::from_secs(1), |_| panic!("must not append"));
+        assert_eq!(*activity.lock().unwrap(), published, "failed append must not refresh PCM age");
+    }
     use std::time::Duration;
 
     #[test]
@@ -707,6 +865,7 @@ mod tests {
             worker: Some(worker),
             stop_sender: Some(stop_sender),
             samples,
+            activity: Arc::new(Mutex::new(None)),
             error: Arc::new(Mutex::new(None)),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
@@ -731,6 +890,7 @@ mod tests {
             worker: None,
             stop_sender: None,
             samples: Arc::new(Mutex::new(samples)),
+            activity: Arc::new(Mutex::new(None)),
             error: Arc::new(Mutex::new(Some("Device disconnected".into()))),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,
@@ -748,6 +908,7 @@ mod tests {
             worker: Some(std::thread::spawn(|| bail!("device unavailable"))),
             stop_sender: None,
             samples: Arc::new(Mutex::new(Vec::new())),
+            activity: Arc::new(Mutex::new(None)),
             error: Arc::new(Mutex::new(None)),
             health: Arc::new(Mutex::new(InputHealth::new(Instant::now()))),
             live: None,

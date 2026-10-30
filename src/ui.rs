@@ -2232,6 +2232,10 @@ impl ApparentCoordinator {
                 .active_recording
                 .as_ref()
                 .and_then(ActiveRecording::mic_warning),
+            input_activity: self.active_recording.as_ref().and_then(|recording| match &recording.source {
+                CaptureSource::Screen { audio: Some(audio), .. } => audio.input_activity(),
+                _ => None,
+            }),
             reduced_motion: self.reduced_motion,
             style: PillStyle::current(),
         }
@@ -3274,15 +3278,19 @@ struct InputEqualizer {
 
 #[cfg(target_os = "linux")]
 impl InputEqualizer {
-    fn step(&mut self, input: Option<(usize, f32)>, reduced_motion: bool) {
-        if input.is_none_or(|(count, _)| count < self.last_count) {
+    fn step(&mut self, input: Option<crate::audio::InputActivity>, reduced_motion: bool) {
+        self.step_at(input, reduced_motion, Instant::now());
+    }
+
+    fn step_at(&mut self, input: Option<crate::audio::InputActivity>, reduced_motion: bool, now: Instant) {
+        if input.is_none_or(|input| input.count < self.last_count) {
             self.last_count = 0;
         }
         let target = match input {
-            Some((count, level)) if count > self.last_count => level,
+            Some(input) if input.count > self.last_count && input.is_recent(now) => input.level,
             _ => 0.0,
         };
-        self.last_count = input.map_or(0, |(count, _)| count);
+        self.last_count = input.map_or(0, |input| input.count);
         let alpha = if reduced_motion {
             1.0
         } else if target > self.level {
@@ -6431,17 +6439,33 @@ mod tests {
     #[test]
     fn equalizer_only_moves_for_new_samples_and_decays_on_stall() {
         let mut meter = InputEqualizer::default();
+        let now = Instant::now();
+        let input = |count, level| Some(crate::audio::InputActivity { count, level, captured_at: now });
         meter.step(None, false); // lab recording / missing microphone
         assert_eq!(meter.level, 0.0);
-        meter.step(Some((1280, 0.8)), false);
+        meter.step_at(input(1280, 0.8), false, now);
         assert!(meter.level > 0.0 && meter.level < 0.8);
         let last = meter.level;
-        meter.step(Some((1280, 0.8)), false); // same samples, not proof of continued input
+        meter.step_at(input(1280, 0.8), false, now); // same samples, not proof of continued input
         assert!(meter.level < last);
-        meter.step(Some((2560, 0.0)), true); // fresh silent callback
+        meter.step_at(input(2560, 0.0), true, now); // fresh silent callback
         assert_eq!(meter.level, 0.0);
-        meter.step(Some((128, 0.5)), true); // new capture resets count
+        meter.step_at(input(128, 0.5), true, now); // new capture resets count
         assert_eq!(meter.level, 0.5);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn equalizer_rejects_delayed_first_pcm_and_wakes_for_fresh_input() {
+        for reduced in [false, true] {
+            let mut meter = InputEqualizer::default();
+            let produced = Instant::now();
+            let resumed = produced + Duration::from_millis(121);
+            meter.step_at(Some(crate::audio::InputActivity { count: 1280, level: 0.8, captured_at: produced }), reduced, resumed);
+            assert_eq!(meter.level, 0.0);
+            meter.step_at(Some(crate::audio::InputActivity { count: 2560, level: 0.8, captured_at: resumed }), reduced, resumed);
+            assert!(meter.level > 0.0);
+        }
     }
 
     #[test]

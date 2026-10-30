@@ -30,7 +30,7 @@ pub struct Pause {
 impl Pause {
     pub fn start(samples: Arc<Mutex<Vec<f32>>>) -> Result<Self> {
         crate::warm_recognizer::clear_if_disabled();
-        if crate::handoff::experiment("warmRecognizer") {
+        if crate::handoff::warm_recognizer() {
             return Self::start_with(samples, crate::warm_recognizer::transcriber()?);
         }
         let mut model: Option<crate::speech::Incremental> = None;

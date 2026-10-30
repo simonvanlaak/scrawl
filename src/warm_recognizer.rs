@@ -256,7 +256,7 @@ static OWNER: OnceLock<Owner<ModelKey>> = OnceLock::new();
 
 /// No thread or model allocation at app launch. Called at the next recording start.
 pub fn clear_if_disabled() {
-    if (!crate::handoff::experiment("warmRecognizer") || !crate::pause_transcribe::wanted())
+    if (!crate::handoff::warm_recognizer() || !crate::pause_transcribe::wanted())
         && let Some(owner) = OWNER.get()
     {
         let _ = owner.0.send(Command::Clear);
@@ -566,25 +566,23 @@ mod tests {
     }
 
     #[test]
-    fn default_off_and_enabled_policy_are_isolated_from_process_overrides() {
+    fn default_on_policy_needs_no_experiment_override() {
         const CASE: &str = "APPARENT_WARM_POLICY_TEST";
         if let Ok(case) = std::env::var(CASE) {
             assert!(!crate::handoff::experiment("warmRecognizer"));
-            if case == "enabled" {
-                crate::handoff::enable_experiment("warmRecognizer");
-            }
+            assert_eq!(case, "default");
             let pause = crate::pause_transcribe::Pause::start(std::sync::Arc::new(
                 std::sync::Mutex::new(Vec::new()),
             ))
             .unwrap();
             let wav = crate::audio::encode_wav_16k(&[]).unwrap();
             assert!(pause.finish(&wav).unwrap().text.is_empty());
-            assert_eq!(OWNER.get().is_some(), case == "enabled");
+            assert!(OWNER.get().is_some(), "an unset config must use the warm owner");
             return;
         }
-        for case in ["off", "enabled"] {
+        for case in ["default"] {
             assert!(std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["warm_recognizer::tests::default_off_and_enabled_policy_are_isolated_from_process_overrides", "--exact"])
+                .args(["warm_recognizer::tests::default_on_policy_needs_no_experiment_override", "--exact"])
                 .env(CASE, case).status().unwrap().success());
         }
     }

@@ -88,10 +88,12 @@ on a Linux machine with Parakeet installed; `--live-speed` replays the saved WAV
 at real speed before timing finalization. Compare with a normal reprocess of the
 same bundle: chunk boundaries can change recognition even when finish is faster.
 
-## Experiment `warmRecognizer` (`src/warm_recognizer.rs`)
+## Warm recognizer (`src/warm_recognizer.rs`)
 
-Off by default; Linux local Parakeet pause transcription only. Enable with
-`"experiments": {"warmRecognizer": true}` in `~/.config/apparent/config.json`.
+On by default for Linux local Parakeet pause transcription. Set the top-level
+`"warmRecognizer": false` in `~/.config/apparent/config.json` to disable it;
+remove that key or set it to `true` to restore reuse. The old
+`experiments.warmRecognizer` flag is no longer read.
 The next recording uses one cached model/session, loaded lazily on its first
 recognition, not at app launch or capture start. It can be reused by subsequent
 recordings. One owner thread serializes recognition and owns native destruction;
@@ -109,7 +111,7 @@ selected filename for transcript metadata. Selection changes apply to the next
 capture's first recognition. A changed file identity invalidates the old cached
 model between captures; if an old lease needs to reload a replaced file, it
 fails into the existing whole-WAV fallback instead of mixing models. Recognition
-errors discard the session. Turning the experiment off, or selecting Hex/command,
+errors discard the session. Setting `warmRecognizer` to `false`, or selecting Hex/command,
 clears the cache on the next recording start (after any already-active worker
 ends). Config edits do not interrupt a capture already in progress. Hex, command,
 whole-WAV fallback, Mac speech, saved bundle formats and manual Paste are unchanged.
@@ -118,11 +120,12 @@ Local logs report load time, reuse, recognition time and idle expiry without
 transcript, audio or model paths. To measure cold versus warm, replay at least two
 recordings **in the same process** with `--live-speed`; separate `apparent reprocess`
 processes cannot share an in-memory cache. For a saved Screen bundle, use
-`apparent reprocess B --out O --bench 2 --live-speed 1 --experiment warmRecognizer`
-and compare with the same command without `--experiment warmRecognizer` (and with
-the config flag off). Use the same model and WAV. Deterministic lifecycle tests
-are not proof of real recognizer speed, transcript equivalence or GUI capture behavior; those checks
-are still required before enabling this experiment by default.
+`apparent reprocess B --out O --bench 2 --live-speed 1`
+and compare with the same command using an isolated `APPARENT_CONFIG` file with
+`"warmRecognizer": false`. Use the same model and WAV. Retaining the native
+recognizer uses additional idle RAM (about 1 GiB in a two-capture Linux VM test;
+actual use depends on the model and machine). Deterministic lifecycle tests are
+not proof of real recognizer speed, transcript equivalence or GUI capture behavior.
 
 ## Finish timing trace (`src/main.rs`)
 

@@ -102,7 +102,17 @@ class ExportAudioProof(unittest.TestCase):
                  "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0", "-c:v", "copy",
                  "-c:a", "aac", phone / "recording.mp4"])
             run([binary, "export", phone, "--out", root / "phone.mp4", "--size", "320", "--fps", "10", "--no-zoom"])
-            self.assertGreater(max(map(abs, audio(root / "phone.mp4"))), 1000)
+            native_samples = audio(root / "phone.mp4")[24000:48000]
+            self.assertGreater(max(map(abs, native_samples)), 1000)
+            crossings = sum(a <= 0 < b for a, b in zip(native_samples, native_samples[1:]))
+            self.assertAlmostEqual(crossings, 880, delta=20, msg="must prefer native 880 Hz over WAV 440 Hz")
+            run(["ffmpeg", "-v", "error", "-i", phone / "recording.mp4",
+                 "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", phone / "disjoint.mp4"])
+            phone_data.update(video="disjoint.mp4", audio=None)
+            (phone / "apparent.json").write_text(json.dumps(phone_data))
+            disjoint = run([binary, "export", phone, "--out", root / "disjoint-new/out.mp4"], success=False)
+            self.assertIn("[AUDIO_MISSING]", disjoint.stderr.decode())
+            self.assertFalse((root / "disjoint-new").exists())
 
             saved_wav = (bundle / "audio.wav").read_bytes()
             (bundle / "audio.wav").unlink()

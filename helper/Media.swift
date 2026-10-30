@@ -519,15 +519,26 @@ enum Media {
     result["audioTracks"] = audioTracks.count
     var audioOverlapsVideo = false
     for track in audioTracks {
-      let range = try await track.load(.timeRange)
-      let start = range.start.seconds
-      let end = CMTimeRangeGetEnd(range).seconds
-      if start.isFinite && end.isFinite && start < videoDuration && end > 0 && end > start {
+      if try await audioTrackOverlaps(track, start: 0, end: videoDuration) {
         audioOverlapsVideo = true
       }
     }
     result["audioOverlapsVideo"] = audioOverlapsVideo
     return result
+  }
+
+  /// A track's timeRange can include empty edit-list padding before its media.
+  /// Admission and export must both find an actual, nonempty media segment.
+  static func audioTrackOverlaps(_ track: AVAssetTrack, start: Double, end: Double) async throws -> Bool {
+    for segment in try await track.load(.segments) where !segment.isEmpty {
+      let range = segment.timeMapping.target
+      let first = range.start.seconds
+      let last = CMTimeRangeGetEnd(range).seconds
+      if first.isFinite && last.isFinite && first < end && last > start && last > first {
+        return true
+      }
+    }
+    return false
   }
 
   /// Decodes frames as raw RGBA8 (`frame-NNNN.rgba`), either sampled every `everyMs` (nearest

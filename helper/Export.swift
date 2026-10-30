@@ -472,12 +472,9 @@ enum Exporter {
       // Match admission: a disjoint first track must not hide a usable second track.
       var selectedTrack: AVAssetTrack?
       for candidate in try await source.loadTracks(withMediaType: .audio) {
-        let range = try await candidate.load(.timeRange)
-        let start = range.start.seconds
-        let end = CMTimeRangeGetEnd(range).seconds
         let wantedStart = Double(plan.audioStartMs) / 1000
         let wantedEnd = wantedStart + Double(plan.audioLengthMs) / 1000
-        if start.isFinite && end.isFinite && start < wantedEnd && end > wantedStart && end > start {
+        if try await Media.audioTrackOverlaps(candidate, start: wantedStart, end: wantedEnd) {
           selectedTrack = candidate
           break
         }

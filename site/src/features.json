@@ -48,6 +48,23 @@
       "docs": ["site/docs/social-preview.md"]
     },
     {
+      "id": "hosted-sync",
+      "group": "delivery",
+      "name": "Hosted complete-bundle handoff",
+      "says": "Explicit upload login queues new GUI captures without waiting for the network. Clipboard text includes a non-secret ID and remote fetch instruction while pending. A separate read login retrieves and validates the complete bundle; failures preserve the local original.",
+      "status": "experiment:hostedSync",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Default off; CLI sign-in only. Candidate requires native capture/paste proof on each OS and deployed account approval. V1 rejects files above 90,000,000 bytes rather than omitting media. No automatic historical uploads. Explicit cloud upload creates a fresh ID; cloud retry keeps existing IDs. Device grants require reauthorization after 30 days.",
+      "config": [
+        { "key": "cloud.enabled", "value": "boolean; false by default", "does": "Enable the automatic upload queue only with experiment and consent" },
+        { "key": "cloud.uploadConsent", "value": "boolean; false by default", "does": "Record explicit permission to share capture contents" },
+        { "key": "cloud.server", "value": "HTTPS API origin; loopback HTTP for development", "does": "Select the hosted account API, not a token or preference store" }
+      ],
+      "docs": ["docs/hosted-client.md", "docs/hosted-api.md"]
+
+    },
+    {
       "id": "native-launch",
       "group": "install",
       "name": "Open the installed app by URL",
@@ -85,6 +102,7 @@
       "name": "Interactive homepage belief",
       "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
       "status": "main",
+      "added": "2026-10-30",
       "platforms": ["mac", "linux"],
       "docs": ["site/docs/belief-release.md"]
     },
@@ -273,6 +291,7 @@
       "name": "Local capture inspection and explicit stop/cancel",
       "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
       "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "added": "2026-10-28",
       "platforms": ["mac", "linux"],
       "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
       "docs": ["docs/capture.md", "docs/linux.md"]
@@ -972,6 +991,7 @@
       "name": "apparent export",
       "says": "One .mp4 with ink, pins, clicks and aligned recorded audio. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
@@ -993,6 +1013,7 @@
       "name": "Local timed export narration",
       "says": "Explicit --narration script generates Kokoro bm_fable speech locally for the export only; --no-audio deliberately exports silence. Sources stay unchanged.",
       "status": "experiment:exportNarration",
+      "added": "2026-10-30",
       "platforms": ["mac", "linux"],
       "note": "Requires separate verified worker/model provisioning. Native platform proof remains required before release.",
 
@@ -1092,6 +1113,7 @@
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]

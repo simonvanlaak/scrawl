@@ -28,6 +28,19 @@ Rows for draggable lists (`Permission::draggable`: Screen Recording, Accessibili
 
 ## Settings (`src/settings.rs`, `helper/Settings.swift`)
 
+The shared config writer serializes CLI and GUI processes with a private
+`config.json.lock` sidecar, held from before the file read until atomic publication.
+Experiment edits include the nested map read in that transaction. Each writer
+rereads the latest object, preserves unknown keys and secrets, writes a unique
+`0600` temporary file, syncs it, then renames it inside a pinned canonical parent
+directory. Config and lock symlinks are refused; the lock must be an owned private
+regular file with one link. Parent directories must be trusted (a private ancestor
+may protect otherwise group-writable descendants). The lock contains no preferences
+and is not removed on unlock. Existing malformed/unreadable config still fails
+closed. External editors do not acquire this advisory lock; normal setting read
+timing is unchanged. Hosted operations acquire their queue lock before this lock,
+never in reverse, and no network operation holds the config lock.
+
 Native URL launch is a separate default-off experiment. See [native launch](native-launch.md)
 for the exact `apparent://open` contract, explicit Linux handler registration and OS checks.
 

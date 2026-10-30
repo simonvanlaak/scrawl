@@ -5,3 +5,5 @@ dist-apparent
 dist-ssr
 .wrangler/state
 .wrangler/tmp
+
+dist-feature-grid

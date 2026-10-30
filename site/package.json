@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.ts",
     "preview": "vite preview",
+    "test:video": "node --test scripts/test-video-demo.mjs",
     "generate:og-video": "node scripts/og-video/capture.mjs"
   },
   "dependencies": {

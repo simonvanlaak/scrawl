@@ -2,6 +2,8 @@
 
 This is repository agent tooling, **not** an `apparent` app subcommand or an automatic capture change. It never adds narration to a bundle, microphone WAV, contact sheet or source movie. First record and inspect real evidence with `skills/make-it-apparent/SKILL.md`. If useful, run the installed app's `apparent export` for its activity camera first; this helper accepts that existing movie too. No Rust build or app restart is needed.
 
+For a normal product walkthrough, start the verified running GUI through its configured recording shortcut, retain the exact owned `capture_id` from `apparent capture state`, wait for `recording`, then finish only that capture with `apparent capture stop <capture_id>`. Inspect the exact completed bundle before rendering. Check the actual source and final crop retain the real recording pill whenever it is promised; never add a simulated pill. Timed `record --duration` is a separate recorder fallback with no normal GUI pill or click/Shift-ink telemetry, not equivalent product proof. Disclose it as such. See `docs/capture.md` for safe capture ownership and permissions.
+
 ## Setup and run
 
 Requires Python 3.11+, `uv`, FFmpeg/ffprobe with libx264 and AAC, and a regular sans-serif TTF. `uv` installs the helper's declared Pillow and edge-tts dependencies in an isolated environment. Linux is exercised; macOS commands and fonts are not yet exercised. No Mac allocation is required for Linux postproduction. Select an actual installed font path on your host (the Linux example below is not a Mac font path).

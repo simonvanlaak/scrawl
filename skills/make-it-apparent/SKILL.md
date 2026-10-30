@@ -25,6 +25,7 @@ The output directory must be new. The font example is Linux-specific; select a r
 
 Use measured `--crop x,y,width,height` for useful close-ups, and put `--caption-box x,y,width,height` in empty output space, away from results. Default output is 1440×900 with white regular 32 px sans-serif, padded rounded dark translucent boxes. The top-left disclosure also needs clear space. Keep captions to two short lines and natural spoken sentences. Reject overlapping/out-of-range cues and speech that exceeds its real window: shorten text rather than rush speech, retime real actions or invent claims. The helper emits H264/AAC/YUV420p faststart MP4 at 30 fps, fully decodes it and retains provenance/timing/QA reports; it does not certify truth, privacy or semantic caption placement. Inspect the complete `share.mp4`, caption boundaries, audio and final caveat before delivering it. Tooling has been exercised on Linux; macOS execution is not yet verified.
 
+
 ## Point out the claim
 
 1. Write one viewer question: “Can I now ___?” Choose a single real scenario that answers it. If motion or interaction adds nothing, use before/after screenshots or a written result instead of forcing a video. For a bug fix, show the old failure if a safe capture exists, then the same task succeeding; never stage an old failure on the new build.
@@ -45,7 +46,11 @@ For a browser-only change, an existing browser recorder may be more precise **if
 
 ## Record the proof with Apparent
 
-Check `apparent record --help` on the **installed** app. For a fixed-duration desktop take, choose the known window and perform the action *while* recording:
+For a normal product walkthrough, use the actual running GUI's recording shortcut. Verify its executable/build and `apparent capture state` first; do not start if another capture is selecting, starting, recording or processing. Start with the configured shortcut (`apparent shortcut record` on Linux), then read `apparent capture state` and retain the exact owned `capture_id`. Wait for `recording`, inspect the real recording pill, perform the action, and stop only that ID with `apparent capture stop <capture_id>`. Never toggle the shortcut to stop an unknown recording. Retain the exact completed bundle path and inspect/export that bundle; see `docs/capture.md` for the control protocol and permissions.
+
+The GUI path supplies the normal recording pill and, where input permissions allow, clicks, marks and cursor telemetry for activity zoom. Inspect decoded source frames and the final crop: when the pill is promised, both must retain the **real pill** without a caption covering it. A selected-window source may omit surrounding controls. Reframe or record the appropriate display; never composite a fake pill.
+
+Timed `record --duration` is a **separate recorder fallback**: it has no normal GUI recording pill and no click/Shift-ink telemetry. Use it only when the GUI route is unavailable or that separate recorder is deliberately being tested. Disclose those limits; a native timed clock take is not normal product-walkthrough proof. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
 
 ```sh
 apparent record --window 'Window title or app' --duration 15 --out /absolute/private/path/walkthrough.apparent
@@ -59,13 +64,13 @@ Read `summary.md` and `apparent.json`; open `contact-sheet.png` and the relevant
 
 For appearance changes, distinguish offscreen renders from a live window: render both schemes to inspect every state, then capture the exact running build opening while the OS is already dark and switching light→dark→light in the same process. Read back the OS appearance alongside screenshots; restore its original setting. A settled screenshot checks that frame, not every transition frame or a live permission grant.
 
-If export works on this host, use `--fps 30` (or `--fps 60` on explicit request) and add zoom only when it helps. Do not hand back a 60 fps original by accident:
+If export works on this host, use `--fps 30` (or `--fps 60` on explicit request). Smooth activity zoom is on by default; keep it on for demos. Use `--no-zoom` only for an intentionally static share copy (for example, a motion-sensitive viewer or a fixed-frame comparison). Do not hand back the unprocessed original or a 60 fps original by accident:
 
 ```sh
 apparent export /absolute/private/path/walkthrough.apparent --out /absolute/private/path/walkthrough.mp4 --fps 30
 ```
 
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed captions. Run the required proof-video helper above on the existing movie for the narrated share copy. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; `ffprobe` verifies format, not truth or privacy. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
+Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Check installed `export --help` before using the flags: older builds require `--zoom` to opt in, whereas current builds use `--no-zoom` to opt out. Compare the exported video to the source and watch it end-to-end too. If no camera motion appears, inspect the interaction telemetry rather than claiming the default flag guarantees motion. Browser-only recordings bypass Apparent's camera planner; prefer an Apparent capture of the browser when polished interaction zoom is required, and disclose an unpolished fallback rather than calling it equivalent. Ordinary Apparent export supplies crop/zoom and recorded audio, not timed captions. Run the required proof-video helper above for the narrated share copy; it does not add caption or speed flags to ordinary export. Never overlay a success claim before the result exists. Check the final file opens in the intended player; `ffprobe` verifies format, not truth or privacy. If source media or Apparent is unavailable, report the blocker and provide a screenshot or written trace, never a claimed video.
 
 ## Hand it back
 

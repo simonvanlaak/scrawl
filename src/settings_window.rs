@@ -1810,9 +1810,6 @@ impl SettingsWindow {
                     .into_any_element(),
             ],
         ));
-        if state.update_check.checking {
-            column = column.child(caption(theme, "Checking for updates…", false));
-        }
         if !state.updates {
             column = column.child(caption(
                 theme,
@@ -2162,6 +2159,14 @@ impl Render for SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_check_has_one_progress_indicator() {
+        let source = include_str!("settings_window.rs");
+        let source = source.split("mod tests {").next().unwrap();
+        assert!(source.contains("\"Checking…\""));
+        assert!(!source.contains("\"Checking for updates…\""), "the button already shows progress");
+    }
 
     #[test]
     fn settings_renderer_tracks_the_linux_system_appearance() {

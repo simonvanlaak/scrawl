@@ -46,6 +46,25 @@ The picker opens on the pointer's display and follows the pointer between displa
 
 On Linux/Hyprland, the picker and capsule use XWayland windows positioned through the Linux UI adapter. The selected output's RandR rectangle anchors a Region crop within its PipeWire stream; the Hyprland portal mapping ID checks the output name before a multi-output capture can begin. See `docs/linux.md` for the mixed-scale two-output Omarchy VM check and its limits. This is not a claim about other Wayland portal backends or mirrored displays.
 
+## Agent control of the running GUI
+
+`apparent capture state` reads the running GUI over a same-user Unix socket and prints JSON with
+`phase` (`idle`, `selecting`, `starting`, `recording`, `processing`, or `completed`) and a
+`capture_id` only while a capture is pending or active. `starting` means no real screen frame has
+arrived yet (on Linux this includes a pending portal chooser); it is **not** proof of recording.
+The ID is random per capture, including a switch to a new target. It is not a bundle path or a
+claim of who started the capture. Never cancel a capture merely because one is present: obtain
+the ID from a start you initiated and compare it with a fresh state read.
+
+`apparent capture stop <capture_id>` finishes only that capture after a frame arrives;
+`apparent capture cancel <capture_id>` discards it even while pending. A mismatched ID or a stop
+while still starting fails without acting. An already ended ID returns `already_ended`, so retries
+do not toggle, start, or alter a newer capture. These commands control the GUI, not a separate
+blocking `record --duration` process. They require a running app and return errors if its control
+socket cannot answer. Neither sends a capture to a chat; finishing uses the ordinary local bundle
+and clipboard path. A `stopping` reply means finalization has begun, not that the bundle has
+already been saved; read state again to observe processing or completion.
+
 ## Capture history
 
 In **Open Latest Capture**, the review window shows Newer and Older buttons and a position in the capture history. It reads completed `.apparent` bundles from the configured captures directory in reverse creation order, skips cancelled or invalid manifests, and loads images for the selected capture only. The first and last entries have no button past the end. The review window's Copy and Show in Files act on the capture currently open, not the newest one.

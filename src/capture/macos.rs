@@ -998,6 +998,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         stopping: thread_stopping,
         urgent: thread_urgent,
         frames: thread_frames,
+        real_frame_seen: thread_real_frame_seen,
         video_offset_ms: thread_offset,
     } = sampler;
     let initial_excluded = excluded_window_ids
@@ -1071,13 +1072,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             let frame = filter_and_config
                 .as_ref()
                 .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
-            push_sck_candidate(
-                &mut thread_frames
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-                frame,
-                urgent,
-            );
+            push_sck_candidate(&thread_frames, &thread_real_frame_seen, frame, urgent);
         }
         thread::park_timeout(Duration::from_millis(30));
     }
@@ -1091,12 +1086,13 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
 }
 
 fn push_sck_candidate(
-    buffer: &mut crate::capture::CandidateBuffer,
+    frames: &Mutex<crate::capture::CandidateBuffer>,
+    real_frame_seen: &AtomicBool,
     frame: Option<RgbaFrame>,
     urgent: bool,
 ) {
     if let Some(frame) = frame {
-        buffer.push(frame, urgent);
+        super::push_candidate(frames, real_frame_seen, frame, urgent, true);
     }
 }
 
@@ -1852,15 +1848,19 @@ mod tests {
 
     #[test]
     fn failed_sck_screenshot_does_not_insert_demo_pixels() {
-        let mut candidates = crate::capture::CandidateBuffer::new(1 << 20);
-        push_sck_candidate(&mut candidates, None, true);
-        assert_eq!(candidates.len(), 0);
+        let candidates = Mutex::new(crate::capture::CandidateBuffer::new(1 << 20));
+        let real_frame_seen = AtomicBool::new(false);
+        push_sck_candidate(&candidates, &real_frame_seen, None, true);
+        assert_eq!(candidates.lock().unwrap().len(), 0);
+        assert!(!real_frame_seen.load(Ordering::Acquire));
         push_sck_candidate(
-            &mut candidates,
+            &candidates,
+            &real_frame_seen,
             Some(RgbaFrame::new(220, 4, 4, vec![0; 64])),
             false,
         );
-        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates.lock().unwrap().len(), 1);
+        assert!(real_frame_seen.load(Ordering::Acquire));
     }
     #[test]
     fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {

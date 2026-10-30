@@ -27,7 +27,24 @@ For interaction-driven camera motion, use the running app's normal recording sho
 ]
 ```
 
-Write natural short sentences tied to actual visible evidence. Notes are factual context, not inferred pass/fail claims. The app never calls a model to invent explanation. Cues must be finite, ordered, non-overlapping, within movie duration, nonempty and at most two lines. Gaps are caption-free and silent unless reviewed source audio is kept. Synthesized speech must fit its window with 100 ms spare. If it does not fit, shorten the text or choose a longer evidenced window: never rush speech or retime real actions. Default voice is **en-GB-RyanNeural at +10%**, not Nova. New text needs a new render directory, not a new recording.
+Write natural short sentences tied to actual visible evidence. Notes are factual context, not inferred pass/fail claims. The app never calls a model to invent explanation. Cues must be finite, ordered, non-overlapping, within movie duration, nonempty and at most two lines. Gaps are caption-free and silent unless reviewed source audio is kept. Synthesized speech must fit its window with 100 ms spare. If it does not fit, shorten the text or choose a longer evidenced window: never rush speech. Default voice is **en-GB-RyanNeural at +10%**, not Nova. New text needs a new render directory, not a new recording.
+
+## Optional gap compression
+
+Original time is still the default (`--no-compression` makes that explicit). Within the existing experiment, `--compress-gaps` speeds only intervals outside generated narration, readable captions and protected source ranges. Default `--gap-rate 4` and `--gap-padding 0.25` retain 250 ms of natural breathing room on each side of each real-time span. Leading and trailing gaps are eligible too. Rate must be finite and in [1,16]; padding must be finite and in [0,5] seconds. These are postproduction options, not recording settings; ordinary human `apparent export` never uses them.
+
+```sh
+apparent walkthrough export /private/take.apparent \
+  --experiment agentWalkthrough --cues /private/cues.json \
+  --out-dir /private/short-share --source-audio drop --allow-online-tts \
+  --compress-gaps --protect-range 6,9
+```
+
+`--protect-range START,END` is repeatable and uses **source movie seconds**, not output time. Use it for latency measurements, animations and proof whose real duration matters. Compression is not a semantic silence detector: it uses the decoded generated speech schedule, never microphone silence. The entire decoded clip, including any provider padding, stays at tempo 1. Speech is synthesized/measured before the map is built. With voice and captions, a caption stays at least 1 second and 15 characters/second (or through the speech end, whichever is longer); an insufficient cue window fails rather than truncating text. Unused tail inside a long cue window can then accelerate. Without voice, caption windows stay intact; without captions, only speech and explicit ranges protect time. With both off, only explicit ranges protect time.
+
+Compression requires `--source-audio drop`, even if no source audio stream is detected. `keep` plus compression fails before rendering; source audio is never truncated, retimed or overlapped to make it fit. All source files remain untouched. A small “4× sped up” indicator appears only during accelerated output intervals. Do not claim real-time latency from those intervals. Video is sampled at 30 fps, so mapped visual boundaries have frame-level quantization; speech placement is rounded to one 48 kHz sample and SRT to milliseconds.
+
+`provenance.json` records the single continuous piecewise `time_map` (source/output start/end and rate), protected ranges, output duration and mapped captions. This same map drives video timestamps, speech placement, burned captions/SRT and speech timing report source/output positions. `timing-report.json` retains decoded speech extents, not cue-window ends. For a no-network revision, `--speech-dir /private/prior-share` reuses its `cue-NNN.mp3` files only when its `cues.json` exactly matches; copied clip hashes enter provenance and clips are decoded/measured again. This explicitly trusts the supplied reviewed clips, not a claim that the service generated their content. New or changed text needs new speech.
 
 ## Privacy and independent switches
 
@@ -48,7 +65,7 @@ External prerequisites, on both macOS and Linux:
 - A regular sans-serif TTF. Linux DejaVu Sans and macOS supplemental Arial locations are checked; use `--font /absolute/path/font.ttf` if absent. Font appearance on macOS is not yet verified.
 - The ordinary installed app/export prerequisites, including the signed Mac helper on macOS.
 
-`--crop full|auto|x,y,w,h` uses the existing bundle exporter (rectangle coordinates are source pixels). Activity camera zoom is on by default; `--no-zoom` fixes the view. With no interaction telemetry it stays still. Output is H264/YUV420p, 1440×900 at 30 fps, AAC when audio is present, faststart. Other aspect ratios are letterboxed. Real duration and chronological action order remain unchanged.
+`--crop full|auto|x,y,w,h` uses the existing bundle exporter (rectangle coordinates are source pixels). Activity camera zoom is on by default; `--no-zoom` fixes the view. With no interaction telemetry it stays still. Output is H264/YUV420p, 1440×900 at 30 fps, AAC when audio is present, faststart. Other aspect ratios are letterboxed. Chronological order always remains unchanged; duration remains unchanged unless gap compression is explicitly selected.
 
 Caption style: regular 32 px white text, 15 px padding, radius 8, dark alpha 220 box, bottom safe area. Keep explanatory lines short. A disclosure occupies the upper left. Inspect actual output for semantic occlusion: bounds validation cannot know which result your caption hides. The standalone helper additionally has measured `--crop` and `--caption-box` controls for existing non-bundle movies; that is not fresh Apparent capture proof.
 

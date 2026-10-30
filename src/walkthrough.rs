@@ -29,7 +29,7 @@ pub enum WalkthroughCommand {
         #[arg(long)]
         template: Option<PathBuf>,
     },
-    /// Render a separate narrated/captioned share copy. Never retimes real actions.
+    /// Render a separate narrated/captioned share copy; original time unless explicitly compressed.
     Export {
         bundle: PathBuf,
         /// Opt into the off-by-default rendering experiment for this process only.
@@ -50,6 +50,22 @@ pub enum WalkthroughCommand {
         no_voice: bool,
         #[arg(long)]
         no_captions: bool,
+        /// Speed gaps outside measured speech/readable captions. Requires source-audio drop.
+        #[arg(long, conflicts_with = "no_compression")]
+        compress_gaps: bool,
+        /// Keep original time (the default).
+        #[arg(long)]
+        no_compression: bool,
+        #[arg(long, default_value_t = 4.0)]
+        gap_rate: f64,
+        #[arg(long, default_value_t = 0.25)]
+        gap_padding: f64,
+        /// Source seconds START,END to preserve at real time; repeat as needed.
+        #[arg(long)]
+        protect_range: Vec<String>,
+        /// Reuse reviewed cue-NNN.mp3 files and matching cues.json without network TTS.
+        #[arg(long)]
+        speech_dir: Option<PathBuf>,
         /// No audio at all. Implies no voice and requires source-audio drop.
         #[arg(long)]
         silent: bool,
@@ -194,6 +210,12 @@ pub fn run(command: WalkthroughCommand) -> Result<Value> {
             allow_online_tts,
             no_voice,
             no_captions,
+            compress_gaps,
+            no_compression,
+            gap_rate,
+            gap_padding,
+            protect_range,
+            speech_dir,
             silent,
             zoom,
             crop,
@@ -209,7 +231,7 @@ pub fn run(command: WalkthroughCommand) -> Result<Value> {
                 "--silent requires --source-audio drop"
             );
             ensure!(
-                no_voice || silent || allow_online_tts,
+                no_voice || silent || allow_online_tts || speech_dir.is_some(),
                 "voice is on by default: --allow-online-tts sends cue text only, or use --no-voice/--silent"
             );
             let evidence = inspect(&bundle, None)?;
@@ -287,6 +309,20 @@ pub fn run(command: WalkthroughCommand) -> Result<Value> {
                 });
             if !zoom {
                 child.arg("--no-zoom");
+            }
+            if compress_gaps {
+                child.arg("--compress-gaps");
+            }
+            if no_compression {
+                child.arg("--no-compression");
+            }
+            child.arg("--gap-rate").arg(gap_rate.to_string());
+            child.arg("--gap-padding").arg(gap_padding.to_string());
+            for range in protect_range {
+                child.arg("--protect-range").arg(range);
+            }
+            if let Some(path) = speech_dir {
+                child.arg("--speech-dir").arg(path);
             }
             if allow_online_tts {
                 child.arg("--allow-online-tts");

@@ -25,7 +25,7 @@
       "id": "agent-walkthrough",
       "group": "export",
       "name": "Two-pass agent walkthrough CLI",
-      "says": "Record real actions, inspect saved evidence and movie-clock timings, then export agent-written cues with independent captions and consented synthetic narration. Raw evidence stays intact.",
+      "says": "Record real actions, inspect saved evidence and movie-clock timings, then export agent-written cues with independent captions and consented synthetic narration. Optional gap compression preserves measured speech and protected proof ranges with an explicit source/output map. Raw evidence stays intact; original time is the default.",
       "status": "experiment:agentWalkthrough",
       "platforms": ["linux", "mac"],
       "note": "Shared CLI implementation. Linux disposable capture/export proof required; macOS execution remains an unverified gate. Python 3.11+, Pillow, Edge TTS (voice only), FFmpeg and a TTF are external prerequisites; no automatic installs.",

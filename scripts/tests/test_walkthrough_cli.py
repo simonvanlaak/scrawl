@@ -54,6 +54,16 @@ class WalkthroughCli(unittest.TestCase):
             self.assertEqual(before, {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.iterdir()})
             provenance = json.loads(Path(result['provenance']).read_text())
             self.assertEqual(provenance['evidence_sha256'], before)
+            self.assertEqual(provenance['output_duration'], 3)
+            compressed = export.copy()
+            compressed[compressed.index('--out-dir') + 1] = root / 'compressed'
+            compressed += ['--compress-gaps', '--no-captions', '--protect-range', '1,2']
+            short = cli(*compressed)
+            policy = json.loads(Path(short['provenance']).read_text())
+            self.assertLess(policy['output_duration'], 3)
+            self.assertEqual(policy['evidence_sha256'], before)
+            self.assertTrue(any(s['rate'] > 1 for s in policy['time_map']))
+            self.assertIn('cannot be used', cli(*compressed, '--no-compression', ok=False))
             cli(*export, ok=False)
             forbidden = export.copy()
             forbidden[forbidden.index('--out-dir') + 1] = bundle / 'share'

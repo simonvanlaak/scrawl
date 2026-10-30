@@ -3,6 +3,7 @@ import { BeliefPond } from "./BeliefPond"
 import { FrogPond } from "./FrogPond"
 import { GithubStars } from "./GithubStars"
 import { Footer } from "./Footer"
+import { Team } from "./Team"
 
 export function App() {
   return (
@@ -11,6 +12,7 @@ export function App() {
         <a className="brand" href="#top" aria-label="Apparent home">
           <img src="/apparent-wordmark.svg" width={149} height={35} decoding="async" alt="apparent" />
         </a>
+        <a className="pond-team-link" href="#team">Team</a>
         <GithubStars />
       </header>
       <main>
@@ -22,6 +24,7 @@ export function App() {
           </div>
         </section>
         <BeliefPond />
+        <Team />
       </main>
       <Footer />
     </div>

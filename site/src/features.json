@@ -22,17 +22,6 @@
   ],
   "features": [
     {
-      "id": "site-team",
-      "group": "install",
-      "name": "Homepage team",
-      "says": "The public homepage shows Olivia and Simon with uncropped portraits and links each affiliation logo to its organization.",
-      "status": "review:#138",
-      "added": "2026-10-30",
-      "platforms": ["mac", "linux"],
-      "pr": 138,
-      "docs": ["site/docs/clanker-deploy.md"]
-    },
-    {
       "id": "site-frog-footer",
       "group": "install",
       "name": "Frog theatre feedback footer",

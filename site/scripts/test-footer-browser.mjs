@@ -99,7 +99,7 @@ try{
     assert.equal(await page.locator('.pond-cover-frog').count(),1)
     assert.equal(await page.locator('.video-demo video').count(),1)
     assert.equal(await page.locator('#make-room').count(),1)
-    assert.equal(await page.locator('.pond-team').count(),1)
+    assert.equal(await page.locator('.pond-team').count(),0)
     assert.deepEqual(errors,[])
     results.push({width,...geometry,status:'PASS'})
     await page.close()

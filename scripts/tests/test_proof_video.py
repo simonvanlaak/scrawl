@@ -70,7 +70,7 @@ class Export(unittest.TestCase):
             cues.write_text(json.dumps(windows))
             for name, flags in [('default', []), ('compressed', ['--compress-gaps']) , ('protected', ['--compress-gaps', '--no-captions', *[v for a,b,_ in windows for v in ['--protect-range', f'{a},{b}']]])]:
                 out = root / name
-                p = subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'drop', '--no-voice', '--gap-padding', '0', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', *flags], capture_output=True)
+                p = subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'drop', '--no-voice', '--gap-padding', '0', '--font', FONT, *flags], capture_output=True)
                 self.assertEqual(p.returncode, 0, p.stderr.decode()[-2000:])
                 policy = json.loads((out / 'provenance.json').read_text())
                 self.assertEqual(policy['output_duration'], 30) if not flags else self.assertLess(policy['output_duration'], 30)
@@ -84,7 +84,7 @@ class Export(unittest.TestCase):
             cues = root / 'cues.json'
             cues.write_text('[[1,2,"Visible state."]]')
             out = root / 'out'
-            result = subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'drop', '--silent', '--no-captions', '--compress-gaps', '--protect-range', '3,4', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'], capture_output=True)
+            result = subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'drop', '--silent', '--no-captions', '--compress-gaps', '--protect-range', '3,4', '--font', FONT], capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             policy = json.loads((out / 'provenance.json').read_text())
             self.assertLess(policy['output_duration'], 4)
@@ -112,7 +112,7 @@ class Export(unittest.TestCase):
             (speech / 'cues.json').write_bytes(cues.read_bytes())
             for i in range(2):
                 proof.run('ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.4', speech / f'cue-{i:03}.mp3')
-            base = [sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--source-audio', 'drop', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+            base = [sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--source-audio', 'drop', '--font', FONT]
             for name, switches in [('compressed', ['--compress-gaps', '--speech-dir', str(speech)]), ('voice-only', ['--compress-gaps', '--speech-dir', str(speech), '--no-captions']), ('caption-only', ['--compress-gaps', '--no-voice']), ('original', ['--no-compression', '--speech-dir', str(speech)])]:
                 out = root / name
                 p = subprocess.run([*base, '--out-dir', str(out), *switches], capture_output=True)

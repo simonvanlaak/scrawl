@@ -17,7 +17,7 @@ export function App() {
       <main>
         <FrogPond />
         <section className="pond-demo" aria-label="See Apparent in action">
-          <h2>See what Apparent captures</h2>
+          <h2>See what <span>apparent</span> captures</h2>
           <div className="demo-section" id="demo" aria-label="Product demo">
             <Demo />
           </div>

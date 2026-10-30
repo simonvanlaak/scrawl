@@ -5,9 +5,10 @@
 //! transcription).
 //!
 //! The encoder is the first one installed of `x264enc` (gst-plugins-ugly), `openh264enc`
-//! (gst-plugins-bad) and VA-API's. With none, Apparent records no movie and keeps sharper
-//! candidates instead (`capture::CANDIDATE_EDGE_NO_VIDEO`), as it does whenever a movie fails.
+//! (gst-plugins-bad) and VA-API's. A missing encoder refuses to start a screen capture;
+//! a movie that fails after capture starts still retains the candidate frames.
 
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -73,6 +74,132 @@ pub fn can_record_video() -> bool {
     init().is_ok() && encoder().is_some()
 }
 
+fn encoder_repair_for(distro: &str) -> &'static str {
+    match distro {
+        "arch" | "archarm" | "omarchy" | "manjaro" | "endeavouros" => {
+            "sudo pacman -S gst-plugins-ugly"
+        }
+        "ubuntu" | "debian" | "linuxmint" | "pop" => "sudo apt install gstreamer1.0-plugins-ugly",
+        "fedora" => "sudo dnf install gstreamer1-plugins-ugly",
+        _ => "Install your distribution's GStreamer H.264 encoder (often gst-plugins-ugly)",
+    }
+}
+
+fn host_distro() -> String {
+    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    os_release
+        .lines()
+        .find_map(|line| line.strip_prefix("ID="))
+        .unwrap_or_default()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// Check before starting a screen capture, including the CLI path. Never install packages here.
+pub fn encoder_warning() -> Option<String> {
+    static CHECK: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    let result = CHECK.get_or_init(|| {
+        init().map_err(|error| error.to_string())?;
+        let selected = encoder().ok_or("No H.264 encoder plugin is installed")?;
+        let directory = preflight_directory().map_err(|error| error.to_string())?;
+        let movie = directory.join("encoder-check.mp4");
+        let result = encode_synthetic(&movie, selected).map_err(|error| error.to_string());
+        let _ = std::fs::remove_file(&movie);
+        let _ = std::fs::remove_dir(directory);
+        result
+    });
+    result.as_ref().err().map(|reason| {
+        encoder_diagnostic(
+            reason,
+            std::env::var_os("APPIMAGE").is_some(),
+            &host_distro(),
+        )
+    })
+}
+
+/// Exclusively create a private directory before GStreamer's filesink opens its output.
+fn preflight_directory() -> Result<PathBuf> {
+    for attempt in 0..16 {
+        let directory = std::env::temp_dir().join(format!(
+            "apparent-encoder-check-{}-{}-{attempt}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        match std::fs::DirBuilder::new().mode(0o700).create(&directory) {
+            Ok(()) => return Ok(directory),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    bail!("Could not create a private H.264 encoder-check directory")
+}
+
+fn encoder_diagnostic(reason: &str, packaged: bool, distro: &str) -> String {
+    if packaged {
+        format!(
+            "H.264 encoder failed in this Apparent AppImage ({reason}). Install a fresh Apparent AppImage; host GStreamer packages cannot repair its bundled runtime. No recording was started."
+        )
+    } else {
+        format!(
+            "H.264 encoder failed ({reason}). Install: {}. Restart Apparent, then retry. No recording was started.",
+            encoder_repair_for(distro)
+        )
+    }
+}
+
+/// Exercise the same encoder selection as real capture, then verify the resulting movie decodes.
+/// Runs in the packaged process so an installed host plugin cannot mask a missing bundled plugin.
+pub fn encoder_check(movie: &Path) -> Result<()> {
+    init()?;
+    let selected = encoder().ok_or_else(|| anyhow!("No H.264 encoder plugin is installed"))?;
+    encode_synthetic(movie, selected)?;
+    let frames = frames(movie, FrameTimes::At(&[0]), 0)?;
+    ensure!(
+        frames
+            .first()
+            .is_some_and(|frame| frame.width == 160 && frame.height == 90),
+        "H.264 movie cannot be decoded at 160x90"
+    );
+    Ok(())
+}
+
+fn encode_synthetic(movie: &Path, selected: &str) -> Result<()> {
+    let launch = format!(
+        "videotestsrc num-buffers=12 ! video/x-raw,width=160,height=90,framerate=10/1 ! videoconvert ! video/x-raw,format=I420 ! {selected} ! h264parse ! mp4mux ! filesink name=encoder_output"
+    );
+    let pipeline = gst::parse::launch(&launch)?
+        .downcast::<gst::Pipeline>()
+        .map_err(|_| anyhow!("Not a pipeline"))?;
+    pipeline
+        .by_name("encoder_output")
+        .context("Encoder pipeline has no output sink")?
+        .set_property("location", movie.to_string_lossy().as_ref());
+    let result = (|| {
+        pipeline.set_state(gst::State::Playing)?;
+        let bus = pipeline.bus().context("Encoder pipeline has no bus")?;
+        match bus.timed_pop_filtered(
+            gst::ClockTime::from_seconds(10),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        ) {
+            Some(message) => match message.view() {
+                gst::MessageView::Eos(..) => Ok(()),
+                gst::MessageView::Error(error) => bail!("H.264 encoding failed: {error}"),
+                _ => unreachable!(),
+            },
+            None => bail!("H.264 encoding timed out"),
+        }
+    })();
+    let _ = pipeline.set_state(gst::State::Null);
+    result?;
+    ensure!(
+        std::fs::metadata(movie)?.len() > 1024,
+        "H.264 movie is empty"
+    );
+    Ok(())
+}
+
 /// Check this process's registry, not the host's gst-inspect executable.
 pub fn h264_decoder_available() -> bool {
     if init().is_err() { return false; }
@@ -94,12 +221,9 @@ fn decoder_repair_for(distro: &str) -> &'static str {
 
 pub fn decoder_warning() -> Option<String> {
     if h264_decoder_available() { return None; }
-    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-    let distro = os_release.lines().find_map(|line| line.strip_prefix("ID="))
-        .unwrap_or_default().trim_matches('"');
     Some(format!(
         "H.264 decoder missing. Install: {}. Restart Apparent. MP4 recording may work, but full-quality keyframes use smaller candidate frames until fixed.",
-        decoder_repair_for(distro)
+        decoder_repair_for(&host_distro())
     ))
 }
 
@@ -415,6 +539,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         stopping,
         urgent,
         frames,
+        real_frame_seen,
         video_offset_ms,
         excluded_window_ids,
     } = sampler;
@@ -505,10 +630,9 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                 None => None,
             };
             match frame {
-                Some(frame) => frames
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(frame, is_urgent),
+                Some(frame) => crate::capture::push_candidate(
+                    &frames, &real_frame_seen, frame, is_urgent, true,
+                ),
                 None if is_urgent => urgent.store(true, Ordering::Release),
                 None => {}
             }
@@ -750,6 +874,46 @@ mod tests {
         assert_eq!(decoder_repair_for("ubuntu"), "sudo apt install gstreamer1.0-libav");
         assert_eq!(decoder_repair_for("fedora"), "sudo dnf install gstreamer1-plugin-libav");
         assert!(decoder_repair_for("other").contains("distribution"));
+    }
+
+    #[test]
+    fn encoder_repair_names_the_host_package_without_installing_it() {
+        assert_eq!(
+            encoder_repair_for("arch"),
+            "sudo pacman -S gst-plugins-ugly"
+        );
+        assert_eq!(
+            encoder_repair_for("omarchy"),
+            "sudo pacman -S gst-plugins-ugly"
+        );
+        assert_eq!(
+            encoder_repair_for("ubuntu"),
+            "sudo apt install gstreamer1.0-plugins-ugly"
+        );
+        assert_eq!(
+            encoder_repair_for("fedora"),
+            "sudo dnf install gstreamer1-plugins-ugly"
+        );
+        assert!(encoder_repair_for("other").contains("distribution"));
+        assert!(
+            encoder_diagnostic("not found", false, "omarchy")
+                .contains("sudo pacman -S gst-plugins-ugly")
+        );
+        let packaged = encoder_diagnostic("not found", true, "omarchy");
+        assert!(packaged.contains("fresh Apparent AppImage"));
+        assert!(!packaged.contains("sudo pacman"));
+    }
+
+    #[test]
+    fn encoder_preflight_uses_a_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = preflight_directory().unwrap();
+        assert_eq!(
+            std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(!directory.join("encoder-check.mp4").exists());
+        std::fs::remove_dir(directory).unwrap();
     }
 
     #[test]

@@ -115,6 +115,8 @@ jobs:
         run: APPIMAGE_EXTRACT_AND_RUN=1 "dist/${{ steps.package.outputs.name }}" --help
       - name: Bundled GStreamer decodes an H.264 MP4
         run: bash scripts/linux/check-appimage-decoder.sh "dist/${{ steps.package.outputs.name }}"
+      - name: Bundled GStreamer encodes a playable H.264 MP4
+        run: bash scripts/linux/check-appimage-encoder.sh "dist/${{ steps.package.outputs.name }}"
       - name: Run two seconds of audio with the packaged CPU backend
         run: bash scripts/linux/smoke-cpu.sh "dist/${{ steps.package.outputs.name }}" "$SPEECH_TEST"
       - uses: petarpetrovt/setup-sde@v6.0

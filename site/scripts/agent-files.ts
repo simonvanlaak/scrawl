@@ -54,7 +54,7 @@ const SAYS: Record<string, string> = {
   inspect: "print summary.md, or apparent.json with --json",
   frames: "plain PNGs of a time range; prints their paths",
   copy: "copy the capture to the clipboard",
-  export: "macOS only: one .mp4 with the ink and clicks burned in and the audio in sync (not available on Linux)",
+  export: "macOS and Linux: one .mp4 with ink, clicks, synced audio and smooth activity zoom by default (--no-zoom opts out)",
   skill: "print the agent skill without installing anything",
 }
 

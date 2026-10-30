@@ -60,9 +60,10 @@ Off by default. During a microphone recording, a separate best-effort recognizer
 
 Off by default (see Experiments in `AGENTS.md`). With it on and Apple Speech the transcriber, `AudioRecorder::start` also starts `apparent-helper transcribe-stream` (one SpeechAnalyzer, finalized results only; it never downloads a model, so one that isn't installed fails at once) and a thread that feeds it the recorder's 16 kHz buffer as `audio::pcm16` every 160 ms. `RecordedAudio.live` carries it to `transcribe::transcribe`, which sends the samples it hasn't had from the finished WAV, closes its input and waits up to 6 s for the tail; the helper must report exactly the WAV's sample count. Word times are therefore the WAV's own, and match one SpeechAnalyzer pass over `audio.wav` word for word and millisecond for millisecond (the batch path splits recordings over 22 s at silences and transcribes the pieces in parallel, so long recordings can differ from it at the cuts). Any failure is logged (`Live transcription failed, …`) and the WAV is transcribed as before; Hex, iPhone and imported recordings never stream. `apparent reprocess B --out O --bench 1 --live-speed 1` replays a bundle's audio into it in real time and logs `Live transcription: N words, … tail N ms` and the finish timings.
 
-## Experiment `pauseTranscribe` (`src/pause_transcribe.rs`, `src/speech.rs`)
+## Linux pause transcription (`src/pause_transcribe.rs`, `src/speech.rs`)
 
-Off by default on Linux with the local Parakeet transcriber. The worker reads only
+On by default on Linux with the local Parakeet transcriber, without an experiment
+flag. The separate Mac `liveTranscribe` experiment is unchanged. The worker reads only
 new microphone samples, uses `audio::speech_islands` and Hex's short-blip filter,
 and waits for at least three seconds of audio plus 700 ms of quiet before sending
 a chunk to its reusable model session. Each early chunk starts 200 ms before its
@@ -73,7 +74,7 @@ rather than dropping audio. At stop it reads the finished WAV to transcribe only
 the unprocessed tail, joins ordered text and absolute word
 times, and falls back to the normal whole-WAV path on any failure. Hex and command
 transcribers are unchanged. To compare without a live microphone, use
-`apparent reprocess B --out O --bench 1 --live-speed 1 --experiment pauseTranscribe`
+`apparent reprocess B --out O --bench 1 --live-speed 1`
 on a Linux machine with Parakeet installed; `--live-speed` replays the saved WAV
 at real speed before timing finalization. Compare with a normal reprocess of the
 same bundle: chunk boundaries can change recognition even when finish is faster.
@@ -85,6 +86,11 @@ Every successfully built bundle has `finish-trace.json` beside `apparent.json`, 
 ## Click-based visual handoff (`src/handoff.rs`, `src/sketch.rs`)
 
 The old automatic OpenCode attachment policy is inactive. The full capture, keyframes, contact sheet, and video are still built and saved. Manual Paste remains image-first; `apparent zoom` is available for closer inspection.
+`apparent copy` is text-only by default, and its confirmation points to the contact sheet. Copying or dispatching Paste does not prove a receiving composer accepted the image. Check the unsent draft; if the image is absent, attach the saved `contact-sheet.png` manually. An agent that cannot open an unattached local path must ask for the image instead of guessing a click target from coordinates or “element unavailable.”
+
+## Passive auto-crop safety (`src/autocrop.rs`)
+
+A crop inferred only from cursor dwell or screen changes must retain the frontmost regular window recorded at that keyframe's time, not just intersect a blank corner. Otherwise Apparent keeps the whole frame, after grouping and content-edge trimming. The existing focus crop inside a large window remains available when that crop was actually attributed to the frontmost window and still intersects it. Whole-capture scope keeps one shared full-frame fallback if any keyframe needs it. Deliberate input (ink, clicks, drags, laser or scroll) can still select another window. Window snapshots are never applied before their timestamps, and an app name appears in a crop label only when one of its recorded windows intersects the delivered crop. This is a correction to existing auto-crop behavior, not a new experiment; it does not change capture mode, window metadata collection or full-frame preservation.
 
 ## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
 
@@ -102,8 +108,6 @@ Off by default; Linux Hyprland Wayland only. The guarded `handoff::run_draft_han
 
 ## Experiment `autoPasteDraft` (`src/linux/auto_paste.rs`, `src/ui.rs`)
 
-Off by default; a user-directed Hyprland Wayland trial that does not need a receiver change or Accessibility setup. Finish a screen capture while leaving the keyboard caret in the intended unsent composer. When the bundle is ready, Apparent copies the text summary, samples the **currently focused** external window, and tries to paste `contact-sheet.png` followed by the summary there. It never returns to the recording's original window or changes focus. It checks window identity and clipboard content before each paste. If focus or clipboard changes, it stops; if it still owns the image selection, it replaces that selection with the summary. The summary remains on the clipboard for ordinary Ctrl+V after success or refusal. If someone copies new content during the attempt, Apparent does not replace it. A refusal points to the saved bundle. This replaces the old clipboard-restoration behavior for this experiment: the fallback needs to remain on Ctrl+V. The completed paper stays visible, and Apparent never sends the draft.
-
-This **does not verify the editor or image attachment**. A dispatched shortcut can be ignored, and focus can move inside one app window. The user must inspect the unsent draft; “Saved · check draft” is not a delivery receipt. One Ctrl+V retries the **text**, not both image and text; attach the image with Paste or manually if missing. The separate `draftHandoff` receiver contract above still refuses without a real editor/attachment observer. Ordinary Ctrl+V and Omarchy Super+V are unchanged.
+Off by default; currently **fails closed on Linux**. When enabled, a finished capture saves the bundle and copies the text summary, but does not dispatch image or text paste keystrokes. The paper says “Saved · paste manually” and points to `contact-sheet.png`: attach it in the intended unsent composer, then use Ctrl+V for the summary. Apparent never sends the draft. The prior window-only trial could paste into another T3 thread within the same window. A window address is not a stable draft/editor identity, and a paste keystroke is not an image attachment receipt. Automatic handoff must wait for a receiver that can verify the capture-start and finish target, writable composer, accepted attachment, and visible text without duplicate insertions. The explicit user-directed `apparent paste` command remains available, but it cannot prove receiver acceptance either. Ordinary Ctrl+V and Omarchy Super+V are unchanged.
 
 To compare a summary experiment on real captures, `scripts/agent-eval.sh [--experiment NAME] [--out DIR] [bundle…]` reprocesses each bundle with and without it (Kit's own `experiments` removed from the baseline's config) and writes `before.md`, `after.md`, both contact sheets and frames per bundle, and an `index.md`, by default to `~/code/home/artifacts/apparent-context/`. Both summaries come from the baseline run's transcript. What a capture recorded live (Accessibility lookups, page events) is kept as recorded, so those only show on captures made with the experiment on.

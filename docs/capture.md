@@ -28,6 +28,8 @@ Carbon hotkeys and the key event tap report presses through `emit_capture_shortc
 
 For interaction-aware agent captures, use the already-running app's recording shortcut (`apparent shortcut record` on Linux, or the configured shortcut on Mac) to start and finish. This follows the same permission rules as an ordinary app recording: macOS Accessibility for click/ink collection; Linux input-device access on supported Wayland sessions, or the X server on X11. It must not silently install a global input hook from the CLI, bypass consent, or forward a bundle to a chat. CLI `--iphone` is a separate native video/mirror path, not the timed screen path.
 
+`apparent record --window <name>` resolves against the same selectable windows as the picker. A name must match exactly one on-screen window by title or app (case-insensitive substring); an empty, missing, or ambiguous name fails before a bundle or recorder is created. Without `--window`, the CLI records the selected display. If a selected window disappears before ScreenCaptureKit starts, its filter does not fall back to a display.
+
 The sampler keeps only small candidates (480 px long edge, in a `CandidateBuffer` capped at 384 MB that thins evenly and halves its sampling rate when full, never dropping the start or click/stroke frames). At finish the chosen keyframes are decoded from `recording.mp4` at native size (2560 px Screen, 1280 px Window/Region, never above the display's own scale, so a 1x 1920 pt display records 1920 px), shifted by `videoOffsetMs` (when the movie started on the capture clock); if decoding fails the candidates are used. macOS prompts over a Screen or Area capture (`windows::system_prompts_over`: UserNotificationCenter, SecurityAgent; ScreenCaptureKit's "bypass the system private window picker" alert comes back every 30 days) are left out of the recording through the content filter when ScreenCaptureKit lists them, frames that may show one are dropped from the candidates (`CandidateBuffer::drop_since`), and clicks on them aren't recorded. `apparent capture-sim` drives this headless for memory and timing checks.
 
 Before a screen movie starts, `.unsafe-video` marks its empty output directory as unsafe to recover. A directory with existing capture files is refused rather than reused while an old recovery could be running. A successfully built bundle removes the marker; an interrupted build remains unrecoverable from the raw movie. If every safe screenshot fails, finalization leaves the raw movie in place but creates no bundle. The marker prevents both automatic orphan recovery and `apparent recover` from converting that movie into keyframes: the movie may contain a system prompt excluded by the screenshot sampler. Treat the retained movie as private raw media, not as safe material to paste or reprocess.
@@ -43,6 +45,25 @@ A capture belongs to one display: a tap takes the one under the pointer, Window 
 The picker opens on the pointer's display and follows the pointer between displays (window, Metal overlay and capsule: `follow_pointer_display`) except while an area is dragged or iPhone is shown; the overlay `move_to`s the target's display when recording starts and follows the iPhone mirror if it's dragged. The capsule (`NativePill::place_on`) sits on the display in use, `PANEL_Y` below its top or lower for a taller menu bar or the notch (`screens::pill_origin`). Test with a `CGVirtualDisplay` (see `scripts/virtual-display.swift`), never on Kit's desk Mac.
 
 On Linux/Hyprland, the picker and capsule use XWayland windows positioned through the Linux UI adapter. The selected output's RandR rectangle anchors a Region crop within its PipeWire stream; the Hyprland portal mapping ID checks the output name before a multi-output capture can begin. See `docs/linux.md` for the mixed-scale two-output Omarchy VM check and its limits. This is not a claim about other Wayland portal backends or mirrored displays.
+
+## Agent control of the running GUI
+
+`apparent capture state` reads the running GUI over a same-user Unix socket and prints JSON with
+`phase` (`idle`, `selecting`, `starting`, `recording`, `processing`, or `completed`) and a
+`capture_id` only while a capture is pending or active. `starting` means no real screen frame has
+arrived yet (on Linux this includes a pending portal chooser); it is **not** proof of recording.
+The ID is random per capture, including a switch to a new target. It is not a bundle path or a
+claim of who started the capture. Never cancel a capture merely because one is present: obtain
+the ID from a start you initiated and compare it with a fresh state read.
+
+`apparent capture stop <capture_id>` finishes only that capture after a frame arrives;
+`apparent capture cancel <capture_id>` discards it even while pending. A mismatched ID or a stop
+while still starting fails without acting. An already ended ID returns `already_ended`, so retries
+do not toggle, start, or alter a newer capture. These commands control the GUI, not a separate
+blocking `record --duration` process. They require a running app and return errors if its control
+socket cannot answer. Neither sends a capture to a chat; finishing uses the ordinary local bundle
+and clipboard path. A `stopping` reply means finalization has begun, not that the bundle has
+already been saved; read state again to observe processing or completion.
 
 ## Capture history
 

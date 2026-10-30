@@ -5,24 +5,53 @@
 }
 
 .pond-page {
+  /* Lilac and Carbon from apparent-wordmark.svg. */
+  --brand-lilac: #b7a5d8;
+  --brand-carbon: #020102;
   background: #f5f0e8;
   color: #020102;
   font-family: "Host Grotesk", Arial, sans-serif;
+}
+
+.pond-page ::selection {
+  background: var(--brand-lilac);
+  color: var(--brand-carbon);
 }
 
 .pond-nav {
   height: 65px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   max-width: 1200px;
   margin: auto;
   padding: 0 20px;
 }
 
 .pond-nav img { display: block; width: 149px; height: auto; }
-.pond-team-link { font-size: 16px; }
+.pond-team-link { margin-left: auto; margin-right: 20px; font-size: 16px; }
 .pond-team-link:hover { text-decoration: underline; text-underline-offset: 4px; }
+.pond-team-link + .github-stars { margin-left: 0; }
+.github-stars {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgb(2 1 2 / 12%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 35%);
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.github-stars:hover { background: rgb(255 255 255 / 70%); border-color: rgb(2 1 2 / 25%); }
+.github-stars-star { color: #c18b00; }
 .pond-nav a:focus-visible,
 .pond-team-profile:focus-visible,
 .pond-team-proof a:focus-visible,
@@ -118,6 +147,7 @@
 
 .pond-demo { background: #0a0a0b; color: #f4f4f5; padding: 48px 0 68px; }
 .pond-demo h2 { max-width: 1240px; margin: 0 auto 22px; padding: 0 20px; font-size: 32px; font-weight: 500; }
+.pond-demo h2 span { color: var(--brand-lilac); }
 .pond-demo .demo-section { padding-bottom: 0; }
 .pond-purpose { max-width: 1000px; margin: 90px auto; padding: 0 24px; text-align: center; }
 .pond-purpose h2 { font-size: 51px; font-weight: 500; line-height: 1.17; letter-spacing: -.045em; }
@@ -172,6 +202,7 @@
   .pond-demo h2 { font-size: 25px; }
   .pond-purpose { margin: 68px auto; }
   .pond-purpose h2 { font-size: 38px; }
+  .pond-team-link { margin-right: 10px; font-size: 14px; }
   .pond-team { padding: 0 16px 70px; }
   .pond-team-heading h2 { font-size: 32px; }
   .pond-team-grid { display: flex; flex-direction: column; gap: 12px; }

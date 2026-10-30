@@ -18,6 +18,76 @@ use crate::model::{
 mod platform;
 pub use platform::*;
 
+/// Resolve a CLI recording target before creating a bundle or starting any recorder.
+pub fn record_target(window_query: Option<&str>) -> Result<TargetInfo> {
+    resolve_record_target(window_query, list_recordable_windows, || discover_target(None))
+}
+
+fn resolve_record_target(
+    window_query: Option<&str>,
+    windows: impl FnOnce() -> Vec<TargetInfo>,
+    display: impl FnOnce() -> TargetInfo,
+) -> Result<TargetInfo> {
+    let Some(query) = window_query else {
+        return Ok(display());
+    };
+    let query = query.trim();
+    anyhow::ensure!(!query.is_empty(), "--window needs a non-empty window name");
+    let query_lower = query.to_lowercase();
+    let mut matches = windows().into_iter().filter(|target| {
+        target.mode == CaptureMode::Window
+            && target.window_id.is_some()
+            && (target.window_title.as_deref().is_some_and(|title| title.to_lowercase().contains(&query_lower))
+                || target.app.as_deref().is_some_and(|app| app.to_lowercase().contains(&query_lower)))
+    });
+    let first = matches.next();
+    anyhow::ensure!(first.is_some(), "No selectable window matches --window {query:?}");
+    anyhow::ensure!(matches.next().is_none(), "More than one window matches --window {query:?}; use a more specific name");
+    Ok(first.expect("checked above"))
+}
+
+#[cfg(test)]
+mod record_target_tests {
+    use super::*;
+
+    fn target(mode: CaptureMode, title: &str, app: &str) -> TargetInfo {
+        TargetInfo {
+            mode,
+            app: Some(app.into()),
+            bundle_id: None,
+            window_title: Some(title.into()),
+            window_id: (mode == CaptureMode::Window).then_some(42),
+            display_id: 0,
+            frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
+        }
+    }
+
+    #[test]
+    fn requested_window_must_be_unique_and_never_fall_back_to_display() {
+        let windows = || vec![target(CaptureMode::Window, "Project", "Editor"), target(CaptureMode::Window, "Other", "Browser")];
+        for query in ["missing", "", "   ", "e"] {
+            let result = resolve_record_target(Some(query), windows, || panic!("display capture must not start"));
+            assert!(result.is_err(), "{query:?} must be rejected");
+        }
+        let selected = resolve_record_target(Some("project"), windows, || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_id, Some(42));
+        assert_eq!(resolve_record_target(Some("browser"), windows, || panic!("display capture must not start")).unwrap().window_title.as_deref(), Some("Other"));
+        assert!(resolve_record_target(Some("project"), || vec![target(CaptureMode::Display, "Project", "Editor")], || panic!("display capture must not start")).is_err());
+        let display = resolve_record_target(None, || panic!("window lookup must not run"), || target(CaptureMode::Display, "", "")).unwrap();
+        assert_eq!(display.mode, CaptureMode::Display);
+    }
+
+    #[test]
+    fn long_window_titles_are_matched_and_checked_for_ambiguity() {
+        let title = "A window title longer than the picker label with UNIQUE_SUFFIX";
+        let selected = resolve_record_target(Some("UNIQUE_SUFFIX"), || vec![target(CaptureMode::Window, title, "Browser")], || panic!("display capture must not start")).unwrap();
+        assert_eq!(selected.window_title.as_deref(), Some(title));
+        let other = "A window title longer than the picker label with OTHER_SUFFIX";
+        let result = resolve_record_target(Some("A window title longer"), || vec![target(CaptureMode::Window, title, "Browser"), target(CaptureMode::Window, other, "Browser")], || panic!("display capture must not start"));
+        assert!(result.is_err(), "truncated picker labels must not hide ambiguity");
+    }
+}
+
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// Candidate frames only feed scene diffs and keyframe selection; the keyframes themselves are
 /// decoded from `recording.mp4` at full size afterwards.
@@ -572,7 +642,25 @@ pub(crate) struct Sampler {
     pub stopping: Arc<AtomicBool>,
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
+    pub real_frame_seen: Arc<AtomicBool>,
     pub video_offset_ms: Arc<AtomicU64>,
+}
+
+/// Synthetic fallback pixels can be kept for diagnostics, but never unlock agent Stop.
+pub(crate) fn push_candidate(
+    frames: &Mutex<CandidateBuffer>,
+    real_frame_seen: &AtomicBool,
+    frame: RgbaFrame,
+    urgent: bool,
+    real: bool,
+) {
+    frames
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(frame, urgent);
+    if real {
+        real_frame_seen.store(true, Ordering::Release);
+    }
 }
 
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture
@@ -582,6 +670,7 @@ pub struct ScreenCaptureSession {
     stopping: Arc<AtomicBool>,
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
+    real_frame_seen: Arc<AtomicBool>,
     video_offset_ms: Arc<AtomicU64>,
     sampler_thread: Option<JoinHandle<Option<PathBuf>>>,
     _recording: crate::retention::Recording,
@@ -597,11 +686,13 @@ impl ScreenCaptureSession {
         let stopping = Arc::new(AtomicBool::new(false));
         let urgent_snapshot = Arc::new(AtomicBool::new(true));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
+        let real_frame_seen = Arc::new(AtomicBool::new(false));
         let video_offset_ms = Arc::new(AtomicU64::new(0));
 
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
+        let thread_real_frame_seen = Arc::clone(&real_frame_seen);
         let thread_offset = Arc::clone(&video_offset_ms);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
@@ -615,6 +706,7 @@ impl ScreenCaptureSession {
                     stopping: thread_stopping,
                     urgent: thread_urgent,
                     frames: thread_frames,
+                    real_frame_seen: thread_real_frame_seen,
                     video_offset_ms: thread_offset,
                 })
             })
@@ -625,6 +717,7 @@ impl ScreenCaptureSession {
             stopping,
             urgent_snapshot,
             frames,
+            real_frame_seen,
             video_offset_ms,
             sampler_thread,
             _recording: crate::retention::Recording::start(),
@@ -640,6 +733,11 @@ impl ScreenCaptureSession {
 
     pub fn elapsed_ms(&self) -> u64 {
         self.started_at.elapsed().as_millis() as u64
+    }
+
+    /// A portal or ScreenCaptureKit session is still pending until a real frame arrives.
+    pub fn has_frames(&self) -> bool {
+        self.real_frame_seen.load(Ordering::Acquire)
     }
 
     pub fn stop(mut self) -> ScreenRecording {
@@ -1523,6 +1621,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn synthetic_candidate_does_not_make_agent_capture_ready() {
+        let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
+        let seen = Arc::new(AtomicBool::new(false));
+        push_candidate(
+            &frames,
+            &seen,
+            crate::render::render_synthetic_demo_frame(1280, 800, 0, 0),
+            false,
+            false,
+        );
+        let session = ScreenCaptureSession {
+            started_at: Instant::now(),
+            stopping: Arc::new(AtomicBool::new(false)),
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames,
+            real_frame_seen: seen,
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: None,
+            _recording: crate::retention::Recording::start(),
+        };
+        assert!(
+            !session.has_frames(),
+            "synthetic pixels are not a real capture"
+        );
+        push_candidate(
+            &session.frames,
+            &session.real_frame_seen,
+            RgbaFrame::new(1, 1, 1, vec![1, 2, 3, 255]),
+            false,
+            true,
+        );
+        assert!(session.has_frames(), "real pixels unlock agent Stop");
+    }
+
+    #[test]
     fn screen_stop_joins_worker_before_collecting_its_final_media() {
         let stopping = Arc::new(AtomicBool::new(false));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
@@ -1548,6 +1681,7 @@ mod tests {
             stopping,
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(120)),
             sampler_thread: Some(worker),
             _recording: crate::retention::Recording::start(),
@@ -2036,6 +2170,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),

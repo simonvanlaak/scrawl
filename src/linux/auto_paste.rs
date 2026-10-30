@@ -1,6 +1,6 @@
 //! A shortcut capture may attempt one guarded draft handoff, never a chat submission.
 use super::hyprland::FocusedWindow;
-use anyhow::{Context, Result, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
@@ -22,6 +22,22 @@ pub fn preflight(original: &FocusedWindow) -> Result<()> {
         "Choose a chat composer and keep it focused until paste finishes"
     );
     Ok(())
+}
+
+/// Automatic handoff needs a receiver-provided draft identity and an image
+/// attachment receipt. Hyprland supplies neither: a window can hold several
+/// T3 threads, and a paste keystroke is not an attachment acknowledgement.
+/// The explicit `apparent paste` command remains user-directed.
+pub fn auto_receiver_preflight() -> Result<()> {
+    bail!("No verified attachment observer or stable draft identity; use the manual handoff")
+}
+
+pub fn completion_note(clipboard_ready: bool) -> &'static str {
+    if clipboard_ready {
+        "Saved · paste manually"
+    } else {
+        "Saved · open bundle (copy failed)"
+    }
 }
 
 pub trait UserPasteOps {
@@ -129,7 +145,7 @@ impl UserPasteOps for LivePaste<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Result, bail};
+    use anyhow::{bail, Result};
 
     #[test]
     fn user_directed_paste_leaves_manual_text_fallback_without_stealing_focus() {
@@ -267,5 +283,22 @@ mod tests {
         other = original.clone();
         other.pid = 43;
         assert!(!window_matches(&original, &other));
+    }
+
+    #[test]
+    fn automatic_handoff_refuses_a_window_without_a_verified_draft_receiver() {
+        let window = FocusedWindow {
+            address: "0xabc".into(),
+            pid: 42,
+            class: "com.t3tools.T3Code".into(),
+        };
+        assert!(window_matches(&window, &window));
+        let result = auto_receiver_preflight();
+        assert!(
+            format!("{:#}", result.unwrap_err()).contains("No verified attachment observer"),
+            "a window is not a thread, editor, or attachment receipt"
+        );
+        assert_eq!(completion_note(true), "Saved · paste manually");
+        assert_eq!(completion_note(false), "Saved · open bundle (copy failed)");
     }
 }

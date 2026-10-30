@@ -544,15 +544,9 @@ impl Input {
     }
 
     fn windows_at(&self, t: u64, s: &Settings) -> Vec<&Win> {
-        let Some(first) = self.snapshots.first() else {
+        let Some(snap) = self.snapshots.iter().take_while(|(st, _)| *st <= t).last() else {
             return Vec::new();
         };
-        let snap = self
-            .snapshots
-            .iter()
-            .take_while(|(st, _)| *st <= t)
-            .last()
-            .unwrap_or(first);
         snap.1
             .iter()
             .filter(|w| {
@@ -1022,6 +1016,37 @@ impl Ctx<'_> {
             .copied()
     }
 
+    /// A resting pointer is not evidence that the active window is irrelevant. Check the
+    /// final geometry, after grouping and content trimming, against this frame's window log.
+    fn keep_frontmost(&self, crop: &mut Crop, t: u64) {
+        let deliberate = crop
+            .used
+            .iter()
+            .any(|&i| self.input.items[i].kind.deliberate());
+        if !deliberate
+            && let Some(win) = self.frontmost(t)
+            && area(clip01(win.rect)) > 0.0
+            && (area(intersect(crop.rect, clip01(win.rect))) <= 0.0
+                || (!contains(crop.rect, clip01(win.rect))
+                    && !(crop.kind == CropKind::Focus && crop.snapped.contains(&win.id))))
+        {
+            crop.rect = FULL;
+            crop.kind = CropKind::Full;
+            crop.reason = "whole screen: passive activity does not retain the active window".into();
+            crop.apps.clear();
+            crop.snapped.clear();
+            crop.within = None;
+        }
+        // Ranked activity can refer to an earlier window, or to changes outside the box.
+        // Only name apps whose windows actually intersect this frame's delivered crop.
+        let wins = self.input.windows_at(t, self.s);
+        crop.apps.retain(|app| {
+            wins.iter().any(|w| {
+                !w.chrome() && &w.app == app && area(intersect(crop.rect, clip01(w.rect))) > 0.0
+            })
+        });
+    }
+
     /// The crop for keyframe `k` (or the whole capture), before grouping. `None` when the slice
     /// has no activity.
     fn crop(&self, k: Option<usize>) -> Option<Crop> {
@@ -1424,9 +1449,12 @@ pub fn compute(input: &Input, settings: &Settings) -> Vec<Crop> {
         sh: input.screen[1].max(1.0),
     };
     if settings.scope == Scope::Whole {
-        let crop = ctx
+        let mut crop = ctx
             .crop(None)
             .unwrap_or_else(|| ctx.fallback(input.duration / 2, [0, input.duration], None));
+        for &t in &input.keyframes {
+            ctx.keep_frontmost(&mut crop, t);
+        }
         return vec![crop; n];
     }
     let raw: Vec<Option<Crop>> = (0..n).map(|k| ctx.crop(Some(k))).collect();
@@ -1518,6 +1546,7 @@ pub fn compute(input: &Input, settings: &Settings) -> Vec<Crop> {
         if c.rect == FULL {
             c.kind = CropKind::Full;
         }
+        ctx.keep_frontmost(c, input.keyframes[k]);
     }
     out
 }
@@ -1998,6 +2027,204 @@ mod tests {
             label: None,
             role: None,
         }
+    }
+
+    #[test]
+    fn resting_cursor_cannot_hide_the_frontmost_window() {
+        let frame = TargetFrame {
+            width: 1440.0,
+            height: 900.0,
+            ..FRAME
+        };
+        let windows = [
+            WindowSnapshot {
+                t: 0,
+                windows: vec![window(1, "Finder", [0, 30, 700, 600], true)],
+            },
+            WindowSnapshot {
+                t: 173_535,
+                windows: vec![window(104, "TextEdit", [141, 64, 603, 505], true)],
+            },
+        ];
+        let cursor = [
+            CursorSample(0, 0.95, 0.05),
+            CursorSample(172_000, 0.95, 0.05),
+        ];
+        let times = [172_995, 173_926];
+        for scope in [Scope::Keyframe, Scope::Grouped, Scope::Whole] {
+            let settings = Settings {
+                scope,
+                ..Settings::default()
+            };
+            let input = Input::new(frame, 197_481, &times, &[], &[], &windows, &cursor, &[]);
+            let crops = compute(&input, &settings);
+            for (crop, bounds) in crops
+                .iter()
+                .zip([[0.0, 30.0, 700.0, 630.0], [141.0, 64.0, 744.0, 569.0]])
+            {
+                let win = [
+                    bounds[0] / 1440.0,
+                    bounds[1] / 900.0,
+                    bounds[2] / 1440.0,
+                    bounds[3] / 900.0,
+                ];
+                assert!(contains(crop.rect, win), "{scope:?}: {crop:?}");
+            }
+        }
+
+        // Exercise the real image path, with target pixels far from the idle pointer.
+        let mut raw = solid(1440, 900, 30);
+        for y in 100..500 {
+            for x in 180..700 {
+                let i = (y * 1440 + x) * 4;
+                raw.rgba[i..i + 3].copy_from_slice(&[10, 220, 80]);
+            }
+        }
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame,
+        };
+        let selected = vec![
+            (keyframe(1, times[0]), raw.clone()),
+            (keyframe(2, times[1]), raw),
+        ];
+        let (frames, _) = annotate_and_crop(
+            selected,
+            None,
+            Some(&Settings::default()),
+            &target,
+            197_481,
+            &[],
+            &[],
+            &[],
+            &windows,
+            &cursor,
+        );
+        let has_target = |f: &RgbaFrame| f.rgba.chunks_exact(4).any(|p| p[..3] == [10, 220, 80]);
+        assert!(
+            frames.iter().all(|(_, f)| has_target(f)),
+            "agent frames lost target pixels"
+        );
+        let sheet = crate::render::render_contact_sheet_for_duration(197_481, &frames);
+        assert!(has_target(&sheet), "contact sheet lost target pixels");
+    }
+
+    #[test]
+    fn passive_crop_cannot_keep_only_a_blank_sliver_of_the_active_window() {
+        let frame = TargetFrame {
+            width: 1280.0,
+            height: 800.0,
+            ..FRAME
+        };
+        let windows = [WindowSnapshot {
+            t: 73,
+            windows: vec![window(1, "Editor", [320, 203, 640, 420], true)],
+        }];
+        let cursor = [
+            CursorSample(73, 0.5, 0.5),
+            CursorSample(1_306, 0.9492, 0.0488),
+        ];
+        let changes = [vec![
+            [0.25, 0.0, 1.0, 0.225],
+            [0.25, 0.75, 0.765625, 0.825],
+            [0.3125, 0.475, 0.609375, 0.575],
+            [0.3125, 0.375, 0.578125, 0.45],
+            [0.3125, 0.6, 0.6875, 0.65],
+            [0.84375, 0.075, 0.875, 0.1],
+        ]];
+        let active = [0.25, 203.0 / 800.0, 0.75, 623.0 / 800.0];
+        let input = Input::new(
+            frame,
+            13_207,
+            &[6_734],
+            &[],
+            &[],
+            &windows,
+            &cursor,
+            &changes,
+        );
+        let settings = Settings::default();
+        let mut crop = compute(&input, &settings).remove(0);
+        // The final content-trimmed geometry observed in the normal-decoder GUI capture.
+        // It intersects blank window chrome, but excludes every word in the editor.
+        crop.rect = [869.0 / 1280.0, 0.0, 1.0, 306.0 / 800.0];
+        crop.kind = CropKind::Activity;
+        let ctx = Ctx {
+            input: &input,
+            s: &settings,
+            sw: 1280.0,
+            sh: 800.0,
+        };
+        assert!(area(intersect(crop.rect, active)) > 0.0);
+        ctx.keep_frontmost(&mut crop, 6_734);
+        assert!(contains(crop.rect, active), "{crop:?}");
+    }
+
+    #[test]
+    fn deliberate_input_still_selects_a_nonfrontmost_window() {
+        let windows = [WindowSnapshot {
+            t: 0,
+            windows: vec![
+                window(1, "Editor", [100, 100, 600, 400], true),
+                window(2, "Browser", [1100, 100, 500, 600], false),
+            ],
+        }];
+        let input = Input::new(
+            FRAME,
+            2_000,
+            &[1_000],
+            &[],
+            &[click(1_000, 0.8, 0.3)],
+            &windows,
+            &[CursorSample(0, 0.95, 0.05)],
+            &[],
+        );
+        let crops = compute(&input, &Settings::default());
+        assert_eq!(crops[0].kind, CropKind::Window);
+        assert_eq!(crops[0].apps, ["Browser"]);
+        assert_eq!(label(&crops).as_deref(), Some("Browser"));
+    }
+
+    #[test]
+    fn activity_label_does_not_name_an_excluded_window() {
+        let windows = [WindowSnapshot {
+            t: 0,
+            windows: vec![window(1, "Editor", [100, 100, 600, 400], true)],
+        }];
+        let input = Input::new(
+            FRAME,
+            2_000,
+            &[1_000],
+            &[],
+            &[click(1_000, 0.95, 0.1)],
+            &windows,
+            &[],
+            &[vec![[0.1, 0.1, 0.3, 0.3]]],
+        );
+        let settings = Settings {
+            snap: false,
+            cause_reach: 0.0,
+            ..Settings::default()
+        };
+        let crops = compute(&input, &settings);
+        assert!(crops[0].apps.is_empty(), "{crops:?}");
+        assert_eq!(label(&crops).as_deref(), Some("the activity"));
+    }
+
+    #[test]
+    fn window_snapshots_do_not_arrive_before_their_timestamp() {
+        let windows = [WindowSnapshot {
+            t: 1_100,
+            windows: vec![window(1, "Editor", [100, 100, 600, 400], true)],
+        }];
+        let input = Input::new(FRAME, 2_000, &[1_000, 1_200], &[], &[], &windows, &[], &[]);
+        assert!(input.windows_at(1_000, &Settings::default()).is_empty());
+        assert_eq!(input.windows_at(1_200, &Settings::default()).len(), 1);
     }
 
     #[test]

@@ -1,0 +1,12 @@
+[package]
+name = "apparent-narrator"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Deliberately independent from the app's dependency graph.
+[workspace]
+
+[dependencies]
+loqui-kokoro = "=0.4.0"
+hound = "=3.5.1"

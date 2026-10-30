@@ -1,4 +1,4 @@
-// Lifecycle-scoped animation and dialogs. No recording, upload or outbound messages.
+// Lifecycle-scoped animation, launch attempt and dialogs. Never records or sends feedback.
 export function mountFooter(root: HTMLElement): () => void {
   const wheel = root.querySelector<HTMLButtonElement>('.footer-wheel')!
   const word = wheel.querySelector<HTMLSpanElement>('span')!
@@ -11,6 +11,22 @@ export function mountFooter(root: HTMLElement): () => void {
     target.addEventListener(name, listener)
     cleanup.push(() => target.removeEventListener(name, listener))
   }
+  const tryButton = root.querySelector<HTMLButtonElement>('.footer-try')!
+  listen(tryButton, 'click', () => {
+    if (tryButton.dataset.launchAttempted !== 'true') {
+      // Change the action before leaving the page. Browsers cannot confirm
+      // installation or launch; the next click always downloads by choice.
+      tryButton.dataset.launchAttempted = 'true'
+      tryButton.textContent = 'Not installed yet? No worries—click again to download ↗'
+      try { window.location.assign('apparent://open') } catch { /* Keep the download action available. */ }
+      return
+    }
+    // Reuse the actual hero link, including its platform/CPU selection, busy
+    // guard and release-list fallback. Do not maintain a second download path.
+    const download = document.querySelector<HTMLAnchorElement>('.pond-download a')
+    if (download) download.click()
+    else window.location.assign('https://github.com/tryapparent/apparent/releases')
+  })
   function fit() {
     if (!active) return
     // Layout width is stable while the rolling word is transformed in 3D.

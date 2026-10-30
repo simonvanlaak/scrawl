@@ -1,5 +1,9 @@
 # Linux
 
+The default-off native launch experiment and explicit AppImage/desktop URL-handler
+registration are documented in [native launch](native-launch.md). Opening a URL never
+installs or changes the selected desktop handler.
+
 Read this before changing `src/capture/linux.rs`, `src/ui/linux.rs`, `src/linux/`, `src/ink_view.rs`, `src/speech.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`. The shared GPUI UI uses platform adapters for the macOS and Linux shells. Windows code is retained but unsupported.
 
 ## X11 everywhere, Wayland around it
@@ -64,6 +68,15 @@ Clicks on the pill and the picker need four things, found in Hyprland's source (
 - For an override-redirect window of `_NET_WM_WINDOW_TYPE_NOTIFICATION` (GPUI's pop-up type), tooltip, menu, splash or utility, the hit test answers "the window in focus" instead of the window. `accept_pointer` makes them toolbar windows, which get the pointer and aren't focused when they map.
 - Hyprland takes an override-redirect window's position when it maps it and ignores later moves, so `x11::place` maps the window again when it moves on Hyprland.
 - The full-screen ink overlay is a notification window above the pill, so it shares the KDE treatment: mapped only while ⇧ is held (`hide_between_strokes`).
+
+Hyprland also assigns override-redirect windows to a workspace. The recording capsule
+is pinned across workspaces after mapping (and again after a move remaps it), without
+focusing it or pinning Settings, the picker, whiteboard or ink overlay. The adapter
+sets an X11-ID-specific title on the capsule and matches that title plus its process
+ID in `clients -j`; it never guesses from the active window. A missing identity
+or failed pin is retried briefly and logged, not replaced with a broad app rule.
+Verified with Hyprland in the isolated Omarchy VM. Lua uses an explicit set-pin
+action; legacy hyprlang dispatches pin only after observing the capsule unpinned.
 
 XWayland sees the pointer only over X11 windows and keeps the last place it saw it over the rest, which picked the wrong display for a recording and started an area selection in the wrong place. On Hyprland `linux::cursor_position` asks Hyprland (`j/cursorpos`) and maps the point to the same place on the same output in XWayland's layout (`hyprland::cursor_in_x_space`): XWayland can put a monitor at y 0 where Hyprland has it at y 1080, so outputs are matched by name and the point is moved by the difference.
 

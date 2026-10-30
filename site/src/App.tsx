@@ -1,4 +1,4 @@
-import { Demo } from "./demo/Demo"
+import { Demo } from "./demo/VideoDemo"
 import { inkPath } from "./demo/ink"
 import { FrogPond } from "./FrogPond"
 import { GithubStars } from "./GithubStars"

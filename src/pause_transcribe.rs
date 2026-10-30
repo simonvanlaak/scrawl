@@ -29,6 +29,10 @@ pub struct Pause {
 
 impl Pause {
     pub fn start(samples: Arc<Mutex<Vec<f32>>>) -> Result<Self> {
+        crate::warm_recognizer::clear_if_disabled();
+        if crate::handoff::experiment("warmRecognizer") {
+            return Self::start_with(samples, crate::warm_recognizer::transcriber()?);
+        }
         let mut model: Option<crate::speech::Incremental> = None;
         Self::start_with(samples, move |chunk, offset| {
             if model.is_none() {
@@ -38,7 +42,7 @@ impl Pause {
         })
     }
 
-    fn start_with(
+    pub(super) fn start_with(
         samples: Arc<Mutex<Vec<f32>>>,
         mut transcribe: impl FnMut(&[f32], u64) -> Result<TranscriptData> + Send + 'static,
     ) -> Result<Self> {

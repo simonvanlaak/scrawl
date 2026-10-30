@@ -178,6 +178,22 @@ which may be newer than the still-running process; `pendingRestart` indicates th
 The update is installed for the *next* launch, not the current process. A corrupt config is
 left untouched rather than replaced when changing the channel or recording a launch.
 
+### Optional warm Parakeet recognizer
+
+`"experiments": {"warmRecognizer": true}` in `~/.config/apparent/config.json`
+opts the next local Parakeet recording into lazy cross-recording model/session
+reuse. It is off by default. A single owner worker retains at most one recognizer,
+and releases it after 30 minutes idle following the actual end of the last pause
+worker, never during capture or recognition. Cancellation waits for that worker's
+real completion before starting the idle clock, without blocking capture teardown.
+Model selection is pinned at first recognition per capture; selection/file changes
+invalidate reuse between captures, and native errors discard the unhealthy session.
+Disabling the flag or choosing Hex/command clears it at the next recording start
+once active work ends. No model RAM is reserved at app launch, and manual Paste
+is unchanged. See [warm recognizer](keyframes-and-text.md#experiment-warmrecognizer-srcwarm_recognizerrs)
+for lifecycle and same-process replay limits. Real replay and GUI verification
+remain required before default enablement.
+
 ## Not on Linux
 
 The cabled iPhone, menu-based video export (the CLI supports export), OS element lookups for `agentContext` (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route). With `agentContext` on, an unnamed Linux click says `clicked (element unavailable)` and a mark receives no OS-derived element label. AT-SPI cannot securely join an accessible top-level to the X11 window where the action occurred; matching PID, title and bounds do not rule out a stale window. Registered dev pages can still supply their own context. See `docs/keyframes-and-text.md`.

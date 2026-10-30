@@ -13,7 +13,7 @@ const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',hea
 const results=[];
 try{
  for(const [name,width,height] of [['desktop',1280,900],['mobile',375,812],['small-mobile',320,740],['wide-mobile',430,932]]){
-  const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('console',m=>{if(m.type()==='error'&&/hydrat|React error|didn't match/i.test(m.text()))errors.push(m.text());});page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
+  const page=await browser.newPage({viewport:{width,height}});const errors=[];let starsRateLimited=false;page.on('console',m=>{if(m.type()==='error'&&/hydrat|React error|didn't match/i.test(m.text()))errors.push(m.text());});page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()===403&&r.url()==='https://api.github.com/repos/tryapparent/apparent'){starsRateLimited=true;return;}if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
   await page.goto(process.env.SITE_URL || `http://127.0.0.1:${server.address().port}/`);await page.evaluate(()=>document.fonts.ready);
   await page.evaluate(()=>scrollTo(0,scrollY+document.querySelector('#belief').getBoundingClientRect().top-innerHeight*.12));
   await page.waitForTimeout(60);
@@ -90,6 +90,11 @@ try{
     await page.waitForTimeout(80);assert.equal(await page.locator('.work-circle').evaluate(e=>getComputedStyle(e).strokeDashoffset),marks.offset,'no autoplay or drift while scroll stops');
   }
   await writeFile(`${evidence}/${name}-scroll-samples.json`,JSON.stringify(samples,null,2));
+  if(starsRateLimited){
+    assert.equal(await page.locator('.github-stars').getAttribute('aria-label'),'Star Apparent on GitHub','rate-limited optional counter keeps its honest fallback');
+    assert.equal(await page.locator('.github-stars span').textContent(),'GitHub');
+    console.log(`${name}: live GitHub API returned 403; verified optional counter fallback`);
+  }
   assert.deepEqual(errors,[]);results.push({viewport:`${width}x${height}`,status:'PASS',checks:['unchanged belief','distant newcomer','Me too under single frog','large and small lily pads','central gap','static pair during flight','high single rightward jump','existing air pose','heading clearance','hug','keyboard','reentry guard','reset','reduced motion before and during flight','no overflow','exact sequential scroll mapping','reversible marks','no drift when stopped','all assets and no page errors']});await page.close();
  }
  await writeFile(`${evidence}/jump-results.json`,JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));

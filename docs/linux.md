@@ -28,7 +28,7 @@ Verified in an Ubuntu 24.04 arm64 VM with GNOME 46 (Wayland and X11) and Plasma 
 
 `apparent record --duration N` is a separate timed recorder, not a shortcut-driven app session. Even with input access it does not collect click or Shift ink events; its manifest and summary explicitly mark that interaction-telemetry gap. Use `apparent shortcut record` with the app to start and finish when those events matter. The permission and pointer-position limits below still apply to the shortcut path.
 
-`apparent export <bundle> --out movie.mp4 --zoom` renders a saved Linux capture as an MP4 with ink, pins, click ripples and the saved WAV when those tracks exist. Install `ffmpeg` and `ffprobe` with H.264/AAC encoders; HEVC export needs `libx265`. Export uses FFmpeg decoding even if the capture's GStreamer full-quality keyframe decoder fell back to candidate images. The menu export experiment is still Mac-only. A timed CLI capture has no click/ink telemetry to burn into the movie; use the app shortcut for an annotated recording. See `docs/export-and-retention.md`.
+`apparent export <bundle> --out movie.mp4` renders a saved Linux capture as an MP4 with ink, pins, click ripples and the saved WAV when those tracks exist. Install `ffmpeg` and `ffprobe` with H.264/AAC encoders; HEVC export needs `libx265`. Export uses FFmpeg decoding even if the capture's GStreamer full-quality keyframe decoder fell back to candidate images. The menu export experiment is still Mac-only. A timed CLI capture has no click/ink telemetry to burn into the movie; use the app shortcut for an annotated recording. See `docs/export-and-retention.md`.
 
 Wayland tells no app where the pointer is over another app's window. Apparent reads buttons and keys from the input devices. In onboarding or Settings › Permissions, **Copy command** copies `sudo usermod -aG input "$USER"`. Run it in a terminal, then log out and back in. Apparent checks whether it can open actual keyboard/mouse devices, rather than trusting group membership; it retries devices when access changes. This is the **Input devices** row (the Accessibility row on macOS).
 
@@ -41,6 +41,10 @@ Without the `input` group, a capture on Wayland has no clicks, keys or ⇧ ink o
 ### Picker and portal limits
 
 Screen and Area work on the tested desktops. The Window picker lists X11/XWayland windows only; use Screen or Area for native Wayland apps. A portal window source exists internally, but the UI does not currently offer it. A press of the record shortcut records the display under the pointer once its keys come up, however long they're held; the tray menu's **Choose What to Record…** opens the picker, which stays open until you choose a target or press Esc. The Mac-only iPhone mode is hidden. Screen sharing can ask again if a desktop does not honor the saved restore token. Finishing while the dialog is open cancels the pending session; a failed or empty capture reports an error rather than producing demo imagery, and `latest` skips its unfinished directory.
+
+`apparent capture state` reports `starting` until the portal supplies a real frame. An agent can
+cancel that pending capture by its observed ID but cannot stop-and-save it until `recording`.
+See `docs/capture.md` for the same-user GUI control protocol on both supported platforms.
 
 Plasma 5 can report successful GlobalShortcuts binding with an empty result. Apparent validates both returned bindings and uses KGlobalAccel directly on Plasma 5, so the shortcut does not also type into the focused app.
 

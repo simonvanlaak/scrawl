@@ -5,7 +5,7 @@ description: Use when told "make it apparent" or asked for video proof.
 
 # Make It Apparent: show the change
 
-When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and make a separate share copy only when it improves clarity. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
+When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and deliver a separate polished export by default. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
 
 ## Point out the claim
 
@@ -27,7 +27,7 @@ For a browser-only change, an existing browser recorder may be more precise **if
 
 ## Record the proof with Apparent
 
-Check `apparent record --help` on the **installed** app. For a fixed-duration desktop take, choose the known window and perform the action *while* recording:
+For polished desktop demos, use the app's interactive recording shortcut to start and finish: it collects the clicks, marks and cursor path that drive automatic zoom. Check the installed app's capabilities and input permissions first. Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
 
 ```sh
 apparent record --window 'Window title or app' --duration 15 --out /absolute/private/path/walkthrough.apparent
@@ -41,13 +41,13 @@ Read `summary.md` and `apparent.json`; open `contact-sheet.png` and the relevant
 
 For appearance changes, distinguish offscreen renders from a live window: render both schemes to inspect every state, then capture the exact running build opening while the OS is already dark and switching light→dark→light in the same process. Read back the OS appearance alongside screenshots; restore its original setting. A settled screenshot checks that frame, not every transition frame or a live permission grant.
 
-If export works on this host, use `--fps 30` (or `--fps 60` on explicit request) and add zoom only when it helps. Do not hand back a 60 fps original by accident:
+If export works on this host, use `--fps 30` (or `--fps 60` on explicit request). Smooth activity zoom is on by default; keep it on for demos. Use `--no-zoom` only for an intentionally static share copy (for example, a motion-sensitive viewer or a fixed-frame comparison). Do not hand back the unprocessed original or a 60 fps original by accident:
 
 ```sh
 apparent export /absolute/private/path/walkthrough.apparent --out /absolute/private/path/walkthrough.mp4 --fps 30
 ```
 
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
+Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Check installed `export --help` before using the flags: older builds require `--zoom` to opt in, whereas current builds use `--no-zoom` to opt out. Compare the exported video to the source and watch it end-to-end too. If no camera motion appears, inspect the interaction telemetry rather than claiming the default flag guarantees motion. Browser-only recordings bypass Apparent's camera planner; prefer an Apparent capture of the browser when polished interaction zoom is required, and disclose an unpolished fallback rather than calling it equivalent. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
 
 ## Hand it back
 
@@ -57,5 +57,5 @@ Embed or link the **verified playable file** in a channel the viewer can reach. 
 
 - A staged click after the result was already present proves nothing; reset to the starting state and capture the action.
 - A smooth mock or browser replay is not evidence for a live native app; name the provenance visibly and in the handoff.
-- Automatic zoom, captions and fast-forward are optional explanation, not permission to conceal failures or invent causality.
+- Automatic zoom is the default presentation; captions and fast-forward are optional explanation. None is permission to conceal failures or invent causality.
 - A complete source bundle is not a shareable artifact until its entire media and delivery destination have been checked.

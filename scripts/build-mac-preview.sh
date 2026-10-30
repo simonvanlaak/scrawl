@@ -43,6 +43,12 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>Apparent launch</string>
+    <key>CFBundleURLSchemes</key><array><string>apparent</string></array>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+  </dict></array>
   <key>CFBundleExecutable</key><string>apparent</string>
   <key>CFBundleIconFile</key><string>Apparent</string>
   <key>CFBundleIdentifier</key><string>dev.simonvanlaak.apparent.preview</string>

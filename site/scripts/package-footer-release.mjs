@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url)
 const { parse } = require(process.env.ACORN_MODULE || 'acorn')
 assert.equal(process.argv.length, 5, 'baseline, new candidate and external manifest required')
 const [baseline, candidate, manifestPath] = process.argv.slice(2).map(p => path.resolve(p))
+assert(!fs.lstatSync(baseline).isSymbolicLink(), 'Baseline must be a real directory, not a symlink; resolve it before packaging')
 assert(!fs.existsSync(candidate), 'Refuse to overwrite a candidate')
 assert(!manifestPath.startsWith(candidate + path.sep), 'Keep evidence outside the public package')
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -54,16 +55,20 @@ const newUrl = `/assets/index-${sha(patched).slice(0,16)}.js`
 const behavior = stripTypeScriptTypes(fs.readFileSync(path.join(site,'src/footer/behavior.ts'),'utf8'))
 parse(behavior,{ecmaVersion:'latest',sourceType:'module'})
 const behaviorUrl = `/assets/footer-${sha(behavior).slice(0,16)}.js`
-const css = fs.readFileSync(path.join(site,'src/footer/footer.css'))
+const css = Buffer.concat([fs.readFileSync(path.join(site,'src/footer/footer.css')), Buffer.from('\n'), fs.readFileSync(path.join(site,'src/cta.css'))])
 const cssUrl = `/assets/footer-${sha(css).slice(0,16)}.css`
 const footer = '<footer class="frog-footer"><apparent-footer>'+footerMarkup+'</apparent-footer></footer>'
 const matches = [...html.matchAll(/<footer\b[^>]*>[\s\S]*?<\/footer>/g)]
 assert.equal(matches.length,1,'Exactly one SSR footer')
 const oldFooter = matches[0][0]
 const resources = /<link rel="stylesheet" href="\/assets\/footer-[a-f0-9]+\.css">|<script type="module" src="\/assets\/footer-[a-f0-9]+\.js"><\/script>/g
-const newResources = `<link rel="stylesheet" href="${cssUrl}"><script type="module" src="${behaviorUrl}"></script>`
-const nextHtml = html.replace(oldFooter,footer).replace(resources,'').replace(oldUrl,newUrl).replace('</head>',newResources+'</head>')
-assert.equal(nextHtml.replace(newResources,'').replace(newUrl,oldUrl).replace(footer,oldFooter),html.replace(resources,''),'All non-footer HTML survives byte-for-byte')
+// Register the new custom element before the baseline React bundle: its
+// bundled older footer must not win the first-definition-only registration.
+// Keep the CSS last so the shared CTA style overrides baseline styles.
+const behaviorResource = `<script type="module" src="${behaviorUrl}"></script>`
+const styleResource = `<link rel="stylesheet" href="${cssUrl}">`
+const nextHtml = html.replace(oldFooter,footer).replace(resources,'').replace(scripts[0][0],behaviorResource+scripts[0][0].replace(oldUrl,newUrl)).replace('</head>',styleResource+'</head>')
+assert.equal(nextHtml.replace(resources,'').replace(newUrl,oldUrl).replace(footer,oldFooter),html.replace(resources,''),'All non-footer HTML survives byte-for-byte')
 assert.deepEqual(inventory(baseline),before,'Baseline changed during preparation')
 fs.cpSync(baseline,candidate,{recursive:true,errorOnExist:true,force:false})
 fs.writeFileSync(path.join(candidate,'index.html'),nextHtml)

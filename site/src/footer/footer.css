@@ -8,11 +8,10 @@ apparent-footer { display: block; }
 .frog-footer #footer-heading { font-size: clamp(36px, 4.5vw, 62px); font-weight: 550; line-height: 1.02; letter-spacing: -.045em; margin: 0 0 22px; }
 .frog-footer .footer-body { font-size: 20px; line-height: 1.5; max-width: 760px; margin: 0 auto 24px; }
 .frog-footer .footer-body img, .frog-footer .footer-dialog p img { display: inline; width: 104px; height: auto; vertical-align: -.2em; }
-.frog-footer .footer-actions { display: flex; align-items: center; justify-content: center; gap: 20px; }
+.frog-footer .footer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 20px; }
 .frog-footer button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
-.frog-footer .footer-try { border: 0; border-radius: 8px; background: #19161d; color: #f5f0e8; padding: 15px 22px; font-size: 17px; font-weight: 550; min-height: 53px; }
+.frog-footer .footer-try { max-width: min(100%, 460px); }
 .frog-footer .footer-hi { border: 0; background: transparent; padding: 12px 0; font-size: 15px; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; }
-.frog-footer .footer-try:hover { background: #39313f; }
 .frog-footer .footer-hi:hover, .frog-footer a:hover { color: #6c4a8c; }
 .frog-footer .footer-base { display: flex; align-items: center; gap: 28px; padding: 24px 48px; min-height: 83px; }
 .frog-footer .footer-brand { display: flex; flex-shrink: 0; }

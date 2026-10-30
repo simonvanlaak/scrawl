@@ -1085,6 +1085,16 @@
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]
     },
     {
+      "id": "onboarding-first-capture",
+      "group": "install",
+      "name": "Choose and try your Record shortcut",
+      "says": "Onboarding requires an explicit shortcut choice and a successful shortcut-started recording before it can finish. Closing leaves setup unfinished for the next launch.",
+      "status": "experiment:onboardingFirstCapture",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Desktop-owned Linux shortcuts must be explicitly accepted rather than edited. Native Mac and Linux interaction proof is required before promotion.",
+      "docs": ["docs/onboarding-and-settings.md"]
+    },
+    {
       "id": "permission-card",
       "group": "install",
       "name": "Drag-in permission card",

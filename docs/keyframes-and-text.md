@@ -101,6 +101,14 @@ The old automatic OpenCode attachment policy is inactive. The full capture, keyf
 
 A crop inferred only from cursor dwell or screen changes must retain the frontmost regular window recorded at that keyframe's time, not just intersect a blank corner. Otherwise Apparent keeps the whole frame, after grouping and content-edge trimming. The existing focus crop inside a large window remains available when that crop was actually attributed to the frontmost window and still intersects it. Whole-capture scope keeps one shared full-frame fallback if any keyframe needs it. Deliberate input (ink, clicks, drags, laser or scroll) can still select another window. Window snapshots are never applied before their timestamps, and an app name appears in a crop label only when one of its recorded windows intersects the delivered crop. This is a correction to existing auto-crop behavior, not a new experiment; it does not change capture mode, window metadata collection or full-frame preservation.
 
+## Experiment `onboardingFirstCapture`
+
+Off by default. The welcome tour requires the user to choose a Record shortcut,
+then complete a local recording started with it. Dismissal leaves the tour
+unfinished. Enable it before opening onboarding; see
+[onboarding and settings](onboarding-and-settings.md#first-capture-experiment).
+It changes neither capture contents nor outbound delivery.
+
 ## Experiment `nativeLaunch`
 
 The separate default-off `nativeLaunch` experiment opens the app by the exact

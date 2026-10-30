@@ -786,6 +786,8 @@ pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
+    /// Identifies the recording whose finalization may update the current UI.
+    capture_generation: u64,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     agent_capture_id: Option<String>,
     #[cfg(target_os = "linux")]
@@ -900,6 +902,7 @@ impl ApparentCoordinator {
             telemetry,
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
+            capture_generation: 0,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             agent_capture_id: None,
             #[cfg(target_os = "linux")]
@@ -1141,7 +1144,10 @@ impl ApparentCoordinator {
             let _ = sender.send(LiveOverlayEvent::Onboarding(event));
         };
         match crate::onboarding::Session::open(flow, &self.shortcut_label(), events) {
-            Ok(session) => self.onboarding = Some(session),
+            Ok(session) => {
+                self.onboarding = Some(session);
+                self.sync_onboarding_editor();
+            }
             Err(error) => apparent_log(format!("onboarding could not open: {error:#}")),
         }
     }
@@ -1319,6 +1325,15 @@ impl ApparentCoordinator {
                     .as_mut()
                     .map_or(Effect::None, |session| session.grants(grants))
             }
+            Event::Action(action) if action == "use-desktop-shortcut" => {
+                let host = crate::settings::AppHost { telemetry: &self.telemetry };
+                if self.onboarding_editor.record_shortcut(&host).externally_managed
+                    && let Some(session) = self.onboarding.as_mut()
+                {
+                    session.input(crate::onboarding::Input::ShortcutChosen);
+                }
+                Effect::None
+            }
             Event::Action(action) => self
                 .onboarding
                 .as_mut()
@@ -1341,12 +1356,23 @@ impl ApparentCoordinator {
                     let mut host = crate::settings::AppHost {
                         telemetry: &self.telemetry,
                     };
+                    let choosing = matches!(action, crate::settings::Action::Shortcut { .. })
+                        && self.onboarding_editor.record_shortcut(&host).recording;
                     self.onboarding_editor.on(action, &mut host);
+                    let editor = self.onboarding_editor.record_shortcut(&host);
+                    if choosing && !editor.recording && editor.error.is_none()
+                        && let Some(session) = self.onboarding.as_mut()
+                    {
+                        session.input(crate::onboarding::Input::ShortcutChosen);
+                    }
                     self.sync_onboarding_editor();
                 }
                 Effect::None
             }
             Event::Exited => {
+                if let Some(session) = self.onboarding.as_ref() {
+                    session.leave(true);
+                }
                 self.cancel_onboarding_editor();
                 self.onboarding = None;
                 Effect::None
@@ -1366,14 +1392,13 @@ impl ApparentCoordinator {
                 self.sync_onboarding_editor();
             }
             Effect::Close | Effect::Settings => {
+                if let Some(session) = self.onboarding.as_ref() {
+                    session.leave(false);
+                }
                 self.cancel_onboarding_editor();
                 if effect == Effect::Settings {
                     self.open_settings(None);
                 }
-                let mut progress = Progress::load();
-                progress.seen = true;
-                progress.resume = None;
-                progress.save();
                 self.onboarding = None;
             }
             Effect::Relaunch { resume } => {
@@ -1486,13 +1511,24 @@ impl ApparentCoordinator {
         match action {
             Action::None => {}
             Action::Cancel => {
+                if let Some(session) = self.onboarding.as_mut() {
+                    session.input(crate::onboarding::Input::CaptureEnded { completed: false });
+                }
                 // Esc can cancel before the picker or a recording exists.
                 self.playback.take();
             }
             Action::RecordScreen => {
+                if let Some(session) = self.onboarding.as_mut() {
+                    session.input(crate::onboarding::Input::ShortcutTriggered);
+                }
                 self.record_screen_now(cx);
             }
-            Action::RecordSelected => self.record_selected_mode(cx),
+            Action::RecordSelected => {
+                if let Some(session) = self.onboarding.as_mut() {
+                    session.input(crate::onboarding::Input::ShortcutTriggered);
+                }
+                self.record_selected_mode(cx);
+            }
             Action::Finish => self.finish_recording(cx),
         }
     }
@@ -1945,16 +1981,23 @@ impl ApparentCoordinator {
     /// while the outer shell springs its width smoothly (`stiffness: 400, damping: 30` equivalent).
     fn set_island_phase(&mut self, phase: IslandPhase) {
         use crate::onboarding::Input;
+        if matches!(phase, IslandPhase::Recording | IslandPhase::Hidden | IslandPhase::Dismissing) {
+            // A new recording or dismissal revokes detached workers' UI ownership.
+            // Their finalized bundles remain on disk; stale results must not copy to
+            // the clipboard, replace the current review, or finish a newer practice.
+            self.capture_generation = self.capture_generation.wrapping_add(1);
+        }
         let capture = match (self.island_phase, phase) {
             (IslandPhase::Recording, IslandPhase::Recording) => None,
             (_, IslandPhase::Recording) => Some(Input::CaptureStarted),
             (IslandPhase::Recording | IslandPhase::Processing, IslandPhase::Completed { .. }) => {
                 Some(Input::CaptureEnded { completed: true })
             }
-            (
-                IslandPhase::Recording | IslandPhase::Processing,
-                IslandPhase::Hidden | IslandPhase::Dismissing,
-            ) => Some(Input::CaptureEnded { completed: false }),
+            // Startup can fail before Recording is presented. Clear the shortcut attempt
+            // then too, so a later menu capture cannot inherit it.
+            (_, IslandPhase::Hidden | IslandPhase::Dismissing) => {
+                Some(Input::CaptureEnded { completed: false })
+            }
             _ => None,
         };
         if let Some(input) = capture
@@ -3019,12 +3062,22 @@ impl ApparentCoordinator {
     }
 
     pub fn cancel_recording(&mut self, cx: &mut Context<Self>) {
+        self.cancel_capture_attempt();
+        cx.defer(whiteboard::close);
+        self.dismiss_island(cx);
+    }
+
+    /// Cancellation must also work before a visible island or recording exists.
+    fn cancel_capture_attempt(&mut self) {
+        // dismiss_island is a no-op while Hidden: startup failure must revoke the
+        // shortcut attempt here, not wait for a visible phase transition.
+        if let Some(session) = self.onboarding.as_mut() {
+            session.input(crate::onboarding::Input::CaptureEnded { completed: false });
+        }
         self.playback.take();
         apparent_log("cancel_recording invoked");
         self.feedback_capture = false;
         self.discard_recording();
-        cx.defer(whiteboard::close);
-        self.dismiss_island(cx);
     }
 
     pub fn finish_recording(&mut self, cx: &mut Context<Self>) {
@@ -3055,6 +3108,7 @@ impl ApparentCoordinator {
         // media teardown, transcription, and PNG encoding run on a background worker.
         drop(rec._metal_overlay);
         self.set_island_phase(IslandPhase::Processing);
+        let generation = self.capture_generation;
         self.completed_note = None;
         cx.notify();
         if matches!(source, CaptureSource::Lab) {
@@ -3064,6 +3118,9 @@ impl ApparentCoordinator {
             cx.spawn(async move |entity, cx| {
                 cx.background_executor().timer(wait).await;
                 let _ = entity.update(cx, |coord, cx| {
+                    if !coord.accepts_capture_result(generation) {
+                        return;
+                    }
                     coord.set_island_phase(IslandPhase::Completed {
                         finished_at: Instant::now(),
                         frame_count: 6,
@@ -3156,6 +3213,9 @@ impl ApparentCoordinator {
 
             let _ = entity
                 .update(cx, |coord, cx| {
+                    if !coord.accepts_capture_result(generation) {
+                        return;
+                    }
                     let (finalized, duration_ms) = result;
                     coord.completed_dir = None;
                     let (dir, bundle, _) = match finalized {
@@ -3251,6 +3311,10 @@ impl ApparentCoordinator {
                 });
         })
         .detach();
+    }
+
+    fn accepts_capture_result(&self, generation: u64) -> bool {
+        generation == self.capture_generation && self.is_processing()
     }
 }
 
@@ -6383,6 +6447,75 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_hidden_shortcut_attempt_cannot_lend_eligibility_to_menu_capture() {
+        use crate::onboarding::{Effect, Flow, Grants, Input, Permission, Session, Status, Step};
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        let grants = Grants {
+            statuses: Permission::REQUIRED.into_iter().map(|p| (p, Status::Granted)).collect(),
+            ..Default::default()
+        };
+        coordinator.onboarding = Some(Session::for_test(
+            Flow::tour(Step::TryIt, Some(grants)).with_first_capture(true, true, false),
+        ));
+        coordinator.onboarding.as_mut().unwrap().input(Input::ShortcutTriggered);
+        // The same cancellation path used by journal/startup failure, before any island appears.
+        coordinator.cancel_capture_attempt();
+        assert!(matches!(coordinator.island_phase, IslandPhase::Hidden));
+        assert!(coordinator.active_recording.is_none());
+        // A later menu recording has no ShortcutTriggered event.
+        coordinator.set_island_phase(IslandPhase::Recording);
+        coordinator.set_island_phase(IslandPhase::Processing);
+        coordinator.set_island_phase(IslandPhase::Completed {
+            finished_at: Instant::now(), frame_count: 1, duration_ms: 1000, inbox_count: 0,
+        });
+        assert_eq!(coordinator.onboarding.as_mut().unwrap().action("continue"), Effect::None);
+    }
+
+    #[test]
+    fn stale_finalization_cannot_complete_a_new_practice_recording() {
+        use crate::onboarding::{Effect, Flow, Grants, Input, Permission, Step};
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        let mut grants = Grants::default();
+        for permission in Permission::REQUIRED {
+            grants.statuses.insert(permission, crate::onboarding::Status::Granted);
+        }
+        let mut flow = Flow::tour(Step::TryIt, Some(grants))
+            .with_first_capture(true, true, false);
+        coordinator.set_island_phase(IslandPhase::Recording);
+        let first = coordinator.capture_generation;
+        coordinator.set_island_phase(IslandPhase::Processing);
+        assert!(coordinator.accepts_capture_result(first));
+        coordinator.set_island_phase(IslandPhase::Dismissing);
+        // The detached worker is still running, but dismissal revokes its UI result.
+        assert!(!coordinator.accepts_capture_result(first));
+        coordinator.set_island_phase(IslandPhase::Hidden);
+        flow.on(Input::ShortcutTriggered);
+        assert_eq!(flow.on(Input::CaptureStarted), Effect::Hide);
+        coordinator.set_island_phase(IslandPhase::Recording);
+        let second = coordinator.capture_generation;
+        let deliver = |coordinator: &mut ApparentCoordinator, flow: &mut Flow, generation| {
+            if coordinator.accepts_capture_result(generation) {
+                coordinator.set_island_phase(IslandPhase::Completed {
+                    finished_at: Instant::now(), frame_count: 1, duration_ms: 1000, inbox_count: 0,
+                });
+                flow.on(Input::CaptureEnded { completed: true });
+            }
+        };
+        deliver(&mut coordinator, &mut flow, first);
+        assert!(matches!(coordinator.island_phase, IslandPhase::Recording));
+        assert_eq!(flow.step(), Step::TryIt);
+        coordinator.set_island_phase(IslandPhase::Processing);
+        deliver(&mut coordinator, &mut flow, first);
+        assert!(coordinator.is_processing());
+        assert_eq!(flow.step(), Step::TryIt);
+        deliver(&mut coordinator, &mut flow, second);
+        assert_eq!(flow.step(), Step::Done);
+        assert!(!coordinator.accepts_capture_result(second), "a duplicate result is stale too");
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]

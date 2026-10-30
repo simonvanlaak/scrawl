@@ -9,7 +9,8 @@ const site = join(dirname(fileURLToPath(import.meta.url)), "..")
 const dist = join(site, "dist")
 const out = join(site, "dist-apparent")
 const html = readFileSync(join(dist, "index.html"), "utf8")
-if (!html.includes("https://app.tryapparent.com/") || !html.includes("Visual feedback gets lost") || !html.includes('id="belief"') || !html.includes("We believe ")) {
+const text = html.replace(/<[^>]*>/g, "")
+if (!html.includes("https://app.tryapparent.com/") || !text.includes("Visual feedback gets lost") || !text.includes("We believe work should be")) {
   throw new Error("Refusing to package a stale or unrelated build")
 }
 if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangton/tap")) {

@@ -24,22 +24,21 @@ test("public homepage has one interactive demonstration", () => {
   assert.equal(existsSync(join(publicDir, "apparent-demo-pi-poster.jpg")), false)
 })
 
-test("visible product names use the wordmark", () => {
+test("product names use the wordmark except the lowercase demo heading", () => {
   const html = readFileSync(join(publicDir, "index.html"), "utf8")
   const body = html.split("<body>")[1]
   assert.match(body, /class="pond-wordmark"[^>]*src="\/apparent-wordmark\.svg"[^>]*alt="Apparent"[^>]*\/> lets you show an agent/)
   assert.equal(existsSync(join(publicDir, "apparent-wordmark.svg")), true)
-  assert.doesNotMatch(body, />\s*(?:Apparent|apparent)\b/)
+  assert.match(body, /<h2>See what <span>apparent<\/span> captures<\/h2>/)
+  assert.doesNotMatch(body.replace('<h2>See what <span>apparent</span> captures</h2>', ""), />\s*(?:Apparent|apparent)\b/)
 })
 
-test("the belief keeps its words and scroll-linked work and enjoyable marks", () => {
+test("the belief headline highlights enjoyable without changing its words", () => {
   const html = readFileSync(join(publicDir, "index.html"), "utf8")
-  const heading = html.match(/<h2 id="belief">([\s\S]*?)<\/h2>/)?.[1]
-  assert.ok(heading, "the packaged page contains the current belief heading")
-  assert.equal(heading.replace(/<svg\b[\s\S]*?<\/svg>/g, "").replace(/<[^>]*>/g, ""),
-    "We believe work should be enjoyable and leave us free for late nights with friends.")
-  assert.match(heading, /class="work-circle"/)
-  assert.match(heading, /class="enjoy-highlight"/)
+  const belief = html.match(/<h2 id="belief">(.*?)<\/h2>/s)?.[1]
+  assert.ok(belief)
+  assert.equal(belief.replace(/<[^>]*>/g, ""), "We believe work should be enjoyable and leave us free for late nights with friends.")
+  assert.match(belief, /class="enjoy-highlight"/)
 })
 
 test("the first screen has a full-size reversible frog and one wave button", () => {

@@ -1,5 +1,9 @@
 # Linux
 
+The default-off native launch experiment and explicit AppImage/desktop URL-handler
+registration are documented in [native launch](native-launch.md). Opening a URL never
+installs or changes the selected desktop handler.
+
 Read this before changing `src/capture/linux.rs`, `src/ui/linux.rs`, `src/linux/`, `src/ink_view.rs`, `src/speech.rs`, or anything behind a `platform::` call in `src/capture.rs` and `src/ui.rs`. The shared GPUI UI uses platform adapters for the macOS and Linux shells. Windows code is retained but unsupported.
 
 ## X11 everywhere, Wayland around it

@@ -2,7 +2,8 @@
 Type=Application
 Name=Apparent
 Comment=Show an agent what you mean
-Exec=apparent
+Exec=apparent launch %u
+MimeType=x-scheme-handler/apparent;
 Icon=dev.kitlangton.apparent
 Categories=Utility;Development;
 Terminal=false

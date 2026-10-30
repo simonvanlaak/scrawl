@@ -140,15 +140,8 @@ fn listen_at(path: PathBuf) -> Result<flume::Receiver<Request>> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(owner_path)?;
-    let owner_meta = owner.metadata()?;
     ensure!(
-        owner_meta.is_file()
-            && owner_meta.uid() == unsafe { libc::geteuid() }
-            && owner_meta.mode() & 0o777 == 0o600,
-        "unsafe control owner lock"
-    );
-    ensure!(
-        unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
+        try_lock_owner(&owner)?,
         "control socket is already owned by another GUI"
     );
     if let Ok(meta) = std::fs::symlink_metadata(&path) {
@@ -227,6 +220,52 @@ fn valid_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Check GUI ownership without asking its UI to respond or connecting to its socket.
+/// Missing/released locks mean no owner; unsafe paths and I/O errors fail closed.
+pub fn running_owner() -> Result<bool> {
+    match socket_path(false) {
+        Ok(path) => running_owner_at(path),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn running_owner_at(path: PathBuf) -> Result<bool> {
+    let owner = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path.with_extension("lock"))
+    {
+        Ok(owner) => owner,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(!try_lock_owner(&owner)?)
+}
+
+fn try_lock_owner(owner: &std::fs::File) -> Result<bool> {
+    let meta = owner.metadata()?;
+    ensure!(
+        meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o777 == 0o600,
+        "unsafe control owner lock"
+    );
+    if unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(false)
+    } else {
+        Err(error.into())
+    }
+}
+
 pub fn command(action: Option<(Action, &str)>) -> Result<String> {
     if let Some((_, id)) = action {
         ensure!(valid_id(id), "capture ID must be 32 hex characters");
@@ -261,6 +300,95 @@ pub fn command(action: Option<(Action, &str)>) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_owner_does_not_require_an_answering_ui() {
+        #[cfg(target_os = "macos")]
+        let parent = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let parent = std::env::temp_dir();
+        let dir = parent.join(format!("apparent-owner-{}", new_id().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = dir.join("capture.sock");
+        let lock = path.with_extension("lock");
+        assert!(!running_owner_at(path.clone()).unwrap());
+        assert!(!lock.exists(), "a query must not create an owner lock");
+
+        let stale = UnixListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        drop(stale);
+        let owner = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .open(&lock)
+            .unwrap();
+        assert_eq!(unsafe { libc::flock(owner.as_raw_fd(), libc::LOCK_EX) }, 0);
+        assert!(
+            running_owner_at(path.clone()).unwrap(),
+            "a held owner lock must prevent another GUI even when connect is refused"
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert!(running_owner_at(path.clone()).unwrap());
+        let listener = UnixListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        assert!(running_owner_at(path.clone()).unwrap());
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "an owner query must not connect, regardless of the listener backlog"
+        );
+        drop(listener);
+        let inode = std::fs::symlink_metadata(&path).unwrap().ino();
+        drop(owner);
+        assert!(!running_owner_at(path.clone()).unwrap());
+        assert_eq!(std::fs::symlink_metadata(&path).unwrap().ino(), inode);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(lock).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn running_owner_rejects_unsafe_locks_without_changing_them() {
+        #[cfg(target_os = "macos")]
+        let parent = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let parent = std::env::temp_dir();
+        let dir = parent.join(format!("apparent-owner-{}", new_id().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = dir.join("capture.sock");
+        let lock = path.with_extension("lock");
+
+        std::fs::write(&lock, b"do not change").unwrap();
+        for mode in [0o644, 0o000] {
+            std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(running_owner_at(path.clone()).is_err());
+            assert_eq!(
+                std::fs::symlink_metadata(&lock).unwrap().mode() & 0o777,
+                mode
+            );
+        }
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&lock).unwrap(), b"do not change");
+        let target = dir.join("target");
+        std::fs::rename(&lock, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &lock).unwrap();
+        assert!(running_owner_at(path.clone()).is_err());
+        assert!(std::fs::symlink_metadata(&lock)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        std::fs::remove_file(&lock).unwrap();
+        std::fs::create_dir(&lock).unwrap();
+        assert!(running_owner_at(path).is_err());
+        std::fs::remove_dir(lock).unwrap();
+        std::fs::remove_file(target).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn competing_launches_cannot_remove_the_winning_control_socket() {

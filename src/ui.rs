@@ -6088,6 +6088,14 @@ pub fn run_app(
     screenshot_out: Option<PathBuf>,
 ) {
     let app = Application::new().with_assets(crate::icons::Assets);
+    #[cfg(target_os = "macos")]
+    app.on_open_urls(|urls| {
+        for url in urls {
+            if crate::launch_instance::request_url(&url).is_err() {
+                apparent_log("Rejected unsupported or disabled Apparent launch URL");
+            }
+        }
+    });
     app.run(move |cx: &mut App| {
         if let Err(error) =
             cx.text_system()
@@ -6188,6 +6196,22 @@ pub fn run_app(
                     platform::poll_status_bar();
                     crate::onboarding_window::poll(cx);
                     crate::settings_window::poll(cx);
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if crate::launch_instance::take_open() {
+                        loop_coord.update(cx, |coord, _| {
+                            if !crate::launch_url::can_present(
+                                coord.is_recording(),
+                                coord.is_processing(),
+                                coord.is_selecting(),
+                            ) {
+                                apparent_log("Launch requested; active capture left unchanged");
+                            } else if let Some(session) = coord.onboarding.as_mut() {
+                                session.show();
+                            } else {
+                                coord.open_settings(None);
+                            }
+                        });
+                    }
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
                     if let Some(ref rx) = agent_rx {
                         while let Ok(request) = rx.try_recv() {

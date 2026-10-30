@@ -7,6 +7,12 @@ description: Use when told "make it apparent" or asked for video proof.
 
 When Simon says "make it apparent," treat it as a request to run this skill and show the result, not a request to edit the product name or copy. Use this developer skill for a short proof video of a visible change. Keep the raw capture as evidence and deliver a separate polished share copy by default. Inspect the entire take before delivery; never commit generated media. A recording is not a substitute for tests, nor is a screen-share of the coding session a demonstration of the finished result.
 
+## Scope: recording first, extra visuals only when needed
+
+This skill owns real screen recording, source inspection, timed narration/subtitles and playable delivery. Keep the short background → problem → fix → now → human action narration plan below. State material limits before the ending; the story must be understandable without the chat.
+
+**If recording is not enough to explain the point and you need visuals, use [apparent-visual-explanations](../apparent-visual-explanations/SKILL.md).** Use that companion also when explanatory visuals are explicitly requested. It owns optional slides, diagrams, illustrations, title/end cards and callouts, their full story structure, Apparent brand and visual QA. Otherwise stay with real footage; do not add slides by default. Never restyle recorded UI, replace requested live proof with slides, or redesign the existing rounded dark captions. A scripted slide window recorded through Apparent is still a slideshow, not app-behavior proof. If live capture is blocked, report the blocker and obtain agreement before substituting an illustrated explanation.
+
 ## Required spoken-style explanation and reusable CLI
 
 Every delivered proof video needs timed natural sentences explaining the action, evidence and result, with matching burned subtitles and synchronized TTS by default. Retain editable cues, SRT and script. This is postproduction explanation, not a transcription or replacement of recorded evidence. Disclose synthetic narration; never play it through speakers during capture. Simon can request a silent captioned copy instead. Suitable live narration need not be duplicated.

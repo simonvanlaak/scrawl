@@ -765,9 +765,7 @@ impl SharedNativePill {
             return;
         }
 
-        if dt > 0.0 {
-            st.model.advance(dt);
-        }
+        st.model.advance_at(dt, std::time::Instant::now());
         st.dirty = false;
 
         let frame = st.model.frame();
@@ -1781,8 +1779,10 @@ mod tests {
         let silent = still(&mut pipelines, &mut model, &pres, 1.0);
         let (_, items) = model::layout_of(&pres, "0:00", model.labels, &model.metrics);
         let meter = items.iter().find(|item| item.id == ElemId::InputEqualizer).unwrap().rect;
-        assert!(model.set_input_activity(Some((1280, 0.8))));
-        model.advance(0.05);
+        assert!(model.set_input_activity(Some(crate::audio::InputActivity {
+            count: 1280, level: 0.8, captured_at: std::time::Instant::now(),
+        })));
+        model.advance_at(0.05, std::time::Instant::now() + std::time::Duration::from_millis(50));
         let active = still(&mut pipelines, &mut model, &pres, 0.0);
         let scale = pipelines.scale as usize;
         let x0 = (meter[0] as usize + 2) * scale;

@@ -1,4 +1,4 @@
-//! Off-by-default pause-ahead transcription for the local Parakeet engine.
+//! Pause-ahead transcription for the local Linux Parakeet engine.
 //! Completed speech is processed while capture continues; the saved WAV supplies the tail.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -18,7 +18,6 @@ const MAX_PENDING_MS: usize = 60_000;
 
 pub fn wanted() -> bool {
     cfg!(target_os = "linux")
-        && crate::handoff::experiment("pauseTranscribe")
         && crate::transcribe::Engine::preferred() == crate::transcribe::Engine::Apple
 }
 
@@ -217,6 +216,32 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
+    fn local_recordings_use_pause_transcription_without_an_experiment() {
+        // Engine overrides are process-wide. Keep each public policy check isolated
+        // from the rest of the suite, with no experiment enabled in the child.
+        const CASE: &str = "APPARENT_PAUSE_POLICY_TEST_ENGINE";
+        if let Ok(name) = std::env::var(CASE) {
+            let engine = crate::transcribe::Engine::parse(&name).unwrap();
+            crate::transcribe::set_override(engine);
+            assert!(!crate::handoff::experiment("pauseTranscribe"));
+            assert_eq!(wanted(), engine == crate::transcribe::Engine::Apple);
+            return;
+        }
+        for name in ["apple", "hex", "command"] {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "pause_transcribe::tests::local_recordings_use_pause_transcription_without_an_experiment",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env(CASE, name)
+                .status()
+                .unwrap();
+            assert!(status.success(), "pause policy for {name}");
+        }
+    }
+
+    #[test]
     fn finished_pause_is_processed_before_stop_and_tail_is_not_lost() {
         let samples = Arc::new(Mutex::new(Vec::new()));
         let (sent, received) = mpsc::channel();
@@ -323,6 +348,29 @@ mod tests {
             pause_boundary(&samples),
             Some((0, 5 * RATE + RATE * 4 / 10 + RATE / 5))
         );
+    }
+
+    #[test]
+    fn a_chunk_requires_700_ms_of_quiet_and_keeps_200_ms_margins() {
+        let mut samples = vec![0.0; RATE];
+        samples.extend(vec![0.2; 3 * RATE]);
+        samples.extend(vec![0.0; 699 * RATE / 1_000]);
+        assert_eq!(pause_boundary(&samples), None);
+        samples.extend(vec![0.0; RATE / 1_000]);
+        assert_eq!(
+            pause_boundary(&samples),
+            Some((800 * RATE / 1_000, 4 * RATE + RATE / 5))
+        );
+    }
+
+    #[test]
+    fn minimum_chunk_is_three_seconds_including_the_trailing_margin() {
+        let mut too_short = vec![0.2; 2_750 * RATE / 1_000];
+        too_short.extend(vec![0.0; RATE]);
+        assert_eq!(pause_boundary(&too_short), None);
+        let mut enough = vec![0.2; 2_800 * RATE / 1_000];
+        enough.extend(vec![0.0; RATE]);
+        assert_eq!(pause_boundary(&enough), Some((0, 3 * RATE)));
     }
 
     #[test]

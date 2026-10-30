@@ -14,8 +14,9 @@
 //!   across `Recording (chips) -> Selecting`) travel on a `0.24 s` zero-bounce spring with up to
 //!   `4 pt` blur in transit that clears before landing.
 
-use crate::audio::InputWarning;
+use crate::audio::{InputActivity, InputWarning};
 use crate::ui::SelectionMode;
+use std::time::Instant;
 
 // ─── Geometry (pt in the fixed 640 × 84 panel) ──────────────────────────────────────────────
 
@@ -927,7 +928,8 @@ pub struct PillModel {
     pub metrics: Metrics,
     pub mic_warning: Option<InputWarning>,
     input_count: usize,
-    input_at: f32,
+    input_at: Instant,
+    input_updated_at: Instant,
     input_target: f32,
     input_level: f32,
 }
@@ -962,29 +964,67 @@ impl PillModel {
             metrics,
             mic_warning: None,
             input_count: 0,
-            input_at: 0.0,
+            input_at: Instant::now(),
+            input_updated_at: Instant::now(),
             input_target: 0.0,
             input_level: 0.0,
         }
     }
 
     /// Captured PCM only. Sample arrival does not establish intelligibility.
-    pub fn set_input_activity(&mut self, input: Option<(usize, f32)>) -> bool {
-        let mut changed = false;
-        if input.is_none_or(|(count, _)| count < self.input_count) {
-            changed = self.input_target > 0.0 || self.input_level > 0.001;
+    pub fn set_input_activity(&mut self, input: Option<InputActivity>) -> bool {
+        self.set_captured_input_at(input, Instant::now())
+    }
+
+    #[cfg(test)]
+    fn set_input_activity_at(&mut self, input: Option<(usize, f32)>, now: Instant) -> bool {
+        self.set_input_activity_captured_at(input, now, now)
+    }
+
+    #[cfg(test)]
+    fn set_input_activity_captured_at(&mut self, input: Option<(usize, f32)>, captured_at: Instant, now: Instant) -> bool {
+        self.set_captured_input_at(input.map(|(count, level)| InputActivity { count, level, captured_at }), now)
+    }
+
+    pub fn set_captured_input_at(&mut self, input: Option<InputActivity>, now: Instant) -> bool {
+        let mut changed = self.update_input_activity(now);
+        if input.is_none_or(|input| input.count < self.input_count) {
+            changed |= self.input_target > 0.0 || self.input_level > 0.001;
             self.input_count = 0;
             self.input_target = 0.0;
         }
-        if let Some((count, level)) = input {
+        if let Some(input) = input {
+            let InputActivity { count, level, captured_at } = input;
             if count > self.input_count {
-                self.input_at = self.t;
-                self.input_target = level.clamp(0.0, 1.0);
+                // Neither a delayed first read nor a repeated read renews PCM age.
+                self.input_at = captured_at;
+                self.input_target = if input.is_recent(now) && level.is_finite()
+                    && matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
+                    level.clamp(0.0, 1.0)
+                } else { 0.0 };
                 changed |= self.input_target > 0.0 || self.input_level > 0.001;
             }
             self.input_count = count;
         }
         changed
+    }
+
+    fn update_input_activity(&mut self, now: Instant) -> bool {
+        let dt = now.saturating_duration_since(self.input_updated_at).as_secs_f32();
+        self.input_updated_at = now;
+        // Expire before the entire elapsed filter step: a frame crossing the boundary
+        // conservatively releases for the whole interval rather than rising on old PCM.
+        if now.checked_duration_since(self.input_at).is_none_or(|age| age.as_secs_f32() >= 0.12)
+            || !matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. })
+        {
+            self.input_target = 0.0;
+        }
+        let before = self.input_level;
+        // Unlike spring integration, elapsed meter decay is neither scaled nor capped.
+        let rate = if self.input_target > self.input_level { 18.0 } else { 8.0 };
+        let alpha = if self.reduced { 1.0 } else { 1.0 - (-dt * rate).exp() };
+        self.input_level += (self.input_target - self.input_level) * alpha;
+        before != self.input_level
     }
 
     pub fn set_mic_warning(&mut self, warning: Option<InputWarning>) {
@@ -1000,6 +1040,10 @@ impl PillModel {
     pub fn set_pres(&mut self, next: Pres) {
         if self.pres == next {
             return;
+        }
+        if !matches!(next, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
+            self.input_target = 0.0;
+            self.input_level = 0.0;
         }
         let layout_changed = !self.pres.same_layout(&next);
         let was_visible = !matches!(self.pres, Pres::Hidden);
@@ -1354,13 +1398,18 @@ impl PillModel {
         (cur_w - self.morph_start_w) / span >= CONTENT_DELAY
     }
 
+    /// Meter time is monotonic real time, independent of bounded/scaled spring `dt`.
+    pub fn advance_at(&mut self, dt: f32, now: Instant) {
+        self.update_input_activity(now);
+        let dt = dt.clamp(0.0, 0.1);
+        if dt > 0.0 {
+            self.integrate(dt);
+        }
+    }
+
     /// Advances the simulation by `dt` seconds.
     pub fn advance(&mut self, dt: f32) {
-        let dt = dt.clamp(0.0, 0.1);
-        if dt <= 0.0 {
-            return;
-        }
-        self.integrate(dt);
+        self.advance_at(dt, Instant::now());
     }
 
     fn integrate(&mut self, dt: f32) {
@@ -1368,9 +1417,6 @@ impl PillModel {
             return;
         }
         self.t += dt;
-        let target = if self.t - self.input_at < 0.12 && matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) { self.input_target } else { 0.0 };
-        let alpha = if self.reduced { 1.0 } else if target > self.input_level { (dt * 18.0).min(1.0) } else { (dt * 8.0).min(1.0) };
-        self.input_level += (target - self.input_level) * alpha;
         if self.geo_at <= self.t + 1e-3 && self.geo_pres != self.pres {
             self.apply_geometry();
         }
@@ -1718,7 +1764,7 @@ impl PillModel {
     /// True once every spring has settled and no delayed geometry transition is pending.
     pub fn is_at_rest(&self) -> bool {
         if self.input_level > 0.001
-            || (self.input_target > 0.0 && self.t - self.input_at < 0.12)
+            || self.input_target > 0.0
         {
             return false;
         }
@@ -2345,28 +2391,166 @@ mod tests {
     }
 
     #[test]
+    fn input_meter_rejects_delayed_first_observation_of_old_pcm() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let produced = Instant::now();
+            let resumed = produced + std::time::Duration::from_millis(121);
+            model.set_input_activity_captured_at(Some((640, 0.0)), produced, produced);
+            // Producer appended while the GUI was stalled; this is its FIRST read.
+            model.set_input_activity_captured_at(Some((1280, 0.8)), produced, resumed);
+            model.advance_at(0.025, resumed + std::time::Duration::from_millis(10));
+            assert_eq!(model.frame().input_level, 0.0,
+                "obsolete PCM rose on first observation (reduced={reduced})");
+            let fresh = resumed + std::time::Duration::from_millis(20);
+            assert!(model.set_input_activity_captured_at(Some((2560, 0.8)), fresh, fresh));
+            model.advance_at(0.025, fresh + std::time::Duration::from_millis(20));
+            assert!(model.frame().input_level > 0.0);
+        }
+    }
+
+    #[test]
+    fn input_meter_expiry_boundary_releases_over_the_entire_filter_step() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let start = Instant::now();
+            model.set_input_activity_captured_at(Some((1280, 0.8)), start, start);
+            model.advance_at(0.025, start + std::time::Duration::from_millis(119));
+            let before = model.frame().input_level;
+            assert!(before > 0.0);
+            model.advance_at(0.0001, start + std::time::Duration::from_millis(120));
+            let expected = if reduced { 0.0 } else { before * (-0.001_f32 * 8.0).exp() };
+            assert!((model.frame().input_level - expected).abs() < 0.000001);
+            assert!(model.frame().input_level < before, "expiry must release, not rise");
+        }
+    }
+
+    #[test]
+    fn input_meter_rejects_future_timestamp_and_zero_count() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let now = Instant::now();
+            model.set_input_activity_captured_at(Some((1280, 0.8)), now + std::time::Duration::from_secs(1), now);
+            model.advance_at(0.025, now + std::time::Duration::from_millis(20));
+            assert_eq!(model.frame().input_level, 0.0);
+            model.set_input_activity_captured_at(Some((0, 0.8)), now, now + std::time::Duration::from_millis(20));
+            model.advance_at(0.025, now + std::time::Duration::from_millis(40));
+            assert_eq!(model.frame().input_level, 0.0);
+        }
+    }
+
+    #[test]
+    fn input_meter_does_not_rise_when_renderer_resumes_after_pcm_stalls() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            model.set_input_activity_at(Some((1280, 0.8)), Instant::now());
+            let now = std::time::Instant::now();
+            // No new PCM. A delayed frame still advances springs by only their bounded dt.
+            model.advance_at(0.025, now + std::time::Duration::from_secs(2));
+            assert_eq!(model.frame().input_level, 0.0,
+                "stale PCM must not rise on resume (reduced={reduced})");
+        }
+    }
+
+    #[test]
     fn input_meter_tracks_new_pcm_and_settles_on_silence_or_stalled_samples() {
         let mut model = PillModel::new(Metrics::default());
         model.set_pres(Pres::Recording { chips: false, has_iphone: false });
         for _ in 0..180 { model.advance(FRAME_DT); }
         assert!(model.is_at_rest());
-        assert!(model.set_input_activity(Some((1280, 0.8))));
+        let start = Instant::now();
+        let at = |ms| start + std::time::Duration::from_millis(ms);
+        assert!(model.set_input_activity_at(Some((1280, 0.8)), at(0)));
         assert!(!model.is_at_rest(), "new PCM must wake a settled pill");
-        model.advance(0.05);
+        model.advance_at(0.05, at(50));
         assert!(model.frame().input_level > 0.0);
 
-        model.set_input_activity(Some((2560, 0.0)));
-        for _ in 0..50 { model.advance(0.02); }
+        model.set_input_activity_at(Some((2560, 0.0)), at(50));
+        for i in 1..=50 { model.advance_at(0.02, at(50 + i * 20)); }
         assert!(model.frame().input_level < 0.01, "silence must settle the bars");
 
-        model.set_input_activity(Some((3840, 0.9)));
-        model.advance(0.05);
+        model.set_input_activity_at(Some((3840, 0.9)), at(1050));
+        model.advance_at(0.05, at(1100));
         assert!(model.frame().input_level > 0.0);
-        for _ in 0..50 {
-            model.set_input_activity(Some((3840, 0.9)));
-            model.advance(0.02);
+        for i in 1..=50 {
+            model.set_input_activity_at(Some((3840, 0.9)), at(1100 + i * 20));
+            model.advance_at(0.02, at(1100 + i * 20));
         }
         assert!(model.frame().input_level < 0.01, "a repeated sample count cannot hold a peak");
+    }
+
+    #[test]
+    fn input_meter_real_elapsed_decay_ignores_spring_time_scale_and_settles() {
+        for reduced in [false, true] {
+            for spring_dt in [0.0, 0.00025, 0.025] {
+                let mut model = PillModel::new(Metrics::default());
+                model.reduced = reduced;
+                model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+                for _ in 0..180 { model.advance(FRAME_DT); }
+                let now = Instant::now();
+                model.set_input_activity_at(Some((1280, 0.8)), now);
+                model.advance_at(0.025, now + std::time::Duration::from_millis(50));
+                let active = model.frame().input_level;
+                assert!(active > 0.0);
+                // Both snapshot and renderer pause, then the unchanged producer count is read.
+                let resumed = now + std::time::Duration::from_secs(2);
+                model.set_input_activity_at(Some((1280, 0.8)), resumed);
+                model.advance_at(spring_dt, resumed);
+                assert!(model.frame().input_level < 0.001, "real elapsed decay was capped");
+                assert!(model.frame().input_level < active);
+                assert!(model.is_at_rest(), "a stalled peak must not keep the display link awake");
+                model.set_input_activity_at(Some((2560, 0.8)), resumed);
+                assert!(!model.is_at_rest(), "new PCM must wake after a stall");
+                model.advance_at(spring_dt, resumed + std::time::Duration::from_millis(50));
+                assert!(model.frame().input_level > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn input_meter_reset_restart_and_nonrecording_do_not_retain_peaks() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let start = Instant::now();
+            let at = |ms| start + std::time::Duration::from_millis(ms);
+            model.set_input_activity_at(Some((2560, 0.8)), at(0));
+            model.advance_at(0.025, at(50));
+            assert!(model.frame().input_level > 0.0);
+            model.set_input_activity_at(None, at(50));
+            model.advance_at(0.025, at(1050));
+            assert!(model.frame().input_level < 0.001);
+            model.set_input_activity_at(Some((1280, 0.8)), at(1050));
+            model.advance_at(0.025, at(1100));
+            assert!(model.frame().input_level > 0.0, "reset permits a new recorder");
+            model.set_input_activity_at(Some((640, 0.0)), at(1100));
+            model.advance_at(0.025, at(2100));
+            assert!(model.frame().input_level < 0.001, "a lower count resets the old target");
+            for (i, pres) in [Pres::Hidden, Pres::Processing].into_iter().enumerate() {
+                let base = 2100 + i as u64 * 200;
+                model.set_input_activity_at(Some((2560 + i * 2560, 0.8)), at(base));
+                model.advance_at(0.025, at(base + 50));
+                assert!(model.frame().input_level > 0.0);
+                model.set_pres(pres);
+                assert_eq!(model.frame().input_level, 0.0, "leaving recording clears the peak");
+                model.set_input_activity_at(Some((3840 + i * 2560, 0.9)), at(base + 50));
+                model.advance_at(0.025, at(base + 100));
+                assert_eq!(model.frame().input_level, 0.0);
+                model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+                model.set_input_activity_at(Some((3840 + i * 2560, 0.9)), at(base + 100));
+                model.advance_at(0.025, at(base + 150));
+                assert_eq!(model.frame().input_level, 0.0, "return cannot revive the same PCM");
+            }
+        }
     }
 
     #[test]

@@ -53,4 +53,5 @@ LDAI_OUTPUT="Apparent-$arch.AppImage" linuxdeploy \
   --icon-file "$root/packaging/linux/dev.kitlangton.apparent.png" \
   --plugin gstreamer \
   --output appimage
+bash "$root/scripts/linux/check-appimage-encoder.sh" "$out/Apparent-$arch.AppImage"
 echo "$out/Apparent-$arch.AppImage"

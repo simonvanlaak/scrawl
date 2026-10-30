@@ -22,6 +22,15 @@
   ],
   "features": [
     {
+      "id": "site-belief-pond",
+      "group": "install",
+      "name": "Interactive homepage belief",
+      "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
+      "status": "main",
+      "platforms": ["mac", "linux"],
+      "docs": ["site/docs/belief-release.md"]
+    },
+    {
       "id": "feedback-issue",
       "group": "delivery",
       "name": "Give Feedback…",
@@ -201,6 +210,16 @@
       "docs": ["README.md#capture-controls"]
     },
     {
+      "id": "agent-capture-control",
+      "group": "record",
+      "name": "Local capture inspection and explicit stop/cancel",
+      "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
+      "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "platforms": ["mac", "linux"],
+      "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
+      "docs": ["docs/capture.md", "docs/linux.md"]
+    },
+    {
       "id": "capsule",
       "group": "record",
       "name": "Capsule",
@@ -288,7 +307,7 @@
       "group": "record",
       "name": "Transcribe at pauses",
       "says": "On Linux, processes completed speech during recording with Parakeet and finishes the remaining audio at stop.",
-      "status": "experiment:pauseTranscribe",
+      "status": "main",
       "added": "2026-10-27",
       "platforms": ["linux"],
       "docs": ["docs/keyframes-and-text.md"]
@@ -397,8 +416,8 @@
     {
       "id": "auto-paste-draft",
       "group": "finish",
-      "name": "Paste a finished capture into its original draft",
-      "says": "Off-by-default T3 Code trial on Hyprland: restore the user-chosen window after Finish and try image-first, text-second paste. Leaves the paper visible because acceptance cannot be verified; never sends the draft.",
+      "name": "Automatic original-draft handoff (blocked)",
+      "says": "Off by default; Linux currently saves the bundle and copies summary text but refuses automatic paste because window identity cannot prove the intended draft or accepted image attachment. Attach the sheet and paste the text manually; never sends the draft.",
       "status": "experiment:autoPasteDraft",
       "added": "2026-10-27",
       "platforms": ["linux"],
@@ -852,7 +871,7 @@
       "id": "cli-copy",
       "group": "cli",
       "name": "copy",
-      "says": "Copy a saved capture to the clipboard without selecting or contacting an agent session.",
+      "says": "Copy a saved capture to the clipboard without contacting an agent session. The confirmation explains that copy is text-only by default and points to the contact sheet; the user checks the unsent draft for an image.",
       "status": "main",
       "added": "2026-10-28",
       "platforms": ["mac", "linux"],
@@ -881,8 +900,8 @@
       "id": "export-cli",
       "group": "export",
       "name": "apparent export",
-      "says": "One .mp4 with ink, pins and clicks burned in, cropped to the activity, audio in sync; --zoom eases toward clicks and marks.",
-      "status": "stable@0.3.4",
+      "says": "One .mp4 with ink, pins, clicks and aligned audio. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out and explicit crops are respected.",
+      "status": "main",
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
@@ -891,7 +910,7 @@
       "id": "export-cli-linux",
       "group": "export",
       "name": "apparent export on Linux",
-      "says": "The CLI burns ink, pins and click ripples into an MP4, with optional auto-zoom and aligned WAV audio, using FFmpeg and ffprobe.",
+      "says": "The CLI burns ink, pins and click ripples into an MP4 with aligned WAV audio, using FFmpeg and ffprobe. Opens on the whole capture for 0.5 s before smooth activity zoom; --no-zoom opts out and explicit crops are respected.",
       "status": "main",
       "added": "2026-10-29",
       "platforms": ["linux"],

@@ -1,4 +1,6 @@
 mod agent_context;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod agent_capture;
 mod audio;
 mod autocrop;
 // Windows looks elements up through UI Automation (`win/uia.rs`); other systems have no lookup.
@@ -232,6 +234,9 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect or explicitly end a GUI capture. Same user and machine only; never toggles or sends.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Capture { #[command(subcommand)] command: CaptureCommand },
     /// Launch the GPUI menu-bar and review application.
     App {
         /// Start a capture session immediately on launch.
@@ -294,6 +299,10 @@ enum Command {
     #[cfg(target_os = "linux")]
     #[command(hide = true)]
     DecoderCheck { movie: PathBuf },
+    /// Verify that this Linux runtime can encode a synthetic H.264 MP4.
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    EncoderCheck { movie: PathBuf },
     /// Transcribe a bundle's audio again with Apple Speech, in place: its transcript, each
     /// keyframe's words, `apparent.json` and `summary.md`. Apparent does this for captures
     /// made while the speech model was still downloading.
@@ -416,9 +425,9 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
-    /// Export a bundle's recording as one shareable .mp4: H.264 video cropped to the activity
-    /// with the ink and click ripples burned in, AAC audio in sync, and optionally Screen
-    /// Studio-style auto-zoom (`--zoom`). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
+    /// Export a bundle's recording as one shareable .mp4: H.264 video opening on the full capture
+    /// with ink and click ripples burned in, AAC audio in sync, and smooth activity zoom by
+    /// default (`--no-zoom` opts out). Encoding uses AVFoundation on Mac and FFmpeg on Linux.
     Export {
         /// Path to `.apparent` bundle directory or `latest`.
         #[arg(default_value = "latest")]
@@ -428,14 +437,13 @@ enum Command {
         out: Option<PathBuf>,
         /// `full`, `auto` (the activity region), or `x,y,w,h` as fractions of the capture (all
         /// ≤ 1) or pixels of the recording.
-        #[arg(long, default_value = "auto")]
+        #[arg(long, default_value = "full")]
         crop: export::crop::CropArg,
         /// Longest side of the output in pixels; it is never scaled up.
         #[arg(long, default_value_t = export::crop::DEFAULT_LONG_EDGE)]
         size: u32,
-        /// Ease in toward clicks, drags, marks and laser points, hold while activity stays
-        /// nearby, and ease back out.
-        #[arg(long)]
+        /// Disable the default smooth camera zoom toward clicks, drags and marks.
+        #[arg(long = "no-zoom", action = clap::ArgAction::SetFalse, default_value_t = true)]
         zoom: bool,
         /// Leave out the red ink, pins and laser.
         #[arg(long)]
@@ -556,6 +564,17 @@ enum Command {
     },
     /// Print the agent skill that teaches coding agents to read captures and use this CLI (`bunx skills add tryapparent/apparent` installs it).
     Skill,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Subcommand)]
+enum CaptureCommand {
+    /// Read the running GUI's phase and opaque capture identity as JSON.
+    State,
+    /// Finish only a matching, already-active capture.
+    Stop { capture_id: String },
+    /// Discard only a matching pending or active capture.
+    Cancel { capture_id: String },
 }
 
 /// `skills/apparent/SKILL.md`, the same text `bunx skills add tryapparent/apparent` installs.
@@ -1611,6 +1630,20 @@ fn main() -> Result<()> {
         },
     };
     match command {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Capture { command } => {
+            let action = match &command {
+                CaptureCommand::State => None,
+                CaptureCommand::Stop { capture_id } => Some((agent_capture::Action::Stop, capture_id.as_str())),
+                CaptureCommand::Cancel { capture_id } => Some((agent_capture::Action::Cancel, capture_id.as_str())),
+            };
+            let response = agent_capture::command(action)?;
+            println!("{response}");
+            let value: serde_json::Value = serde_json::from_str(&response)?;
+            ensure!(value.get("error").is_none(), "GUI capture control: {response}");
+            ensure!(!matches!(value["outcome"].as_str(), Some("wrong_capture" | "not_ready")), "GUI capture control: {response}");
+            Ok(())
+        }
         Command::App { record, iphone } => {
             #[cfg(target_os = "windows")]
             {
@@ -1718,6 +1751,10 @@ fn main() -> Result<()> {
                 capture::screen_capture_usable(false),
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
+            #[cfg(target_os = "linux")]
+            if let Some(warning) = linux::media::encoder_warning() {
+                anyhow::bail!("{warning}");
+            }
             let target = record_target(window.as_deref())?;
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
@@ -2104,6 +2141,12 @@ fn main() -> Result<()> {
             println!("Decoded {} full-quality H.264 keyframe(s) ({}x{})", frames.len(), frame.width, frame.height);
             Ok(())
         }
+        #[cfg(target_os = "linux")]
+        Command::EncoderCheck { movie } => {
+            linux::media::encoder_check(&movie)?;
+            println!("Encoded and decoded H.264 MP4: {}", movie.display());
+            Ok(())
+        }
         Command::SckProbe { watch } => {
             let end = std::time::Instant::now() + std::time::Duration::from_secs(watch.unwrap_or(0));
             loop {
@@ -2413,7 +2456,7 @@ fn main() -> Result<()> {
         Command::Copy { bundle } => {
             let dir = handoff::resolve_bundle_dir(&bundle)?;
             handoff::copy_bundle_to_clipboard(&dir)?;
-            println!("Copied {} to clipboard", dir.display());
+            println!("{}", copy_confirmation(&dir));
             Ok(())
         }
         Command::Preview {
@@ -2435,9 +2478,25 @@ fn main() -> Result<()> {
     }
 }
 
+fn copy_confirmation(dir: &std::path::Path) -> String {
+    format!(
+        "Copied {} to clipboard. Copy is text-only by default; it cannot confirm an image attachment. Use Apparent's Paste control for image + text, or attach {} manually; check the draft before sending.",
+        dir.display(),
+        dir.join("contact-sheet.png").display()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_confirmation_does_not_imply_visuals_reached_the_agent() {
+        let confirmation = copy_confirmation(std::path::Path::new("/captures/example.apparent"));
+        assert!(confirmation.contains("contact-sheet.png"), "{confirmation}");
+        assert!(confirmation.contains("Paste"), "{confirmation}");
+        assert!(confirmation.contains("check the draft"), "{confirmation}");
+    }
 
     #[test]
     fn movie_without_safe_screenshots_is_not_a_bundle() {
@@ -2485,6 +2544,27 @@ mod tests {
     #[test]
     fn cli_identifies_as_apparent() {
         assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
+    fn export_cli_zooms_by_default_and_no_zoom_opts_out() {
+        for (args, expected) in [
+            (vec!["apparent", "export", "capture.apparent"], true),
+            (vec!["apparent", "export", "capture.apparent", "--no-zoom"], false),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Export { zoom, crop, .. }) = cli.command else {
+                panic!("expected export command");
+            };
+            assert_eq!(zoom, expected);
+            assert_eq!(crop, export::crop::CropArg::Full);
+        }
+        assert!(Cli::try_parse_from(["apparent", "export", "capture.apparent", "--zoom"]).is_err());
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let help = command.find_subcommand_mut("export").unwrap().render_long_help().to_string();
+        assert!(help.contains("--no-zoom"));
+        assert!(!help.contains("--zoom"), "retired flag must not appear in help: {help}");
     }
 
     #[test]

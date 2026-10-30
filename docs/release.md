@@ -2,7 +2,7 @@
 
 ## Temporary Mac preview releases
 
-Until Developer ID signing is affordable, the fork's **Mac preview release** workflow
+The fork's **Mac preview release** workflow
 (`.github/workflows/release-mac-preview.yml`) is the regular distribution path for Apple silicon.
 It is dispatched manually from `tryapparent/apparent`'s `main`: **Actions → Mac preview release →
 Run workflow → main**. It builds on `macos-26`, assigns version `0.<workflow run>.<attempt>` and
@@ -28,16 +28,26 @@ Sparkle key and production appcast are unrelated. Test an actual update between 
 a Mac before announcing it; CI packaging and an appcast alone do not prove installation works.
 
 The app is named `Apparent Preview` with bundle ID `dev.simonvanlaak.apparent.preview`, so it
-does not overwrite `Apparent.app` or follow Kit's Sparkle feed. It is ad-hoc signed, **not
-notarized**: the first download may require System Settings → Privacy & Security → Open Anyway.
+does not overwrite `Apparent.app` or follow Kit's Sparkle feed. By default it is ad-hoc signed,
+**not notarized**: the first download may require System Settings → Privacy & Security → Open Anyway.
 Sparkle verifies subsequent ZIPs with the separate EdDSA key; this is not Apple notarization.
 It still uses Apparent's normal
 capture/config paths, so it is not a separate data profile: don't run it alongside production
 Apparent or assume their settings and hotkeys are independent. The preview cannot register itself
-at login or install the `apparent` command, to avoid replacing production integrations. Do not use
-this workflow for a Developer ID/notarized release; that still requires the checks below. Moving
+at login or install the `apparent` command, to avoid replacing production integrations. The optional
+Developer ID setup below keeps these preview restrictions. Moving
 users from the preview back to a signed stable app is a separate migration, not an update in this
 feed. The stable app's build-number ordering and bundle identity will need an explicit plan.
+
+### Optional Developer ID signing
+
+Follow [the credential setup and first signed-release checklist](mac-signing.md) to prepare
+Simon's certificate and notarization API key. `MAC_APPLE_SIGNING_ENABLED=true` enables the
+signed/notarized path in this same workflow without changing the preview identity or Sparkle
+key/feed. Leave it unset/`false` until credentials are ready. Native signing and the first
+ad-hoc-to-signed update remain unverified until tested with that real certificate.
+
+## Kit's original production release procedure
 
 Everything lands on `main` through pull requests, the version bump and the appcast included. A release
 is one Mac build (notarized DMG + Sparkle zip) and two Linux AppImages, built from the same tagged

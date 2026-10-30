@@ -488,7 +488,7 @@ enum Exporter {
         if let slot = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
           let requested = CMTimeRange(start: cm(plan.audioStartMs), duration: cm(plan.audioLengthMs))
           let available = try await track.load(.timeRange)
-          let overlap = CMTimeRangeGetIntersection(requested, available)
+          let overlap = CMTimeRangeGetIntersection(requested, otherRange: available)
           try slot.insertTimeRange(overlap, of: track, at: CMTimeSubtract(overlap.start, requested.start))
           let reader = try AVAssetReader(asset: composition)
           let output = AVAssetReaderAudioMixOutput(audioTracks: composition.tracks(withMediaType: .audio), audioSettings: [

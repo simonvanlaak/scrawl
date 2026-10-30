@@ -13,7 +13,11 @@ const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',hea
 const results=[];
 try{
  for(const [name,width,height] of [['desktop',1280,900],['mobile',375,812],['small-mobile',320,740],['wide-mobile',430,932]]){
-  const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('console',m=>{if(m.type()==='error'&&/hydrat|React error|didn't match/i.test(m.text()))errors.push(m.text());});page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
+  const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on('console',m=>{if(m.type()==='error'&&/hydrat|React error|didn't match/i.test(m.text()))errors.push(m.text());});page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{
+    // The star badge deliberately falls back to GitHub when its public API is rate-limited.
+    if(r.url()==='https://api.github.com/repos/tryapparent/apparent' && [403,429].includes(r.status()))return;
+    if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);
+  });
   await page.goto(process.env.SITE_URL || `http://127.0.0.1:${server.address().port}/`);await page.evaluate(()=>document.fonts.ready);
   await page.evaluate(()=>scrollTo(0,scrollY+document.querySelector('#belief').getBoundingClientRect().top-innerHeight*.12));
   await page.waitForTimeout(60);

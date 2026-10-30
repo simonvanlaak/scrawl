@@ -32,9 +32,14 @@ test("visible product names use the wordmark", () => {
   assert.doesNotMatch(body, />\s*(?:Apparent|apparent)\b/)
 })
 
-test("the headline highlights enjoyable without changing its words or break", () => {
+test("the belief keeps its words and scroll-linked work and enjoyable marks", () => {
   const html = readFileSync(join(publicDir, "index.html"), "utf8")
-  assert.match(html, /We believe work should be <span class="word-highlight">enjoyable(?:<svg[^>]*class="brush-highlight"[^>]*aria-hidden="true"[^>]*><path[^>]*fill="#b7a5d8"[^>]*><\/path><\/svg>)?<\/span><br\/> and leave us free for late nights with friends\./)
+  const heading = html.match(/<h2 id="belief">([\s\S]*?)<\/h2>/)?.[1]
+  assert.ok(heading, "the packaged page contains the current belief heading")
+  assert.equal(heading.replace(/<svg\b[\s\S]*?<\/svg>/g, "").replace(/<[^>]*>/g, ""),
+    "We believe work should be enjoyable and leave us free for late nights with friends.")
+  assert.match(heading, /class="work-circle"/)
+  assert.match(heading, /class="enjoy-highlight"/)
 })
 
 test("the first screen has a full-size reversible frog and one wave button", () => {

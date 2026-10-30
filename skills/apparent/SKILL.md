@@ -72,7 +72,9 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Two-pass agent walkthroughs
 
-For an explicit explanatory share copy, use `apparent walkthrough record --duration 20 --out /private/take.apparent`, then `apparent walkthrough inspect /private/take.apparent --template /private/cues.json`. These print JSON with readiness and exact paths. Timed recording has no click/ink telemetry; prefer the normal app shortcut when interaction camera motion matters, and use `capture state|stop` below for capture ownership. Never call a pending/finalizing take ready.
+For a normal product walkthrough, verify the running GUI build and idle capture state, start its configured recording shortcut, retain the exact owned `capture_id` from `apparent capture state`, wait for `recording`, perform the action, and finish only that ID with `apparent capture stop <capture_id>`. Then use `apparent walkthrough inspect /private/take.apparent --template /private/cues.json` on its exact completed bundle. Check decoded source frames and the final crop retain the real recording pill when promised; never composite a fake pill. See capture ownership below. Never call a pending/finalizing take ready.
+
+`apparent walkthrough record --duration 20 --out /private/fallback.apparent` is a separate timed recorder fallback, not the normal GUI flow: it has no normal recording pill or click/Shift-ink telemetry. Use it only when that limitation is intentional or the GUI route is unavailable, and disclose it. Walkthrough commands print JSON with readiness and exact paths.
 
 Inspect the entire saved movie, summary, contact sheet and frames before filling the blank cue template with short natural sentences tied to evidence. Cues are `[start_seconds,end_seconds,text]` on the movie clock, not wallclock; subtract `videoOffsetMs` from bundle milliseconds before dividing by 1000. Missing text must not become invented narration. Then run `apparent walkthrough export /private/take.apparent --experiment agentWalkthrough --cues /private/cues.json --out-dir /private/share-1 --source-audio drop --allow-online-tts`.
 

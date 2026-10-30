@@ -29,6 +29,7 @@ The output directory must be new and outside the source bundle. The installed bi
 The workflow reuses Apparent's crop and activity-camera export (`--crop full|auto|x,y,width,height`, zoom on, `--no-zoom` only when intentional). Default output is 1440×900 with white regular 32 px sans-serif, padded rounded dark translucent boxes. Captions sit at the bottom; the top-left disclosure also needs clear space. Keep captions to two short lines and natural spoken sentences. Reject overlapping/out-of-range cues and speech that exceeds its real window: shorten text rather than rush speech, retime real actions or invent claims. The CLI emits H264/AAC/YUV420p faststart MP4 at 30 fps, fully decodes it and retains source hashes and provenance/timing/QA reports; it does not certify truth, privacy or semantic caption placement. Edit cues and render to a new directory without re-recording. Inspect the complete `share.mp4`, caption boundaries, audio and final caveat before delivering it. Tooling has been exercised on Linux; macOS execution is not yet verified. The repository helper remains available for older or non-bundle movies, not as a substitute for the native bundle workflow.
 
 
+
 ## Point out the claim
 
 1. Write one viewer question: “Can I now ___?” Choose a single real scenario that answers it. If motion or interaction adds nothing, use before/after screenshots or a written result instead of forcing a video. For a bug fix, show the old failure if a safe capture exists, then the same task succeeding; never stage an old failure on the new build.
@@ -49,7 +50,11 @@ For a browser-only change, an existing browser recorder may be more precise **if
 
 ## Record the proof with Apparent
 
-For polished desktop demos, use the app's interactive recording shortcut to start and finish: it collects the clicks, marks and cursor path that drive automatic zoom. Check the installed app's capabilities and input permissions first. Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
+For a normal product walkthrough, use the actual running GUI's recording shortcut. Verify its executable/build and `apparent capture state` first; do not start if another capture is selecting, starting, recording or processing. Start with the configured shortcut (`apparent shortcut record` on Linux), then read `apparent capture state` and retain the exact owned `capture_id`. Wait for `recording`, inspect the real recording pill, perform the action, and stop only that ID with `apparent capture stop <capture_id>`. Never toggle the shortcut to stop an unknown recording. Retain the exact completed bundle path and inspect/export that bundle; see `docs/capture.md` for the control protocol and permissions.
+
+The GUI path supplies the normal recording pill and, where input permissions allow, clicks, marks and cursor telemetry for activity zoom. Inspect decoded source frames and the final crop: when the pill is promised, both must retain the **real pill** without a caption covering it. A selected-window source may omit surrounding controls. Reframe or record the appropriate display; never composite a fake pill.
+
+Timed `record --duration` is a **separate recorder fallback**: it has no normal GUI recording pill and no click/Shift-ink telemetry. Use it only when the GUI route is unavailable or that separate recorder is deliberately being tested. Disclose those limits; a native timed clock take is not normal product-walkthrough proof. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
 
 ```sh
 apparent record --window 'Window title or app' --duration 15 --out /absolute/private/path/walkthrough.apparent

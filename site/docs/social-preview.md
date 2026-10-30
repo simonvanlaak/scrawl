@@ -1,10 +1,11 @@
 # Homepage link preview
 
 The homepage declares `https://app.tryapparent.com/social-preview-v1.png` in its
-static Open Graph and Twitter metadata. The 512 × 512 PNG contains only the
-canonical lilac-on-carbon app mark, so it stays legible as a tiny thumbnail.
-Twitter uses the compact `summary` card rather than a large poster. Other
-receivers choose their own layout; these tags cannot force Slack's display size.
+static Open Graph and Twitter metadata. The 1200 × 630 PNG contains only the
+canonical wordmark, centered in Lilac on Carbon. It follows the restrained wide
+brand-card approach used by Slack and Linear, without promotional copy or decoration.
+Twitter uses `summary_large_image`. Receivers choose their own layout; neither
+source image dimensions nor these tags can force Slack's display size.
 No JavaScript, video or font request is needed to display the image.
 
 Rebuild the checked-in image from `site/`:
@@ -18,7 +19,8 @@ node --test scripts/test-social-preview.mjs
 
 The generator uses the existing `playwright-core` dependency and an installed
 Chrome (or Playwright's existing Chromium when `CHROME_PATH` is absent). It does
-not install a browser. Inspect the generated PNG after changing its design.
+not install a browser. It inverts the existing SVG's brand colors and preserves
+its letterforms. Inspect the generated PNG at full and thumbnail sizes after changing its design.
 The public packager must include the exact image bytes; the tests check both
 source and packaged head metadata, dimensions and byte preservation.
 

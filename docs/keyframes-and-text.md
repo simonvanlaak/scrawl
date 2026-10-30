@@ -92,6 +92,12 @@ The old automatic OpenCode attachment policy is inactive. The full capture, keyf
 
 A crop inferred only from cursor dwell or screen changes must retain the frontmost regular window recorded at that keyframe's time, not just intersect a blank corner. Otherwise Apparent keeps the whole frame, after grouping and content-edge trimming. The existing focus crop inside a large window remains available when that crop was actually attributed to the frontmost window and still intersects it. Whole-capture scope keeps one shared full-frame fallback if any keyframe needs it. Deliberate input (ink, clicks, drags, laser or scroll) can still select another window. Window snapshots are never applied before their timestamps, and an app name appears in a crop label only when one of its recorded windows intersects the delivered crop. This is a correction to existing auto-crop behavior, not a new experiment; it does not change capture mode, window metadata collection or full-frame preservation.
 
+## Experiment `nativeLaunch`
+
+The separate default-off `nativeLaunch` experiment opens the app by the exact
+`apparent://open` URL, never a capture or handoff. Its OS registration and validation
+contract are in [native launch](native-launch.md).
+
 ## Experiment `agentDemoVideo` (`src/handoff.rs`, `src/settings.rs`)
 
 On by default; set `"experiments": {"agentDemoVideo": false}` or switch it off in Settings › Agents to disable it. With it on, copies and manual or guarded draft pastes ask the agent to use the repository's `make-it-apparent` skill for a short video of a complex visible change, inspect the finished recording, and embed or link a playable file where the viewer can access it. A local path alone only works on a shared filesystem. The agent names the exact build/OS and what the video does not verify; if the skill, recording surface or delivery is unavailable, it reports the blocker rather than calling the walkthrough done. This does not change the saved `summary.md` or the capture; automatic OpenCode delivery has been removed. A config edit applies on the next copy/paste without a restart.

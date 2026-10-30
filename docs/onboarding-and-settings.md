@@ -26,6 +26,9 @@ Rows for draggable lists (`Permission::draggable`: Screen Recording, Accessibili
 
 ## Settings (`src/settings.rs`, `helper/Settings.swift`)
 
+Native URL launch is a separate default-off experiment. See [native launch](native-launch.md)
+for the exact `apparent://open` contract, explicit Linux handler registration and OS checks.
+
 The onboarding pattern again. `apparent-helper settings` draws the `View` it's sent (General, Recording, Storage, Permissions, Agents, About; ⌘, or the menu's **Settings…**, and **Open Settings** on onboarding's last screen) and reports actions as JSON lines; `Panel` decides and writes `~/.config/apparent/config.json` through `handoff::set_config_value_in` (other keys and `0600` kept). If an existing config is malformed or unreadable, writes fail instead of replacing it with a new object and losing preferences.
 
 Both shortcuts (`ShortcutKind::Record` ⌥⇧S, `Paste` ⌥⇧V) live under `"shortcuts"` (Carbon `keyCode`/`modifiers`/`label`; absent is the default, and `"paste": null` turns paste off; 0.3.x's file under Application Support is moved across once). Each shows only its keys, as rounded keycaps with a little depth in a recessed field, like Hex's control (`helper/ShortcutKeys.swift`). Holding its modifiers while Settings is in front sinks those keys onto their bases and turns the key red. Listening tints the field red: a dot breathes beside "Type a shortcut", and modifiers land as they go down (in macOS order) and lift out when let go, with a red caret after them. An accepted shortcut's keys bob once, left to right. A refused one turns red and shakes before the old keys return, with Rust's reason in the caption. Every value is a closed-form spring evaluated at a time (`Track`, `KeyController`), so the helper draws any moment the same live or rendered, and the TimelineView stops when the keys are still. Clicking a shortcut's row sends `record-shortcut`: Rust pauses every Apparent hotkey (`capture::pause_shortcuts`: Carbon unregistered, `emit_*` muted) so the current combo reaches the recorder, then `settings::validate` turns down combos without ⌘/⌥/⌃ (function keys excepted), ⌘ + one key, macOS's own (a static list plus the helper's enabled `CopySymbolicHotKeys`) and the other shortcut; `capture::set_shortcuts` registers both and puts the old ones back if `RegisterEventHotKey` refuses. Only a default answers to its aliases (⌃/⌘ added, ⌃⌥⌘, the ANSI key); a custom combo matches exactly in Carbon and the key event tap. Paste can be turned off (`ShortcutKind::can_unset`; Record can't, it's the way in) with the × beside its field or Delete while it listens (`clear-shortcut`, `Pressed::is_delete`): `ShortcutConfig::unset()` registers nothing and matches no key, and the field shows "Set shortcut".
@@ -46,7 +49,7 @@ Settings follows system light or dark appearance without storing a preference. T
 
 
 Settings › About keeps its existing **Check for Updates…** action. On Linux, a manual check
-shows Checking and ignores duplicate clicks until it completes. Its dismissible result has
+shows Checking… only in the disabled check button and ignores duplicate clicks until it completes. Its dismissible result has
 one line only: **Update available**, **No update available**, or **Update check failed**, with
 the same pixel frog jumping, lounging, or puzzled on its notched lily pad. Failures and
 unexpected worker responses are logged; they never become “No update available” or

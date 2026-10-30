@@ -28,6 +28,10 @@ mod inbox;
 mod ink_view;
 mod ingest_http;
 mod keyframes;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod launch_instance;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod launch_url;
 #[cfg(target_os = "macos")]
 mod laser_overlay;
 mod live_transcribe;
@@ -234,6 +238,15 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open Apparent without recording. Only apparent://open is accepted.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Launch { url: Option<String> },
+    /// Explicitly register the Linux URL handler, or inspect the desktop's selected handler.
+    #[cfg(target_os = "linux")]
+    LaunchHandler {
+        #[command(subcommand)]
+        command: LaunchHandlerCommand,
+    },
     /// Inspect or explicitly end a GUI capture. Same user and machine only; never toggles or sends.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     Capture { #[command(subcommand)] command: CaptureCommand },
@@ -1626,6 +1639,49 @@ where
     })
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Subcommand)]
+enum LaunchHandlerCommand {
+    Install,
+    Status,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn run_owned_app(record: bool, iphone: bool) -> Result<()> {
+    let Some(owner) = launch_instance::acquire()? else {
+        #[cfg(target_os = "linux")]
+        if record {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while !linux::ipc::running() {
+                ensure!(
+                    std::time::Instant::now() < deadline,
+                    "running app is not ready"
+                );
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            return linux::ipc::send("shortcut record");
+        }
+        return launch_instance::forward_open();
+    };
+    // Older releases do not own the new lock. Never start beside their GUI.
+    #[cfg(target_os = "linux")]
+    ensure!(
+        !linux::ipc::running(),
+        "running Apparent needs an update for native launch"
+    );
+    ensure!(
+        !agent_capture::running_owner()?,
+        "another Apparent GUI is running; update and restart it first"
+    );
+    owner.listen()?;
+    #[cfg(target_os = "linux")]
+    if let Err(error) = linux::update::record_running() {
+        eprintln!("Apparent could not record its running version in config: {error:#}");
+    }
+    ui::run_app(None, record, iphone, None);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     linux::prepare_process();
@@ -1652,6 +1708,23 @@ fn main() -> Result<()> {
         },
     };
     match command {
+        #[cfg(target_os = "linux")]
+        Command::LaunchHandler { command } => match command {
+            LaunchHandlerCommand::Install => linux::launch_handler::install(),
+            LaunchHandlerCommand::Status => {
+                println!("{}", linux::launch_handler::status()?);
+                Ok(())
+            }
+        },
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Launch { url } => {
+            if let Some(url) = url {
+                launch_instance::request_url(&url)?;
+            } else {
+                launch_instance::request_open();
+            }
+            run_owned_app(false, false)
+        }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         Command::Capture { command } => {
             let action = match &command {
@@ -1679,12 +1752,13 @@ fn main() -> Result<()> {
                 linux::ipc::send(if record { "shortcut record" } else { "open" })?;
                 return Ok(());
             }
-            #[cfg(target_os = "linux")]
-            if let Err(error) = linux::update::record_running() {
-                eprintln!("Apparent could not record its running version in config: {error:#}");
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            return run_owned_app(record, iphone);
+            #[cfg(target_os = "windows")]
+            {
+                ui::run_app(None, record, iphone, None);
+                Ok(())
             }
-            ui::run_app(None, record, iphone, None);
-            Ok(())
         }
         #[cfg(target_os = "linux")]
         Command::Update { command } => {

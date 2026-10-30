@@ -6088,6 +6088,14 @@ pub fn run_app(
     screenshot_out: Option<PathBuf>,
 ) {
     let app = Application::new().with_assets(crate::icons::Assets);
+    #[cfg(target_os = "macos")]
+    app.on_open_urls(|urls| {
+        for url in urls {
+            if crate::launch_instance::request_url(&url).is_err() {
+                apparent_log("Rejected unsupported or disabled Apparent launch URL");
+            }
+        }
+    });
     app.run(move |cx: &mut App| {
         if let Err(error) =
             cx.text_system()
@@ -6118,13 +6126,16 @@ pub fn run_app(
         let agent_rx = crate::agent_capture::listen().map_err(|error| apparent_log(format!("Agent capture control unavailable: {error:#}"))).ok();
 
         // Onboarding opens on first launch, or for a permission that went away.
-        if screenshot_out.is_none() && std::env::var_os("APPARENT_NO_ONBOARDING").is_none() {
+        let mut onboarding_initialized = screenshot_out.is_some()
+            || std::env::var_os("APPARENT_NO_ONBOARDING").is_some();
+        if !onboarding_initialized {
             let sender = telemetry.ui_sender.clone();
             std::thread::spawn(move || {
                 if let Some(grants) = crate::onboarding::read_grants() {
                     let event = crate::onboarding::Event::Launch(grants);
                     let _ = sender.send(LiveOverlayEvent::Onboarding(event));
                 }
+                let _ = sender.send(LiveOverlayEvent::OnboardingInitialized);
             });
         }
         let has_initial = initial_bundle.is_some();
@@ -6188,6 +6199,22 @@ pub fn run_app(
                     platform::poll_status_bar();
                     crate::onboarding_window::poll(cx);
                     crate::settings_window::poll(cx);
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if crate::launch_instance::take_open(onboarding_initialized) {
+                        loop_coord.update(cx, |coord, _| {
+                            if !crate::launch_url::can_present(
+                                coord.is_recording(),
+                                coord.is_processing(),
+                                coord.is_selecting(),
+                            ) {
+                                apparent_log("Launch requested; active capture left unchanged");
+                            } else if let Some(session) = coord.onboarding.as_mut() {
+                                session.show();
+                            } else {
+                                coord.open_settings(None);
+                            }
+                        });
+                    }
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
                     if let Some(ref rx) = agent_rx {
                         while let Ok(request) = rx.try_recv() {
@@ -6274,6 +6301,9 @@ pub fn run_app(
                             LiveOverlayEvent::PhoneEnded => coord.phone_ended(cx),
                             LiveOverlayEvent::Onboarding(event) => {
                                 coord.onboarding_event(event, cx)
+                            }
+                            LiveOverlayEvent::OnboardingInitialized => {
+                                onboarding_initialized = true;
                             }
                             LiveOverlayEvent::Settings(event) => coord.settings_event(event, cx),
                         });

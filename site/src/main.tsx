@@ -3,6 +3,7 @@ import { createRoot, hydrateRoot } from "react-dom/client"
 import { App } from "./App"
 import "./styles.css"
 import "./pond-hero.css"
+import "./cta.css"
 
 const root = document.getElementById("root")!
 const app = (

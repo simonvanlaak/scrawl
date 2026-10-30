@@ -469,10 +469,27 @@ enum Exporter {
     var audioIn: AVAssetWriterInput?
     if let audio = plan.audio, plan.audioLengthMs > 0 {
       let source = AVURLAsset(url: URL(filePath: audio))
-      if let track = try await source.loadTracks(withMediaType: .audio).first {
+      // Match admission: a disjoint first track must not hide a usable second track.
+      var selectedTrack: AVAssetTrack?
+      for candidate in try await source.loadTracks(withMediaType: .audio) {
+        let range = try await candidate.load(.timeRange)
+        let start = range.start.seconds
+        let end = CMTimeRangeGetEnd(range).seconds
+        let wantedStart = Double(plan.audioStartMs) / 1000
+        let wantedEnd = wantedStart + Double(plan.audioLengthMs) / 1000
+        if start.isFinite && end.isFinite && start < wantedEnd && end > wantedStart && end > start {
+          selectedTrack = candidate
+          break
+        }
+      }
+      guard let track = selectedTrack else { throw HelperError("No audio track overlaps the requested export interval") }
+      do {
         let composition = AVMutableComposition()
         if let slot = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-          try slot.insertTimeRange(CMTimeRange(start: cm(plan.audioStartMs), duration: cm(plan.audioLengthMs)), of: track, at: .zero)
+          let requested = CMTimeRange(start: cm(plan.audioStartMs), duration: cm(plan.audioLengthMs))
+          let available = try await track.load(.timeRange)
+          let overlap = CMTimeRangeGetIntersection(requested, available)
+          try slot.insertTimeRange(overlap, of: track, at: CMTimeSubtract(overlap.start, requested.start))
           let reader = try AVAssetReader(asset: composition)
           let output = AVAssetReaderAudioMixOutput(audioTracks: composition.tracks(withMediaType: .audio), audioSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM,

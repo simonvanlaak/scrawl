@@ -502,14 +502,31 @@ enum Media {
     let asset = AVURLAsset(url: movie)
     let duration = try await asset.load(.duration).seconds
     var result: [String: Any] = ["durationMs": Int(((duration.isFinite ? duration : 0) * 1000).rounded())]
+    var videoDuration = duration
     if let track = try await asset.loadTracks(withMediaType: .video).first {
       let (size, transform) = try await track.load(.naturalSize, .preferredTransform)
       let shown = size.applying(transform)
       result["width"] = Int(abs(shown.width).rounded())
       result["height"] = Int(abs(shown.height).rounded())
       result["fps"] = Double(try await track.load(.nominalFrameRate))
+      let range = try await track.load(.timeRange)
+      videoDuration = range.duration.seconds
+      if videoDuration.isFinite && videoDuration > 0 {
+        result["videoDurationMs"] = Int((videoDuration * 1000).rounded())
+      }
     }
-    result["audioTracks"] = try await asset.loadTracks(withMediaType: .audio).count
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    result["audioTracks"] = audioTracks.count
+    var audioOverlapsVideo = false
+    for track in audioTracks {
+      let range = try await track.load(.timeRange)
+      let start = range.start.seconds
+      let end = CMTimeRangeGetEnd(range).seconds
+      if start.isFinite && end.isFinite && start < videoDuration && end > 0 && end > start {
+        audioOverlapsVideo = true
+      }
+    }
+    result["audioOverlapsVideo"] = audioOverlapsVideo
     return result
   }
 

@@ -22,6 +22,17 @@
   ],
   "features": [
     {
+      "id": "site-social-preview",
+      "group": "install",
+      "name": "Website link preview",
+      "says": "Shared homepage links declare a minimal wide Apparent wordmark image for Open Graph and Twitter large-image cards, without requiring JavaScript.",
+      "status": "branch:t3/share-picker-visual-preview",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Candidate only. Deployment and a fresh receiver unfurl are required; existing previews may remain cached.",
+      "docs": ["site/docs/social-preview.md"]
+    },
+    {
       "id": "native-launch",
       "group": "install",
       "name": "Open the installed app by URL",

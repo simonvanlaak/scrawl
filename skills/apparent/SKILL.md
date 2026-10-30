@@ -70,18 +70,26 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Other commands
 
+For a running GUI app on macOS or Linux, `apparent capture state` prints its live phase and
+`capture_id` (only while pending or recording). If you initiated that capture and have retained
+its ID, `apparent capture stop <capture_id>` saves it after frames arrive, while
+`apparent capture cancel <capture_id>` discards it even when the portal is pending. Do not use
+the record shortcut as a stop toggle or act on an ID you did not establish as yours. A wrong ID
+fails; repeating an ended ID does nothing. These commands do not control a separate timed
+`record --duration` invocation and never send a capture to a session.
+
 ```sh
 apparent inspect <bundle>               # summary.md, the text above
 apparent inspect <bundle> --json        # apparent.json
 apparent inspect <bundle> --marks       # the marks, numbered as in the text [--json]
 apparent frames <bundle> --from 0:04 --to 0:06 [--fps 4]   # plain PNGs of a range; prints their paths
 apparent copy <bundle>                  # copy the capture to the clipboard
-apparent export <bundle> [--out demo.mp4] [--zoom] [--crop auto|full|x,y,w,h] [--size 1920]
+apparent export <bundle> [--out demo.mp4] [--no-zoom] [--crop auto|full|x,y,w,h] [--size 1920]
 ```
 
 - `zoom` and `frames` write into `<bundle>/zoom/`. Leave the rest of the bundle as it is, because Apparent manages those files and cleans them up.
 - Apparent does not send captures to agent sessions. Use `copy` to put a finished capture on the clipboard.
-- `export` is macOS only; Linux does not support video export. On Mac it writes one `.mp4` with the ink and clicks burned in and the audio in sync (default `~/Movies/Apparent/<bundle>.mp4`). `--zoom` eases in toward the activity. `--no-ink`, `--no-clicks`, `--hevc` and `--fps` are also available.
+- `export` works on macOS and Linux (Linux requires `ffmpeg` and `ffprobe`). It writes one `.mp4` with ink and clicks burned in, audio in sync, and smooth activity zoom enabled by default (default `~/Movies/Apparent/<bundle>.mp4`). It opens on the whole capture for 0.5 s before zooming; explicit `--crop auto` or rectangles still bound the view. `--no-zoom` disables camera motion. The original recording stays unchanged. Without click/mark telemetry the camera stays still; use the app's recording shortcut for interaction-aware demos, not the timed `record --duration` path. `--no-ink`, `--no-clicks`, `--hevc` and `--fps` are also available.
 - On Linux, `apparent update status` prints JSON with the selected channel, the **live process** version (`running.version`, or `null` if none), the installed AppImage identity, and whether a restart is pending. The `running` object in `~/.config/apparent/config.json` is a launch record, not proof the process is still alive after a crash; use `status` to validate its PID and start time. `apparent update channel stable|main` chooses the feed; `apparent update check` checks and stages an update for the next launch (installed AppImages only).
 - Video and audio go to the Trash 7 days after a capture unless the person changed that in Settings. After that `zoom`, `frames` and `export` can't read the video, but `frames/`, the contact sheet and `apparent.json` remain.
 - `apparent <command> --help` lists every flag, and `apparent skill` prints this guide as the installed version knows it.

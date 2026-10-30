@@ -27,6 +27,8 @@ pub const MIN_ZOOM_SCALE: f32 = 1.5;
 pub const FIT_FRACTION: f32 = 0.7;
 /// The zoom starts this long before the activity so it has arrived when it happens.
 pub const LEAD_MS: u64 = 350;
+/// Establish the whole view before any camera movement, including activity at time zero.
+pub const OPENING_MS: u64 = 500;
 /// How long a zoom is held after the last activity before easing out.
 pub const HOLD_MS: u64 = 2_500;
 /// Spring visual duration in seconds (Kit's `camera` row, 1.0–1.8 / 0, a little quicker for a
@@ -255,7 +257,15 @@ fn dense(input: &Input) -> Vec<CameraKey> {
         let current = segments
             .iter()
             .rposition(|seg| seg.start <= t)
-            .filter(|&i| t < segments[i].release);
+            .filter(|&i| t > OPENING_MS && t < segments[i].release)
+            // Opening may postpone a segment into a new cursor sweep. Recheck travel
+            // until that delayed zoom starts; don't interrupt an already active zoom.
+            .filter(|&i| {
+                segments[i].start > OPENING_MS
+                    || active == Some(i)
+                    || segments[i].scale <= 1.0
+                    || !in_ranges(&travel, t)
+            });
         if current != active {
             active = current;
             if let Some(i) = current {
@@ -278,9 +288,12 @@ fn dense(input: &Input) -> Vec<CameraKey> {
             _ => (1.0, [0.5, 0.5]),
         };
         let offset = |f: f32| (0.5 - target_scale * f as f64).clamp(1.0 - target_scale, 0.0);
-        spring(&mut s, &mut vs, target_scale, omega, dt);
-        spring(&mut ox, &mut vox, offset(target_focus[0]), omega, dt);
-        spring(&mut oy, &mut voy, offset(target_focus[1]), omega, dt);
+        // The state at t=0 is the initial view, not one spring step into the first zoom.
+        if k > 0 {
+            spring(&mut s, &mut vs, target_scale, omega, dt);
+            spring(&mut ox, &mut vox, offset(target_focus[0]), omega, dt);
+            spring(&mut oy, &mut voy, offset(target_focus[1]), omega, dt);
+        }
         if s < 1.0 {
             (s, vs) = (1.0, 0.0);
         }
@@ -379,6 +392,32 @@ mod tests {
     fn centre_at(keys: &[CameraKey], t: f64) -> [f32; 2] {
         let r = rect_at(keys, t);
         [(r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0]
+    }
+
+    #[test]
+    fn opening_holds_the_whole_view_even_with_immediate_activity() {
+        for crop in [FULL, [0.2, 0.1, 0.9, 0.8]] {
+            let focuses = [click(0, 0.7, 0.3)];
+            let keys = plan(&input(4_000, crop, &focuses, &[]));
+            for t in [0.0, 100.0, 250.0, 500.0] {
+                assert_eq!(rect_at(&keys, t), crop, "opening at {t} ms");
+            }
+            let r = rect_at(&keys, 1_500.0);
+            assert!(r[2] - r[0] < (crop[2] - crop[0]) / 1.5, "then zooms in");
+        }
+    }
+
+    #[test]
+    fn opening_delayed_zoom_waits_for_fast_travel_to_finish() {
+        let focuses = [click(0, 0.1, 0.5)];
+        let cursor: Vec<_> = (0..=10)
+            .map(|i| (300 + i * 50, 0.1 + i as f32 * 0.08, 0.5))
+            .collect();
+        let keys = plan(&input(4_000, FULL, &focuses, &cursor));
+        for t in (0..=900).step_by(25) {
+            assert_eq!(rect_at(&keys, t as f64), FULL, "travelling at {t} ms");
+        }
+        assert!(scale_at(&keys, 1_900.0) > 1.5, "zooms once travel finishes");
     }
 
     #[test]

@@ -26,6 +26,27 @@ Onboarding follows the system's light or dark appearance. The macOS window and i
 
 Rows for draggable lists (`Permission::draggable`: Screen Recording, Accessibility) go straight to `OpenSettings`, which launches `apparent-helper permission-panel` (`helper/PermissionPanel.swift`) from the row's button: the card flies to just below System Settings (inside its empty lower area when the screen has no room; `PermissionPanel.dock`, checked by `scripts/check-permission-panel-dock.sh`), drags the `Apparent.app` that contains the helper, reads grants from a fresh `--check` process (never trusts the drop), and is told `granted` when the row turns on. Preview it with `permission-panel --permission screen-recording --preview`; never `tccutil reset` Kit's real grants to test it.
 
+### First-capture experiment
+
+Enable `"experiments": {"onboardingFirstCapture": true}` before opening the tour
+(restart the app or replay onboarding from Settings). It is off by default.
+Existing users who already finished setup are not forced through it again.
+
+On Shortcut, Continue stays disabled until a valid Record combination has been
+entered in the inline recorder. Invalid, cancelled or reset choices do not count.
+A verified desktop-owned Linux binding instead offers **Use desktop shortcut**;
+Apparent cannot rewrite that compositor setting. The next page asks the user to
+try giving feedback on onboarding: start with the chosen shortcut, talk and point,
+then press it again to finish. This is a local practice capture, not feedback sent
+to the team. Menu-started captures and cancelled or failed attempts do not finish
+the tour. A successful bundle completion advances to Done.
+
+Closing or choosing Try later is allowed, but leaves the experimental setup
+unfinished so it resumes on the next launch. `onboarding.shortcutChosen` and
+`onboarding.firstCaptureCompleted` persist those milestones beside `resume`;
+`seen` becomes true only after a successful practice capture. The default flow
+and permission-repair windows retain their existing behavior.
+
 ## Settings (`src/settings.rs`, `helper/Settings.swift`)
 
 Native URL launch is a separate default-off experiment. See [native launch](native-launch.md)

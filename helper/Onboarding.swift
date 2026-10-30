@@ -144,6 +144,8 @@ struct OnboardingState: Decodable, Equatable {
   var ready = false
   var fix = false
   var shortcutEditing = false
+  var firstCaptureRequired = false
+  var shortcutChosen = false
   var pickerNote = false
   var speech: SpeechStatus?
   /// The demo on how-it-works: nil, "skipped", "watched" or "practiced".
@@ -598,9 +600,15 @@ struct OnboardingView: View {
   private var centered: some View {
     let s = model.shortcut
     let (title, body): (String, String) = switch state.step {
-    case "try-it": ("Make your first capture", "Tap \(s) now. Talk, point at something, then tap \(s) again.")
+    case "try-it": ("Make your first capture", state.firstCaptureRequired
+      ? "Tap \(s) to start. Try giving feedback on this onboarding: talk and point at something. Tap \(s) again to finish. The capture stays local; nothing is sent to us."
+      : "Tap \(s) now. Talk, point at something, then tap \(s) again.")
     case "done": ("It's on your clipboard", "Press ⌘V in your agent. apparent stays in the menu bar; tap \(s) whenever you want to show something.")
-    case "shortcut": ("Choose your shortcut", state.shortcutEditing
+    case "shortcut": ("Choose your shortcut", state.firstCaptureRequired
+      ? (state.shortcutChosen
+          ? "Shortcut saved. Continue to make your first capture."
+          : "Choose a key combination and press it here. You will use it to start and finish recordings.")
+      : state.shortcutEditing
       ? (model.shortcutEditor?.recording == true
           ? "Press the new shortcut now. Esc cancels; Continue keeps the current one."
           : "Continue to try it, or change it again.")
@@ -647,14 +655,14 @@ struct OnboardingView: View {
             if editor.recording {
               QuietButton(title: "Cancel") { model.send("cancel-shortcut") }
             }
-            if !editor.isDefault && !editor.externallyManaged {
+            if !state.firstCaptureRequired && !editor.isDefault && !editor.externallyManaged {
               QuietButton(title: "Reset to default") { model.send("reset-shortcut") }
             }
           }
           .padding(.top, 12)
         }
         if !state.shortcutEditing || model.shortcutEditor?.recording == false {
-          QuietButton(title: "Change shortcut") { model.send("change-shortcut") }
+          QuietButton(title: state.firstCaptureRequired ? "Set shortcut" : "Change shortcut") { model.send("change-shortcut") }
             .padding(.top, 18)
         }
       }
@@ -786,7 +794,7 @@ struct OnboardingView: View {
     case "how-it-works": return state.tutorialSeen ? ("Continue", "continue", true) : ("Skip", "skip", true)
     case "permissions":
       return (state.fix ? "Done" : "Continue", "continue", state.ready)
-    case "shortcut": return ("Continue", "continue", true)
+    case "shortcut": return ("Continue", "continue", !state.firstCaptureRequired || state.shortcutChosen)
     case "done": return ("Done", "continue", true)
     default: return nil
     }
@@ -795,7 +803,7 @@ struct OnboardingView: View {
   private var secondary: String? {
     switch state.step {
     case "permissions": return state.fix ? "Not now" : "Set up later"
-    case "try-it": return "Close"
+    case "try-it": return state.firstCaptureRequired ? "Try later" : "Close"
     case "done": return "Open Settings"
     default: return nil
     }
@@ -808,7 +816,7 @@ struct OnboardingView: View {
       }
       if let secondary {
         QuietButton(title: secondary) {
-          model.send(state.step == "try-it" ? "continue" : state.step == "done" ? "settings" : "later")
+          model.send(state.step == "try-it" && !state.firstCaptureRequired ? "continue" : state.step == "done" ? "settings" : "later")
         }
       } else {
         Spacer().frame(height: 22)
@@ -1199,6 +1207,9 @@ final class Onboarding: NSObject, NSApplicationDelegate, NSWindowDelegate {
       ("permissions-macos15-picker-note", OnboardingState(step: "permissions", index: 2, rows: sequoia, pickerNote: true, speech: SpeechStatus(state: "needsPermission", engine: "SFSpeechRecognizer", locale: "en_US")), 0),
       ("permissions-macos15-no-dictation", OnboardingState(step: "permissions", index: 2, rows: sequoiaNoDictation, ready: true, speech: noDictation), 0),
       ("shortcut", OnboardingState(step: "shortcut", index: 3, count: 5), 0),
+      ("shortcut-required", OnboardingState(step: "shortcut", index: 3, count: 5, firstCaptureRequired: true), 0),
+      ("shortcut-chosen", OnboardingState(step: "shortcut", index: 3, count: 5, firstCaptureRequired: true, shortcutChosen: true), 0),
+      ("try-it-required", OnboardingState(step: "try-it", index: 4, count: 5, firstCaptureRequired: true, shortcutChosen: true), 0.3),
       ("try-it", OnboardingState(step: "try-it", index: 4, count: 5), 0.3),
       ("try-it-downloading", OnboardingState(step: "try-it", index: 4, count: 5, pickerNote: true, speech: SpeechStatus(state: "downloading", locale: "en_US", progress: 0.42)), 0.3),
       ("done", OnboardingState(step: "done", index: 5, count: 5), 0),

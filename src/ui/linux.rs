@@ -641,6 +641,17 @@ impl ksni::Tray for ApparentTray {
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         let mut items = Vec::new();
+        if let Some(status) = &self.status {
+            items.push(
+                ksni::menu::StandardItem {
+                    label: status.replace('_', "__"),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(ksni::MenuItem::Separator);
+        }
         let inbox = crate::inbox::Inbox::load_default();
         if inbox.len() > 0 {
             let now = crate::now_epoch_ms();
@@ -668,7 +679,17 @@ impl ksni::Tray for ApparentTray {
         items.push(ksni::MenuItem::Separator);
         items.push(self.item("Open Latest Capture", MenuAction::OpenLatest));
         if crate::handoff::video_export() {
-            items.push(self.item("Export Last Capture as Video…", MenuAction::ExportVideo));
+            items.push(
+                ksni::menu::StandardItem {
+                    label: "Export Last Capture as Video…".into(),
+                    enabled: !super::EXPORTING.load(Ordering::Acquire),
+                    activate: Box::new(|tray: &mut Self| {
+                        let _ = tray.actions.try_send(MenuAction::ExportVideo);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
         }
         items.push(ksni::MenuItem::Separator);
         items.push(self.item("Settings…", MenuAction::Settings));
@@ -742,7 +763,7 @@ pub(super) fn poll_status_bar() {
     });
 }
 
-/// A video export's progress, in the icon's tooltip.
+/// A video export's progress, in the icon's tooltip and menu.
 pub(super) fn set_status_text(text: &str) {
     let text = text.to_owned();
     TRAY.with(|slot| {
@@ -762,4 +783,100 @@ pub(super) fn set_status_inbox_count(count: usize) {
             });
         }
     });
+}
+
+/// Use the desktop's own chooser (GTK/KDE on X11 and Wayland), never a shell picker.
+/// Cancellation must not start the encoder.
+pub(super) fn choose_export_destination(
+    default: &Path,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    use anyhow::Context as _;
+    use ashpd::desktop::ResponseError;
+    use ashpd::desktop::file_chooser::{FileFilter, SelectedFiles};
+    futures_lite::future::block_on(async {
+        let name = default
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("capture.mp4");
+        let request = SelectedFiles::save_file()
+            .title("Export Last Capture as Video")
+            .accept_label("Export")
+            .current_name(name)
+            .filter(FileFilter::new("MP4 video").glob("*.mp4"))
+            .send()
+            .await
+            .context("Could not open the desktop Save dialog; check your FileChooser portal")?;
+        let selected = match request.response() {
+            Ok(selected) => selected,
+            Err(ashpd::Error::Response(ResponseError::Cancelled)) => return Ok(None),
+            Err(error) => return Err(error).context("Desktop Save dialog failed"),
+        };
+        let uri = selected
+            .uris()
+            .first()
+            .context("Desktop Save dialog returned no destination")?;
+        local_export_destination(uri).map(Some)
+    })
+}
+
+fn local_export_destination(uri: &ashpd::url::Url) -> anyhow::Result<std::path::PathBuf> {
+    let path = uri
+        .to_file_path()
+        .map_err(|_| anyhow::anyhow!("Choose a local MP4 file destination"))?;
+    anyhow::ensure!(
+        path.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4")),
+        "Choose a filename ending in .mp4 and retry"
+    );
+    Ok(path)
+}
+
+#[cfg(test)]
+mod export_menu_tests {
+    use super::*;
+    use ksni::Tray as _;
+
+    #[test]
+    fn export_progress_and_failure_are_visible_menu_rows() {
+        let (actions, _) = flume::bounded(1);
+        for status in [
+            "Exporting 42%",
+            "Export failed — choose another destination and retry",
+        ] {
+            let tray = ApparentTray {
+                actions: actions.clone(),
+                status: Some(status.into()),
+                inbox: 0,
+            };
+            assert!(
+                tray.menu().iter().any(|item| matches!(item,
+                    ksni::MenuItem::Standard(item) if item.label == status && !item.enabled
+                )),
+                "status must be visible without hovering: {status}"
+            );
+        }
+    }
+
+    #[test]
+    fn export_destination_accepts_local_mp4_and_decodes_filename() {
+        let uri = ashpd::url::Url::parse("file:///home/test/My%20capture%20%C3%A4.MP4").unwrap();
+        assert_eq!(
+            local_export_destination(&uri).unwrap(),
+            Path::new("/home/test/My capture ä.MP4")
+        );
+    }
+
+    #[test]
+    fn export_destination_refuses_remote_or_non_mp4_targets() {
+        for uri in [
+            "https://example.com/capture.mp4",
+            "file:///home/test/capture",
+            "file:///home/test/capture.txt",
+        ] {
+            assert!(
+                local_export_destination(&ashpd::url::Url::parse(uri).unwrap()).is_err(),
+                "{uri}"
+            );
+        }
+    }
 }

@@ -92,6 +92,43 @@ fn old_camera_progress_preserves_other_grants_and_unknown_config() {
 }
 
 #[test]
+fn first_capture_milestones_and_legacy_camera_coexist_and_reset() {
+    use onboarding::{Permission, Progress};
+    let dir = std::env::temp_dir().join(format!("apparent-milestones-{}", make_bundle_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.json");
+    let input = serde_json::json!({
+        "other": {"untouched": 42},
+        "onboarding": {"seen": true, "granted": ["camera"], "shortcutChosen": true,
+            "firstCaptureCompleted": true, "futureProgress": {"keep": true}}
+    });
+    std::fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let mut progress = Progress::load_from(&path);
+    assert!(progress.shortcut_chosen && progress.first_capture_completed);
+    assert!(progress.granted.contains(&Permission::Camera));
+    progress.save_to(&path).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved, input);
+    progress.shortcut_chosen = false;
+    progress.first_capture_completed = false;
+    progress.save_to(&path).unwrap();
+    let loaded = Progress::load_from(&path);
+    assert!(!loaded.shortcut_chosen && !loaded.first_capture_completed);
+    let mut expected = input;
+    expected["onboarding"]
+        .as_object_mut()
+        .unwrap()
+        .remove("shortcutChosen");
+    expected["onboarding"]
+        .as_object_mut()
+        .unwrap()
+        .remove("firstCaptureCompleted");
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved, expected);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn saved_device_copy_text_is_file_only_and_preserves_the_manifest() {
     let dir = std::env::temp_dir().join(format!("apparent-copy-{}.apparent", make_bundle_id()));
     let (_, mut bundle, _) = generate_demo_bundle(Some(dir.clone())).unwrap();

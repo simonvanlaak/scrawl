@@ -19,7 +19,7 @@ if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangt
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 for (const name of [
-  "index.html", "assets", "pond", "team", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
+  "index.html", "assets", "pond", "team", "feature-demos", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
   "Apparent-ghost-demo-v4-lilac.mp4", "Apparent-ghost-demo-v4-lilac-poster.jpg",
 ]) {
   if (!existsSync(join(dist, name))) throw new Error(`Missing required asset: ${name}`)

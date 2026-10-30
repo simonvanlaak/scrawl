@@ -39,3 +39,12 @@ Do not use Python's basic `http.server` to judge seeking: it ignores Range reque
 and Chrome can clamp an early seek to zero. Require a live `206` response with
 the correct `Content-Range`, compare the downloaded movie's SHA-256 with the
 packaged source, and rerun the browser check on the public URL after cutover.
+
+For layout changes, run `node scripts/verify-page-density-browser.mjs <URL>`
+against the packaged page. It checks the download gap, shorter hero, uncropped
+movie, and visible, reachable playback/chapter controls at seven desktop and
+phone sizes, including a 600px-tall desktop. The movie width follows viewport
+height so its controls do not fall below the screen. Keep the belief section's
+scroll runway below its content: the marks must still complete before the page
+ends, and the frog's jump must stay below the heading. Run the belief browser
+regression from `belief-release.md` after changing those gaps.

@@ -46,6 +46,28 @@ fn retired_helper_and_camera_packaging_are_absent() {
 }
 
 #[test]
+fn retirement_preserves_desktop_permission_declarations_in_all_mac_packages() {
+    for (name, packaging) in [
+        ("install", include_str!("../scripts/install-app.sh")),
+        ("preview", include_str!("../scripts/build-mac-preview.sh")),
+        ("release", include_str!("../scripts/release-app.sh")),
+    ] {
+        for permission in [
+            "NSScreenCaptureUsageDescription",
+            "NSMicrophoneUsageDescription",
+            "NSSpeechRecognitionUsageDescription",
+            "NSAppleEventsUsageDescription",
+        ] {
+            assert!(
+                packaging.contains(&format!("<key>{permission}</key>")),
+                "{name} package lost desktop permission declaration {permission}"
+            );
+        }
+        assert!(!packaging.contains("NSCameraUsageDescription"));
+    }
+}
+
+#[test]
 fn old_camera_progress_preserves_other_grants_and_unknown_config() {
     use onboarding::{Permission, Progress, Step};
     let dir =

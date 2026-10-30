@@ -242,6 +242,11 @@ pub struct Probe {
     pub height: u32,
     #[serde(default)]
     pub audio_tracks: u32,
+    /// Native track time range intersects the video's export interval.
+    #[serde(default)]
+    pub audio_overlaps_video: bool,
+    #[serde(default)]
+    pub video_duration_ms: Option<u64>,
     /// The video track's nominal frame rate (0 when unknown).
     #[serde(default)]
     pub fps: f64,

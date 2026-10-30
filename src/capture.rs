@@ -668,6 +668,25 @@ pub(crate) fn push_candidate(
     }
 }
 
+/// Attempt one native screenshot without bypassing a terminal setup failure.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn sample_real_candidate(
+    frames: &Mutex<CandidateBuffer>,
+    real_frame_seen: &AtomicBool,
+    startup_failed: &AtomicBool,
+    urgent: bool,
+    sample: impl FnOnce() -> std::result::Result<RgbaFrame, String>,
+) {
+    if startup_failed.load(Ordering::Acquire) {
+        return;
+    }
+    // Individual acquisition/decode errors are not classified terminal source errors.
+    // Skip this sample and let the sampler try again, including before its first frame.
+    if let Ok(frame) = sample() {
+        push_candidate(frames, real_frame_seen, frame, urgent, true);
+    }
+}
+
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture
 /// and Media Foundation on Windows).
 pub struct ScreenCaptureSession {
@@ -1717,6 +1736,65 @@ mod tests {
     }
 
     #[test]
+    fn transient_screenshot_failure_retries_to_readiness_and_finalization() {
+        for error in ["screenshot acquisition failed", "screenshot has invalid pixel length"] {
+            let stopping = Arc::new(AtomicBool::new(false));
+            let worker_stopping = Arc::clone(&stopping);
+            let worker = thread::spawn(move || {
+                while !worker_stopping.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(5));
+                }
+                None
+            });
+            let session = ScreenCaptureSession {
+                started_at: Instant::now(),
+                stopping,
+                urgent_snapshot: Arc::new(AtomicBool::new(false)),
+                frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+                real_frame_seen: Arc::new(AtomicBool::new(false)),
+                startup_failed: Arc::new(AtomicBool::new(false)),
+                video_offset_ms: Arc::new(AtomicU64::new(0)),
+                sampler_thread: Some(worker),
+                _recording: crate::retention::Recording::start(),
+            };
+            sample_real_candidate(
+                &session.frames, &session.real_frame_seen, &session.startup_failed,
+                true, || Err(error.into()),
+            );
+            assert!(!session.has_frames(), "a failed sample cannot supply readiness");
+            assert_eq!(session.frames.lock().unwrap().len(), 0, "no demo pixels");
+            let mut retried = false;
+            sample_real_candidate(
+                &session.frames, &session.real_frame_seen, &session.startup_failed,
+                false, || {
+                    retried = true;
+                    Ok(RgbaFrame::new(220, 64, 64, vec![255; 64 * 64 * 4]))
+                },
+            );
+            assert!(retried, "{error}: an individual sample failure must not disable later attempts");
+            assert!(session.has_frames(), "the next successful sample unlocks Stop");
+            assert!(!session.failed_to_start());
+            let recording = session.stop();
+            assert_eq!(recording.frames.len(), 1);
+            let dir = std::env::temp_dir().join(crate::make_bundle_id());
+            let target = TargetInfo {
+                mode: CaptureMode::Region,
+                app: None, bundle_id: None, window_title: None, window_id: None,
+                display_id: 0,
+                frame: TargetFrame { x: 0.0, y: 0.0, width: 64.0, height: 64.0, scale: 1.0 },
+            };
+            let (saved, bundle, _) = crate::finalize_capture_bundle(
+                &dir, target, recording, vec![], vec![], None, None,
+                crate::windows::ActivityLog::default(), None,
+            ).expect("a recovered real sample must allow ordinary finalization");
+            assert_eq!(saved, dir);
+            assert!(!bundle.keyframes.is_empty());
+            assert!(dir.join("apparent.json").is_file());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn pending_worker_is_not_failed_and_terminal_signal_does_not_discard_it() {
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = Arc::clone(&stopping);
@@ -1739,6 +1817,11 @@ mod tests {
         };
         assert!(!session.failed_to_start(), "a pending producer is not an error");
         session.startup_failed.store(true, Ordering::Release);
+        sample_real_candidate(
+            &session.frames, &session.real_frame_seen, &session.startup_failed,
+            true, || panic!("a classified terminal setup failure must not retry"),
+        );
+        assert!(!session.has_frames());
         assert!(session.failed_to_start());
         assert!(session.failed_to_start(), "inspection must be read-only");
         assert!(!session.stopping.load(Ordering::Acquire));

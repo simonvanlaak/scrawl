@@ -1073,22 +1073,18 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         // A terminal startup error cannot recover into a different readiness result. Keep
         // servicing privacy exclusions above until the owner explicitly Stops or Cancels.
-        if !startup_failed.load(Ordering::Acquire) && (urgent || last_sample.elapsed() >= interval) {
+        if urgent || last_sample.elapsed() >= interval {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            let frame = filter_and_config.as_ref().and_then(|(filter, config)| {
-                match capture_sck_frame(filter, config, t_ms) {
-                    Ok(frame) => Some(frame),
-                    Err(error) => {
-                        if !thread_real_frame_seen.load(Ordering::Acquire) {
-                            apparent_log(format!("Screen capture failed to start: {error}"));
-                            startup_failed.store(true, Ordering::Release);
-                        }
-                        None
-                    }
-                }
-            });
-            push_sck_candidate(&thread_frames, &thread_real_frame_seen, frame, urgent);
+            if let Some((filter, config)) = filter_and_config.as_ref() {
+                super::sample_real_candidate(
+                    &thread_frames,
+                    &thread_real_frame_seen,
+                    &startup_failed,
+                    urgent,
+                    || capture_sck_frame(filter, config, t_ms),
+                );
+            }
         }
         thread::park_timeout(Duration::from_millis(30));
     }
@@ -1099,17 +1095,6 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
     }
     video_path
-}
-
-fn push_sck_candidate(
-    frames: &Mutex<crate::capture::CandidateBuffer>,
-    real_frame_seen: &AtomicBool,
-    frame: Option<RgbaFrame>,
-    urgent: bool,
-) {
-    if let Some(frame) = frame {
-        super::push_candidate(frames, real_frame_seen, frame, urgent, true);
-    }
 }
 
 fn build_sck_filter_and_config(
@@ -1263,8 +1248,8 @@ fn capture_sck_frame(
     if std::env::var("APPARENT_TEST_DROP_SCK_FRAMES").as_deref() == Ok("1") {
         return Err("test-injected screenshot failure".into());
     }
-    // This wrapper waits for native asynchronous completion. An explicit completion error
-    // must not look like a still-pending consent prompt.
+    // Acquisition and conversion can fail for an individual sample. The sampler retries;
+    // these unclassified errors do not establish a terminal setup/source failure.
     let image = SCScreenshotManager::capture_image(filter, config)
         .map_err(|error| format!("{error:?}"))?;
     let width = u32::try_from(image.width()).map_err(|error| error.to_string())?;
@@ -1865,22 +1850,6 @@ mod tests {
     use super::*;
     use crate::model::TargetFrame;
 
-    #[test]
-    fn failed_sck_screenshot_does_not_insert_demo_pixels() {
-        let candidates = Mutex::new(crate::capture::CandidateBuffer::new(1 << 20));
-        let real_frame_seen = AtomicBool::new(false);
-        push_sck_candidate(&candidates, &real_frame_seen, None, true);
-        assert_eq!(candidates.lock().unwrap().len(), 0);
-        assert!(!real_frame_seen.load(Ordering::Acquire));
-        push_sck_candidate(
-            &candidates,
-            &real_frame_seen,
-            Some(RgbaFrame::new(220, 4, 4, vec![0; 64])),
-            false,
-        );
-        assert_eq!(candidates.lock().unwrap().len(), 1);
-        assert!(real_frame_seen.load(Ordering::Acquire));
-    }
     #[test]
     fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {
         // Dvorak puts B where QWERTY has N (45) and T where QWERTY has K (40).

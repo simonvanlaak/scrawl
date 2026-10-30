@@ -371,6 +371,18 @@
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
+      "id": "warm-recognizer",
+      "group": "record",
+      "name": "Keep the local recognizer warm",
+      "says": "Lazily reuses one local Parakeet model/session across recordings, releasing it after 30 minutes idle once capture and recognition have ended.",
+      "status": "main",
+      "added": "2026-10-30",
+      "platforms": ["linux"],
+      "config": [{ "key": "warmRecognizer", "value": "true", "does": "Set false to disable cross-capture recognizer reuse at the next recording start" }],
+      "note": "On by default; set warmRecognizer to false to disable at the next recording start. Linux local Parakeet pause worker only; Mac uses Apple Speech, not this engine. Retaining the recognizer costs additional idle RAM. No change to manual Paste.",
+      "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]
+    },
+    {
       "id": "straight-line",
       "group": "record",
       "name": "Straight lines",

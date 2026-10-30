@@ -190,6 +190,8 @@ impl AudioRecorder {
         let word_probe = crate::handoff::experiment("liveWordWarning")
             .then(|| crate::live_word_probe::Probe::start(Arc::clone(&samples)));
         #[cfg(target_os = "linux")]
+        crate::warm_recognizer::clear_if_disabled();
+        #[cfg(target_os = "linux")]
         let pause = crate::pause_transcribe::wanted()
             .then(|| crate::pause_transcribe::Pause::start(Arc::clone(&samples)))
             .and_then(|result| {

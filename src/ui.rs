@@ -30,7 +30,7 @@ pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 use crate::audio::{AudioRecorder, InputWarning};
 use crate::capture::{
     LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, apparent_log,
-    current_mouse_screen, discover_target, install_global_hotkeys, list_selectable_windows,
+    current_mouse_screen, install_global_hotkeys, list_selectable_windows,
     record_external_frontmost_app, region_target, selectable_window_at, shortcut_from_key_and_mods,
     start_global_input_tap, update_global_shortcut,
 };
@@ -763,13 +763,15 @@ struct ActiveRecording {
 
 impl ActiveRecording {
     fn mic_warning(&self) -> Option<InputWarning> {
-        match &self.source {
+        let mic = match &self.source {
             CaptureSource::Screen {
                 audio: Some(audio), ..
             } => audio.warning(),
             CaptureSource::Screen { audio: None, .. } => Some(InputWarning::Unavailable),
             CaptureSource::Phone(_) | CaptureSource::Lab => None,
-        }
+        };
+        let missing = matches!(&self.source, CaptureSource::Screen { session, .. } if session.monitor_warning());
+        crate::audio::recording_warning(mic, missing)
     }
 
     fn elapsed_ms(&self) -> u64 {
@@ -1127,7 +1129,13 @@ impl ApparentCoordinator {
         }
         let response = match outcome {
             Some(outcome) => serde_json::json!({"outcome": outcome, "state": self.agent_state()}),
-            None => serde_json::json!({"state": before}),
+            None => {
+                let displays = self.active_recording.as_ref().and_then(|recording| match &recording.source {
+                    CaptureSource::Screen { session, .. } => Some(session.display_status()),
+                    _ => None,
+                }).unwrap_or_default();
+                serde_json::json!({"state": before, "displays": displays})
+            },
         };
         let _ = request.reply.send(response.to_string());
     }
@@ -1462,9 +1470,27 @@ impl ApparentCoordinator {
         self.apply_shortcut(action, cx);
     }
 
-    /// Polled from the UI loop while a press is pending: watches for ⌥⇧ coming up and Esc,
-    /// whichever app or window has focus.
+    /// Polled while a press is pending OR a recording exists, including portal startup.
+    /// Worker completion must not depend on another shortcut press.
     pub fn tick_shortcut(&mut self, cx: &mut Context<Self>) {
+        if self.active_recording.as_ref().is_some_and(|recording| matches!(&recording.source,
+            CaptureSource::Screen { session, .. } if session.cancelled())) {
+            self.cancel_recording(cx);
+            return;
+        }
+        if self.active_recording.as_ref().is_some_and(|recording| matches!(&recording.source,
+            CaptureSource::Screen { session, .. } if session.ended() && session.has_frames())) {
+            self.finish_recording(cx);
+            return;
+        }
+        if self.active_recording.as_ref().is_some_and(|recording| matches!(&recording.source,
+            CaptureSource::Screen { session, .. } if session.startup_failed())) {
+            self.cancel_recording(cx);
+            let message = "No displays could start recording. Check screen sharing and try again.";
+            apparent_log(message);
+            if let Ok(mut status) = CAPTURE_STATUS.lock() { *status = Some(message.to_owned()); }
+            return;
+        }
         if !self.shortcut.is_pending() {
             return;
         }
@@ -1523,7 +1549,15 @@ impl ApparentCoordinator {
         let target = if self.lab {
             lab::target()
         } else {
-            discover_target(None)
+            match crate::capture::discover_desktop_target() {
+                Ok(target) => target,
+                Err(error) => {
+                    let message = format!("Cannot start desktop capture: {error:#}");
+                    apparent_log(&message);
+                    if let Ok(mut status) = CAPTURE_STATUS.lock() { *status = Some(message); }
+                    return;
+                }
+            }
         };
         self.start_recording_with_target(target, cx);
         if self.is_recording() {
@@ -2064,8 +2098,23 @@ impl ApparentCoordinator {
         }
     }
 
-    /// Follow the pointer with Linux controls, not with the capture source. On Mac,
-    /// a dragged capsule must stay where it was dropped for the whole recording.
+    /// Move only the existing excluded ink window; never retarget the capture or capsule.
+    #[cfg(target_os = "macos")]
+    fn follow_recording_ink(&mut self) {
+        let Some(recording) = self.active_recording.as_ref() else { return; };
+        let CaptureSource::Screen { session, .. } = &recording.source else { return; };
+        if recording.target.displays.is_empty() { return; }
+        let Some(overlay) = recording._metal_overlay.as_ref() else { return; };
+        let current = overlay.screen();
+        let Some(pointer) = current_mouse_screen() else { return; };
+        let pointer = pointer.map(f64::from);
+        let displays = session.display_status();
+        if let Some(frame) = recording_ink_destination(current, pointer, &displays)
+            && let Some(overlay) = self.active_recording.as_mut().and_then(|r| r._metal_overlay.as_mut()) {
+            overlay.move_to(frame);
+        }
+    }
+
     #[cfg(target_os = "linux")]
     fn follow_recording_pointer(&mut self) {
         if !matches!(self.island_phase, IslandPhase::Recording)
@@ -2429,6 +2478,8 @@ impl ApparentCoordinator {
             self.sync_picker_overlay();
         }
         self.follow_phone_mirror();
+        #[cfg(target_os = "macos")]
+        self.follow_recording_ink();
         #[cfg(target_os = "linux")]
         self.follow_recording_pointer();
 
@@ -4778,6 +4829,15 @@ fn area_rect(a: [f32; 2], b: [f32; 2], display: [f32; 4]) -> Option<[f64; 4]> {
         .then(|| [a[0].min(b[0]), a[1].min(b[1]), w, h].map(f64::from))
 }
 
+pub(crate) fn recording_ink_destination(current: [f64; 4], pointer: [f64; 2], displays: &[crate::model::CapturedDisplay]) -> Option<[f64; 4]> {
+    displays.iter().filter(|d| d.failure.is_none()).find_map(|d| {
+        let f = d.frame;
+        let frame = [f.x, f.y, f.width, f.height];
+        (pointer[0] >= f.x && pointer[1] >= f.y && pointer[0] < f.x + f.width
+            && pointer[1] < f.y + f.height && frame != current).then_some(frame)
+    })
+}
+
 fn recording_pointer_destination(
     current: [f64; 4],
     pointer: [f64; 2],
@@ -6090,6 +6150,10 @@ pub fn run_start_benchmark() {
     });
 }
 
+fn capture_tick_needed(shortcut_pending: bool, active_recording: bool) -> bool {
+    shortcut_pending || active_recording
+}
+
 /// Runs the GPUI desktop app, optionally opening an initial `.apparent` bundle in the Review window
 /// or starting recording immediately.
 pub fn run_app(
@@ -6353,7 +6417,7 @@ pub fn run_app(
                     }
 
                     motion::poll_tune();
-                    if loop_coord.read(cx).shortcut.is_pending() {
+                    if capture_tick_needed(loop_coord.read(cx).shortcut.is_pending(), loop_coord.read(cx).active_recording.is_some()) {
                         loop_coord.update(cx, |coord, cx| coord.tick_shortcut(cx));
                     } else if loop_coord.read(cx).telemetry.take_escape()
                         && loop_coord.read(cx).is_selecting()
@@ -6383,6 +6447,17 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_gui_loop_polls_starting_and_live_captures_after_shortcut_release() {
+        let mut shortcut = crate::shortcut::Shortcut::default();
+        shortcut.press(crate::shortcut::Activity::Free);
+        assert!(capture_tick_needed(shortcut.is_pending(), false));
+        assert_eq!(shortcut.tick(false), crate::shortcut::Action::RecordScreen);
+        assert!(!shortcut.is_pending());
+        assert!(capture_tick_needed(shortcut.is_pending(), true), "portal refusal must reach recovery without another shortcut press");
+        assert!(!capture_tick_needed(false, false));
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]

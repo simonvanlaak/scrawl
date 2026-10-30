@@ -17,10 +17,34 @@ use crate::model::{
 #[cfg_attr(target_os = "linux", path = "capture/linux.rs")]
 mod platform;
 pub use platform::*;
+pub(crate) mod desktop;
 
 /// Resolve a CLI recording target before creating a bundle or starting any recorder.
 pub fn record_target(window_query: Option<&str>) -> Result<TargetInfo> {
+    if window_query.is_none() { return discover_desktop_target(); }
     resolve_record_target(window_query, list_recordable_windows, || discover_target(None))
+}
+
+/// Untargeted starts record the connected desktop; picker targets remain scoped.
+pub fn discover_desktop_target() -> Result<TargetInfo> {
+    let target = discover_target(None);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        return untargeted_target(target, platform::connected_displays);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    Ok(target)
+}
+
+fn untargeted_target(target: TargetInfo, inventory: impl FnOnce() -> Vec<crate::model::CapturedDisplay>) -> Result<TargetInfo> {
+    resolve_desktop_inventory(target, inventory())
+}
+
+fn resolve_desktop_inventory(mut target: TargetInfo, displays: Vec<crate::model::CapturedDisplay>) -> Result<TargetInfo> {
+    target.frame = desktop::bounds(&displays.iter().map(|d| d.frame).collect::<Vec<_>>())
+        .context("No connected displays available for desktop capture")?;
+    target.displays = displays;
+    Ok(target)
 }
 
 fn resolve_record_target(
@@ -50,6 +74,30 @@ fn resolve_record_target(
 mod record_target_tests {
     use super::*;
 
+    #[test]
+    fn default_untargeted_capture_uses_inventory_without_config() {
+        let selected = target(CaptureMode::Display, "", "");
+        let displays: Vec<_> = [(-800.0, 1), (0.0, 2)].into_iter().map(|(x, id)| crate::model::CapturedDisplay {
+            id, name: format!("output-{id}"), frame: TargetFrame { x, ..selected.frame },
+            started_ms: None, failed_ms: None, failure: None,
+        }).collect();
+        let desktop = untargeted_target(selected.clone(), || displays).unwrap();
+        assert_eq!(desktop.displays.len(), 2, "default must not need an experiment/config opt-in");
+        assert_eq!(desktop.frame.x, -800.0);
+        assert_eq!(desktop.frame.width, 1600.0);
+        assert!(untargeted_target(selected, Vec::new).is_err());
+        for mode in [CaptureMode::Display, CaptureMode::Region] {
+            let explicit = target(mode, "chosen", "Editor");
+            let resolved = resolve_record_target(None, || panic!("not a window request"), || explicit.clone()).unwrap();
+            assert_eq!(resolved.frame, explicit.frame);
+            assert!(resolved.displays.is_empty(), "explicit {mode:?} must stay scoped");
+        }
+        let window = resolve_record_target(Some("chosen"), || vec![target(CaptureMode::Window, "chosen", "Editor")],
+            || panic!("explicit window must not use desktop inventory")).unwrap();
+        assert_eq!(window.window_id, Some(42));
+        assert!(window.displays.is_empty());
+    }
+
     fn target(mode: CaptureMode, title: &str, app: &str) -> TargetInfo {
         TargetInfo {
             mode,
@@ -58,6 +106,7 @@ mod record_target_tests {
             window_title: Some(title.into()),
             window_id: (mode == CaptureMode::Window).then_some(42),
             display_id: 0,
+            displays: Vec::new(),
             frame: TargetFrame { x: 0.0, y: 0.0, width: 800.0, height: 600.0, scale: 1.0 },
         }
     }
@@ -105,15 +154,31 @@ pub struct CandidateBuffer {
     cap: usize,
     budget: usize,
     interval: Duration,
+    latest_only: bool,
+    privacy_invalidated: bool,
+    cancelled: bool,
+    pub(crate) awaiting_consent: bool,
+    pub(crate) startup_ready_ms: u64,
 }
 
 impl CandidateBuffer {
+    /// A native privacy decision can arrive after another consumer copied these pixels.
+    pub(crate) fn invalidate_privacy(&mut self) {
+        self.privacy_invalidated = true;
+        self.frames.clear();
+    }
+
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             frames: Vec::new(),
             cap: 0,
             budget: budget_bytes,
             interval: FRAME_SAMPLE_INTERVAL,
+            latest_only: false,
+            privacy_invalidated: false,
+            cancelled: false,
+            awaiting_consent: false,
+            startup_ready_ms: 0,
         }
     }
 
@@ -128,6 +193,12 @@ impl CandidateBuffer {
     }
 
     pub fn push(&mut self, frame: RgbaFrame, urgent: bool) {
+        if self.privacy_invalidated || self.cancelled { return; }
+        if self.latest_only {
+            self.frames.clear();
+            self.frames.push((frame, urgent));
+            return;
+        }
         if self.cap == 0 {
             self.cap = (self.budget / frame.rgba.len().max(1)).clamp(60, 1_200);
         }
@@ -177,6 +248,10 @@ impl CandidateBuffer {
     pub fn into_frames(self) -> Vec<RgbaFrame> {
         self.frames.into_iter().map(|(f, _)| f).collect()
     }
+
+    fn latest() -> Self {
+        Self { latest_only: true, ..Self::new(0) }
+    }
 }
 
 /// What a finished screen capture leaves behind.
@@ -187,6 +262,7 @@ pub struct ScreenRecording {
     pub duration_ms: u64,
     /// The capture time (on the frames' clock) of the video's start.
     pub video_offset_ms: u64,
+    pub displays: Vec<crate::model::CapturedDisplay>,
 }
 
 /// Live UI events emitted by the global input monitor to drive Apparent's HUD & Review windows.
@@ -608,6 +684,7 @@ pub fn region_target(
         window_title: hit.and_then(|window| window.window_title.clone()),
         window_id: None,
         display_id,
+        displays: Vec::new(),
         frame: TargetFrame {
             x,
             y,
@@ -675,6 +752,7 @@ pub struct ScreenCaptureSession {
     real_frame_seen: Arc<AtomicBool>,
     video_offset_ms: Arc<AtomicU64>,
     sampler_thread: Option<JoinHandle<Option<PathBuf>>>,
+    displays: Arc<Mutex<Vec<crate::model::CapturedDisplay>>>,
     _recording: crate::retention::Recording,
 }
 
@@ -690,6 +768,8 @@ impl ScreenCaptureSession {
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
         let real_frame_seen = Arc::new(AtomicBool::new(false));
         let video_offset_ms = Arc::new(AtomicU64::new(0));
+        let displays = Arc::new(Mutex::new(target.displays.clone()));
+        let thread_displays = Arc::clone(&displays);
 
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
@@ -700,7 +780,7 @@ impl ScreenCaptureSession {
         let sampler_thread = thread::Builder::new()
             .name("apparent-frame-sampler".into())
             .spawn(move || {
-                platform::run_sampler(Sampler {
+                let sampler = Sampler {
                     target: sampler_target,
                     video_output_path,
                     excluded_window_ids,
@@ -710,7 +790,12 @@ impl ScreenCaptureSession {
                     frames: thread_frames,
                     real_frame_seen: thread_real_frame_seen,
                     video_offset_ms: thread_offset,
-                })
+                };
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                if !sampler.target.displays.is_empty() {
+                    return desktop::run(sampler, thread_displays);
+                }
+                platform::run_sampler(sampler)
             })
             .ok();
 
@@ -722,6 +807,7 @@ impl ScreenCaptureSession {
             real_frame_seen,
             video_offset_ms,
             sampler_thread,
+            displays,
             _recording: crate::retention::Recording::start(),
         }
     }
@@ -741,6 +827,25 @@ impl ScreenCaptureSession {
     pub fn has_frames(&self) -> bool {
         self.real_frame_seen.load(Ordering::Acquire)
     }
+
+    pub fn monitor_warning(&self) -> bool {
+        self.displays.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter().any(|d| d.failure.is_some())
+    }
+
+    pub fn display_status(&self) -> Vec<crate::model::CapturedDisplay> {
+        self.displays.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    pub fn startup_failed(&self) -> bool {
+        !self.has_frames() && self.sampler_thread.as_ref().is_some_and(JoinHandle::is_finished)
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancelled
+    }
+
+    pub fn ended(&self) -> bool { self.sampler_thread.as_ref().is_none_or(JoinHandle::is_finished) }
 
     pub fn stop(mut self) -> ScreenRecording {
         let duration_ms = self.elapsed_ms();
@@ -768,6 +873,7 @@ impl ScreenCaptureSession {
             video: valid_video,
             duration_ms: duration_ms.max(100),
             video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
+            displays: self.displays.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(),
         }
     }
 }
@@ -1641,6 +1747,7 @@ mod tests {
             real_frame_seen: seen,
             video_offset_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
+            displays: Arc::new(Mutex::new(Vec::new())),
             _recording: crate::retention::Recording::start(),
         };
         assert!(
@@ -1686,6 +1793,7 @@ mod tests {
             real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(120)),
             sampler_thread: Some(worker),
+            displays: Arc::new(Mutex::new(Vec::new())),
             _recording: crate::retention::Recording::start(),
         };
         let recording = session.stop();
@@ -1980,6 +2088,7 @@ mod tests {
                 window_title: None,
                 window_id: None,
                 display_id: 2,
+                displays: Vec::new(),
                 frame,
             };
             // Windows frames are pixels already and never upscaled.
@@ -2175,6 +2284,7 @@ mod tests {
             real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
+            displays: Arc::new(Mutex::new(Vec::new())),
             _recording: crate::retention::Recording::start(),
         };
         assert!(session.stop().frames.is_empty());
@@ -2189,6 +2299,7 @@ mod tests {
             window_title: None,
             window_id: None,
             display_id: 1,
+            displays: Vec::new(),
             frame: TargetFrame {
                 x: 0.0,
                 y: 0.0,
@@ -2239,6 +2350,7 @@ mod tests {
             window_title: Some(format!("Window {id}")),
             window_id: Some(id),
             display_id: 1,
+            displays: Vec::new(),
             frame: TargetFrame {
                 x,
                 y,

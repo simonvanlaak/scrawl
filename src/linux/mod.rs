@@ -16,6 +16,7 @@ pub mod atspi;
 pub mod appearance;
 pub mod auto_paste;
 pub mod clipboard;
+mod desktop_consent;
 pub mod hyprland;
 pub mod input;
 pub mod ipc;

@@ -5,9 +5,17 @@
 }
 
 .pond-page {
+  /* Lilac and Carbon from apparent-wordmark.svg. */
+  --brand-lilac: #b7a5d8;
+  --brand-carbon: #020102;
   background: #f5f0e8;
   color: #020102;
   font-family: "Host Grotesk", Arial, sans-serif;
+}
+
+.pond-page ::selection {
+  background: var(--brand-lilac);
+  color: var(--brand-carbon);
 }
 
 .pond-nav {
@@ -133,6 +141,7 @@
 
 .pond-demo { background: #0a0a0b; color: #f4f4f5; padding: 48px 0 68px; }
 .pond-demo h2 { max-width: 1240px; margin: 0 auto 22px; padding: 0 20px; font-size: 32px; font-weight: 500; }
+.pond-demo h2 span { color: var(--brand-lilac); }
 .pond-demo .demo-section { padding-bottom: 0; }
 .pond-purpose { max-width: 1000px; margin: 90px auto; padding: 0 24px; text-align: center; }
 .pond-purpose h2 { font-size: 51px; font-weight: 500; line-height: 1.17; letter-spacing: -.045em; }

@@ -46,7 +46,7 @@ Settings follows system light or dark appearance without storing a preference. T
 
 
 Settings › About keeps its existing **Check for Updates…** action. On Linux, a manual check
-shows Checking and ignores duplicate clicks until it completes. Its dismissible result has
+shows Checking… only in the disabled check button and ignores duplicate clicks until it completes. Its dismissible result has
 one line only: **Update available**, **No update available**, or **Update check failed**, with
 the same pixel frog jumping, lounging, or puzzled on its notched lily pad. Failures and
 unexpected worker responses are logged; they never become “No update available” or

@@ -2,11 +2,14 @@
 
 `apparent walkthrough` connects the real recorder, evidence inspection and a separate polished share copy. Ordinary captures and `apparent export` defaults are unchanged. Rendering is an off-by-default `agentWalkthrough` experiment: opt in per export with `--experiment agentWalkthrough`, or set `"experiments": {"agentWalkthrough": true}` in `~/.config/apparent/config.json` (read at invocation, no restart).
 
+For a normal product walkthrough, start the verified running GUI through its configured recording shortcut, retain the exact owned `capture_id` from `apparent capture state`, wait for `recording`, then finish only that capture with `apparent capture stop <capture_id>`. Inspect the exact completed bundle before rendering. Check the actual source and final crop retain the real recording pill whenever it is promised; never add a simulated pill. Timed `record --duration` is a separate recorder fallback with no normal GUI pill or click/Shift-ink telemetry, not equivalent product proof. Disclose it as such. See `docs/capture.md` for safe capture ownership and permissions.
+
 ## Two passes
 
 ```sh
-apparent walkthrough record --duration 20 --out /private/take.apparent \
-  --note 'A factual task note, not a test verdict'
+# Start the verified running GUI with its recording shortcut.
+# Read capture state, retain your capture_id, act, then stop only that ID.
+# Use the exact completed bundle path below, not a concurrent "latest" capture.
 apparent walkthrough inspect /private/take.apparent --template /private/cues.json
 # Inspect the entire movie, summary, contact sheet and frames. Edit cues.json.
 apparent walkthrough export /private/take.apparent \
@@ -14,7 +17,7 @@ apparent walkthrough export /private/take.apparent \
   --out-dir /private/share-1 --source-audio drop --allow-online-tts
 ```
 
-All three commands print machine-readable JSON on stdout; recorder progress goes to stderr. `record` delegates to the existing timed recorder, supports its unique `--window` selector, refuses an existing bundle, and waits through finalization. It records screen and microphone but **no click/Shift-ink telemetry**; a changing UI can still be visible in the movie. It does not perform your task for you. Arrange actions concurrently with recording. No wall clock is used for cues.
+The walkthrough commands print machine-readable JSON on stdout; recorder progress goes to stderr. If the GUI route is unavailable, the separately disclosed `apparent walkthrough record --duration 20 --out /private/fallback.apparent` delegates to the existing timed recorder, supports its unique `--window` selector, refuses an existing bundle, and waits through finalization. It records screen and microphone but **no normal GUI recording pill or click/Shift-ink telemetry**; a changing UI can still be visible in the movie. It does not perform your task for you. Arrange actions concurrently with recording. No wall clock is used for cues.
 
 For interaction-driven camera motion, use the running app's normal recording shortcut instead, retain its `capture_id` from `apparent capture state`, and finish only your capture with `apparent capture stop <capture_id>`. Do not toggle a shortcut to stop an unknown recording. See [capture control](capture.md#agent-control-of-the-running-gui). Then use `walkthrough inspect` on the exact completed bundle. The workflow does not introduce another recording engine or change input permissions.
 

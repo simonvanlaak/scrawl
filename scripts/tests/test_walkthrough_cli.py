@@ -48,10 +48,11 @@ class WalkthroughCli(unittest.TestCase):
             template.write_text('[[0,1,"The real screen."],[2,3,"The take ends."]]')
             # Embedded Python must not execute modules from the task's directory.
             (root / 'PIL.py').write_text('raise RuntimeError("untrusted local module executed")')
-            before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.iterdir()}
+            # Provenance uses canonical file identities, even when TMPDIR is a symlink.
+            before = {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.iterdir()}
             result = cli(*export)
             self.assertTrue(Path(result['output']).is_file())
-            self.assertEqual(before, {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.iterdir()})
+            self.assertEqual(before, {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.iterdir()})
             provenance = json.loads(Path(result['provenance']).read_text())
             self.assertEqual(provenance['evidence_sha256'], before)
             cli(*export, ok=False)

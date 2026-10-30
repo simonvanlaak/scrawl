@@ -1002,12 +1002,12 @@
       "id": "export-menu",
       "group": "export",
       "name": "Export from the menu",
-      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent with progress beside the menu bar icon.",
+      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent on Mac or a native Save dialog destination on Linux, with visible progress and failure feedback.",
       "status": "experiment:videoExport",
-      "platforms": ["mac"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-18",
       "config": [{ "key": "videoExport", "value": "true", "does": "Show Export Last Capture as Video… (Settings › Recording › Experimental)" }],
-      "docs": ["README.md#export-as-video"]
+      "docs": ["README.md#export-as-video", "docs/export-and-retention.md#linux-tray-export", "docs/linux.md"]
     },
 
     {

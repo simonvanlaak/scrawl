@@ -198,6 +198,10 @@ pub enum Input {
     /// A permission row's button.
     Grant(Permission),
     ChangeShortcut,
+    /// A shortcut was explicitly chosen and successfully saved, or accepted from the desktop.
+    ShortcutChosen,
+    /// The global shortcut requested a capture (not the menu or a timed CLI recording).
+    ShortcutTriggered,
     /// The window was closed.
     Closed,
     /// "Open Settings" on the last screen.
@@ -279,6 +283,8 @@ pub struct View {
     pub picker_note: bool,
     /// Show the inline Record recorder, not a second Settings window.
     pub shortcut_editing: bool,
+    pub first_capture_required: bool,
+    pub shortcut_chosen: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -301,9 +307,32 @@ pub struct Flow {
     /// The step `Effect::ConfirmScreen` was given on (once per window).
     screen_confirmed: Option<Step>,
     shortcut_editing: bool,
+    first_capture_required: bool,
+    shortcut_chosen: bool,
+    first_capture_completed: bool,
+    shortcut_pending: bool,
+    practice_recording: bool,
 }
 
 impl Flow {
+    /// Opt into the first-capture onboarding experiment, restoring durable milestones.
+    pub fn with_first_capture(mut self, required: bool, chosen: bool, completed: bool) -> Self {
+        self.first_capture_required = required && self.mode == Mode::Tour;
+        self.shortcut_chosen = chosen;
+        self.first_capture_completed = chosen && completed;
+        if self.first_capture_required && self.step.position() >= Step::Shortcut.position() {
+            self.step = if !chosen {
+                Step::Shortcut
+            } else if self.first_capture_completed {
+                Step::Done
+            } else if self.step == Step::Done {
+                Step::TryIt
+            } else {
+                self.step
+            };
+        }
+        self
+    }
     /// The tour from `start`. Walking forward passes the permissions screen when everything on
     /// it works, and a later step never shows before it's done. A tour resumed on the
     /// permissions screen (after a relaunch) stays there, so the window comes back where it was.
@@ -342,6 +371,11 @@ impl Flow {
             tutorial: None,
             screen_confirmed: None,
             shortcut_editing: false,
+            first_capture_required: false,
+            shortcut_chosen: false,
+            first_capture_completed: false,
+            shortcut_pending: false,
+            practice_recording: false,
         }
     }
 
@@ -381,6 +415,16 @@ impl Flow {
 
     pub fn on(&mut self, input: Input) -> Effect {
         match input {
+            Input::ShortcutChosen => {
+                if self.mode == Mode::Tour && self.step == Step::Shortcut {
+                    self.shortcut_chosen = true;
+                }
+                Effect::None
+            }
+            Input::ShortcutTriggered => {
+                self.shortcut_pending = self.step == Step::TryIt && self.shortcut_chosen;
+                Effect::None
+            }
             Input::Continue => self.primary(),
             Input::Back => {
                 self.step = self.back_from(self.step);
@@ -424,14 +468,20 @@ impl Flow {
                 Effect::Show
             }
             Input::CaptureStarted if !self.hidden => {
+                self.practice_recording = std::mem::take(&mut self.shortcut_pending);
                 self.hidden = true;
                 Effect::Hide
             }
             Input::CaptureStarted => Effect::None,
             Input::CaptureEnded { completed } => {
-                if completed && self.step == Step::TryIt {
+                if completed && self.step == Step::TryIt
+                    && (!self.first_capture_required || self.practice_recording)
+                {
+                    self.first_capture_completed = true;
                     self.step = Step::Done;
                 }
+                self.shortcut_pending = false;
+                self.practice_recording = false;
                 if std::mem::take(&mut self.hidden) {
                     Effect::Show
                 } else {
@@ -470,6 +520,8 @@ impl Flow {
             tutorial: self.tutorial,
             picker_note: self.screen_confirmed == Some(self.step),
             shortcut_editing: self.step == Step::Shortcut && self.shortcut_editing,
+            first_capture_required: self.first_capture_required,
+            shortcut_chosen: self.shortcut_chosen,
         }
     }
 
@@ -554,6 +606,8 @@ impl Flow {
 
     fn primary(&mut self) -> Effect {
         match self.step {
+            Step::Shortcut if self.first_capture_required && !self.shortcut_chosen => Effect::None,
+            Step::TryIt if self.first_capture_required => Effect::None,
             Step::TryIt | Step::Done => Effect::Close,
             Step::Permissions if !self.done() => Effect::None,
             _ => self.advance(),
@@ -704,7 +758,7 @@ impl Gate {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
-    /// The tour was finished or closed; it doesn't open by itself again.
+    /// The tour finished (or was dismissed in the legacy flow); it won't open by itself again.
     #[serde(default)]
     pub seen: bool,
     /// Where the tour picks up at the next launch.
@@ -723,9 +777,23 @@ pub struct Progress {
     /// The how-it-works demo was skipped, watched or drawn on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tutorial: Option<Tutorial>,
+    /// Explicitly saved Record shortcut (or accepted desktop-owned shortcut) in the tour.
+    #[serde(default)]
+    pub shortcut_chosen: bool,
+    /// A shortcut-started practice recording produced a completed local capture.
+    #[serde(default)]
+    pub first_capture_completed: bool,
 }
 
 impl Progress {
+    /// Closing is allowed, but an experimental tour resumes until its capture succeeds.
+    pub fn leave(&mut self, flow: &Flow) {
+        if flow.mode == Mode::Fix {
+            return;
+        }
+        self.seen = !flow.first_capture_required || flow.first_capture_completed;
+        self.resume = if self.seen { None } else { flow.resume_point() };
+    }
     pub fn load() -> Self {
         Self::load_from(&crate::handoff::default_config_path())
     }
@@ -892,10 +960,28 @@ pub struct Session {
     last_view: String,
     saved_resume: Option<Step>,
     saved_tutorial: Option<Tutorial>,
+    saved_shortcut_chosen: bool,
+    saved_first_capture_completed: bool,
     clock: std::time::Instant,
 }
 
 impl Session {
+    /// State-only transport: tests exercise coordinator lifecycle without a window or user config.
+    #[cfg(test)]
+    pub(crate) fn for_test(flow: Flow) -> Self {
+        Self {
+            flow,
+            transport: Transport::InProcess(None),
+            polling: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            last_view: String::new(),
+            saved_resume: None,
+            saved_tutorial: None,
+            saved_shortcut_chosen: false,
+            saved_first_capture_completed: false,
+            clock: std::time::Instant::now(),
+        }
+    }
+
     pub fn open(
         flow: Flow,
         shortcut: &str,
@@ -938,12 +1024,19 @@ impl Session {
         let mut session = Self {
             flow: flow
                 .with_auto_relaunch(allowed)
-                .with_tutorial(progress.tutorial),
+                .with_tutorial(progress.tutorial)
+                .with_first_capture(
+                    crate::handoff::experiment("onboardingFirstCapture"),
+                    progress.shortcut_chosen,
+                    progress.first_capture_completed,
+                ),
             transport,
             polling,
             last_view: String::new(),
             saved_resume: None,
             saved_tutorial: progress.tutorial,
+            saved_shortcut_chosen: progress.shortcut_chosen,
+            saved_first_capture_completed: progress.first_capture_completed,
             clock: std::time::Instant::now(),
         };
         session.sync();
@@ -1012,6 +1105,16 @@ impl Session {
 
     pub fn mode(&self) -> Mode {
         self.flow.mode()
+    }
+
+    pub fn leave(&self, exited: bool) {
+        // A helper crash was not a completed tour before this experiment either.
+        if exited && !self.flow.first_capture_required {
+            return;
+        }
+        let mut progress = Progress::load();
+        progress.leave(&self.flow);
+        progress.save();
     }
 
     /// Feeds the flow and carries out what the window can do itself. Returns what needs the
@@ -1124,6 +1227,10 @@ impl Session {
     }
 
     fn sync(&mut self) {
+        #[cfg(test)]
+        if matches!(self.transport, Transport::InProcess(None)) {
+            return;
+        }
         let mut view = serde_json::to_value(self.flow.view()).unwrap_or_default();
         view["type"] = "state".into();
         view["speech"] = serde_json::to_value(crate::speech_model::current()).unwrap_or_default();
@@ -1136,15 +1243,24 @@ impl Session {
         let resume = self.flow.resume_point();
         let tutorial = self.flow.tutorial();
         let new_resume = resume.is_some() && resume != self.saved_resume;
-        if new_resume || tutorial != self.saved_tutorial {
+        let milestones_changed = self.flow.mode == Mode::Tour
+            && (self.saved_shortcut_chosen != self.flow.shortcut_chosen
+                || self.saved_first_capture_completed != self.flow.first_capture_completed);
+        if new_resume || tutorial != self.saved_tutorial || milestones_changed {
             let mut progress = Progress::load();
             if new_resume {
                 progress.resume = resume;
             }
             progress.tutorial = tutorial;
+            if self.flow.mode == Mode::Tour {
+                progress.shortcut_chosen = self.flow.shortcut_chosen;
+                progress.first_capture_completed = self.flow.first_capture_completed;
+            }
             progress.save();
             self.saved_resume = resume.or(self.saved_resume);
             self.saved_tutorial = tutorial;
+            self.saved_shortcut_chosen = self.flow.shortcut_chosen;
+            self.saved_first_capture_completed = self.flow.first_capture_completed;
         }
     }
 
@@ -1247,6 +1363,86 @@ pub fn relaunch() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn first_capture_close_resumes_until_success_without_trapping_the_user() {
+        let mut progress = Progress::default();
+        let mut flow = Flow::tour(Step::Shortcut, Some(grants(&Permission::REQUIRED)))
+            .with_first_capture(true, false, false);
+        assert_eq!(flow.on(Input::Closed), Effect::Close);
+        progress.leave(&flow);
+        assert!(!progress.seen);
+        assert_eq!(progress.resume, Some(Step::Shortcut));
+        flow.on(Input::ShortcutChosen);
+        flow.on(Input::Continue);
+        assert_eq!(flow.on(Input::Later), Effect::Close);
+        progress.leave(&flow);
+        assert!(!progress.seen);
+        assert_eq!(progress.resume, Some(Step::TryIt));
+        flow.on(Input::ShortcutTriggered);
+        flow.on(Input::CaptureStarted);
+        flow.on(Input::CaptureEnded { completed: true });
+        progress.leave(&flow);
+        assert!(progress.seen);
+        assert_eq!(progress.resume, None);
+    }
+
+    #[test]
+    fn first_capture_resume_rechecks_milestones_and_preserves_legacy_and_repairs() {
+        let ready = Some(grants(&Permission::REQUIRED));
+        let missing = Flow::tour(Step::TryIt, ready.clone()).with_first_capture(true, false, false);
+        assert_eq!(missing.step(), Step::Shortcut);
+        let unfinished = Flow::tour(Step::Done, ready.clone()).with_first_capture(true, true, false);
+        assert_eq!(unfinished.step(), Step::TryIt);
+        let completed = Flow::tour(Step::TryIt, ready.clone()).with_first_capture(true, true, true);
+        assert_eq!(completed.step(), Step::Done);
+        let legacy = Flow::tour(Step::Shortcut, ready.clone()).with_first_capture(false, false, false);
+        let mut progress = Progress::default();
+        progress.leave(&legacy);
+        assert!(progress.seen, "the default flow still allows dismissal");
+        let repair = Flow::fix(Permission::REQUIRED.to_vec(), ready).with_first_capture(true, false, false);
+        assert!(!repair.view().first_capture_required);
+        let before = progress.clone();
+        progress.leave(&repair);
+        assert_eq!(progress, before, "permission repair does not complete or reset a tour");
+    }
+
+    #[test]
+    fn first_capture_requires_explicit_shortcut_choice() {
+        let mut flow = Flow::tour(Step::Shortcut, Some(grants(&Permission::REQUIRED)))
+            .with_first_capture(true, false, false);
+        assert_eq!(flow.on(Input::Continue), Effect::None);
+        assert_eq!(flow.step(), Step::Shortcut, "an existing shortcut is not a choice");
+        flow.on(Input::ChangeShortcut);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::Shortcut, "opening the recorder is not a saved choice");
+        flow.on(Input::ShortcutChosen);
+        flow.on(Input::Continue);
+        assert_eq!(flow.step(), Step::TryIt);
+    }
+
+    #[test]
+    fn first_capture_requires_shortcut_start_and_successful_finish() {
+        let mut flow = Flow::tour(Step::TryIt, Some(grants(&Permission::REQUIRED)))
+            .with_first_capture(true, true, false);
+        assert_eq!(flow.on(Input::Continue), Effect::None, "Try it cannot finish the tour");
+        flow.on(Input::CaptureEnded { completed: true });
+        assert_eq!(flow.step(), Step::TryIt, "a stale completion cannot count");
+        flow.on(Input::CaptureStarted);
+        flow.on(Input::CaptureEnded { completed: true });
+        assert_eq!(flow.step(), Step::TryIt, "menu recordings do not prove the shortcut works");
+        flow.on(Input::ShortcutTriggered);
+        flow.on(Input::CaptureStarted);
+        flow.on(Input::CaptureEnded { completed: false });
+        assert_eq!(flow.step(), Step::TryIt, "cancelled captures do not count");
+        flow.on(Input::CaptureStarted);
+        flow.on(Input::CaptureEnded { completed: true });
+        assert_eq!(flow.step(), Step::TryIt, "cancel clears the shortcut attempt");
+        flow.on(Input::ShortcutTriggered);
+        flow.on(Input::CaptureStarted);
+        flow.on(Input::CaptureEnded { completed: true });
+        assert_eq!(flow.step(), Step::Done);
+    }
+
     use super::*;
 
     use Permission::{Accessibility, Camera, InputMonitoring, Microphone, ScreenRecording};
@@ -1866,6 +2062,8 @@ mod tests {
             relaunched_at: Some(1_792_000_000_000),
             reopen_fix: true,
             tutorial: Some(Tutorial::Practiced),
+            shortcut_chosen: true,
+            first_capture_completed: true,
         };
         progress.save_to(&path).unwrap();
         assert_eq!(Progress::load_from(&path), progress);

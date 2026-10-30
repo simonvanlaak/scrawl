@@ -4,6 +4,7 @@ import { FrogPond } from "./FrogPond"
 import { GithubStars } from "./GithubStars"
 import { Footer } from "./Footer"
 import { Team } from "./Team"
+import { FeatureGrid } from "./features/FeatureGrid"
 
 export function App() {
   return (
@@ -23,6 +24,7 @@ export function App() {
             <Demo />
           </div>
         </section>
+        <FeatureGrid />
         <BeliefPond />
         <Team />
       </main>

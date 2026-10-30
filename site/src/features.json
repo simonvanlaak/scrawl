@@ -22,6 +22,16 @@
   ],
   "features": [
     {
+      "id": "site-frog-footer",
+      "group": "install",
+      "name": "Frog theatre feedback footer",
+      "says": "Paper fades into the frog theatre behind a feedback invitation. A compact Made … in Berlin credit sits beside the wordmark, rotates whole phrases and respects reduced motion. Install-first and LinkedIn dialogs do not record or send feedback.",
+      "status": "main",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "docs": ["site/docs/footer-release.md"]
+    },
+    {
       "id": "site-belief-pond",
       "group": "install",
       "name": "Interactive homepage belief",

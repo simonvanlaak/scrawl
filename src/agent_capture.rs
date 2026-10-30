@@ -1,7 +1,8 @@
 //! Local, same-user control of the running GUI. Never launches an app or sends a capture.
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -274,7 +275,7 @@ fn listen_at(path: PathBuf) -> Result<flume::Receiver<Request>> {
                 && meta.mode() & 0o777 == 0o600,
             "unsafe existing control socket"
         );
-        match UnixStream::connect(&path) {
+        match connect_until(&path, Instant::now() + Duration::from_millis(250)) {
             Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
                 std::fs::remove_file(&path)?
             }
@@ -395,6 +396,162 @@ pub fn command(action: Option<(Action, &str)>) -> Result<String> {
     command_for(action, Duration::from_secs(4))
 }
 
+fn deadline_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "GUI capture control deadline expired",
+    )
+}
+
+fn remaining_until(deadline: Instant) -> std::io::Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(deadline_error())
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn wait_ready(fd: libc::c_int, events: libc::c_short, deadline: Instant) -> std::io::Result<()> {
+    loop {
+        let remaining = remaining_until(deadline)?;
+        let mut descriptor = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        let millis = remaining
+            .as_millis()
+            .saturating_add(1)
+            .min(i32::MAX as u128) as i32;
+        let result = unsafe { libc::poll(&mut descriptor, 1, millis) };
+        if result > 0 {
+            remaining_until(deadline)?;
+            return Ok(());
+        }
+        if result < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+}
+
+/// Nonblocking from socket creation onward. Linux reports a full Unix accept queue as
+/// EAGAIN (not EINPROGRESS); retry with a fresh socket without leaving a worker behind.
+fn connect_until(path: &std::path::Path, deadline: Instant) -> std::io::Result<UnixStream> {
+    let bytes = path.as_os_str().as_bytes();
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid control socket path",
+        ));
+    }
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (dest, source) in address.sun_path.iter_mut().zip(bytes) {
+        *dest = *source as libc::c_char;
+    }
+    let length =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    #[cfg(target_os = "macos")]
+    {
+        address.sun_len = length as u8;
+    }
+    loop {
+        remaining_until(deadline)?;
+        #[cfg(target_os = "linux")]
+        let flags = libc::SOCK_STREAM | libc::SOCK_CLOEXEC;
+        #[cfg(not(target_os = "linux"))]
+        let flags = libc::SOCK_STREAM;
+        let fd = unsafe { libc::socket(libc::AF_UNIX, flags, 0) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // Own the descriptor immediately, including every error path below.
+        let stream = unsafe { UnixStream::from_raw_fd(fd) };
+        #[cfg(target_os = "macos")]
+        {
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let enabled: libc::c_int = 1;
+            if unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_NOSIGPIPE,
+                    (&enabled as *const libc::c_int).cast(),
+                    std::mem::size_of_val(&enabled) as libc::socklen_t,
+                )
+            } < 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        stream.set_nonblocking(true)?;
+        if unsafe { libc::connect(fd, (&address as *const libc::sockaddr_un).cast(), length) } == 0
+        {
+            return Ok(stream);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EINPROGRESS) {
+            wait_ready(fd, libc::POLLOUT, deadline)?;
+            if let Some(error) = stream.take_error()? {
+                return Err(error);
+            }
+            return Ok(stream);
+        }
+        if !matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+        ) {
+            return Err(error);
+        }
+        drop(stream);
+        std::thread::sleep(Duration::from_millis(2).min(remaining_until(deadline)?));
+    }
+}
+
+/// One absolute deadline covers all partial reads/writes, not one timeout per byte.
+struct DeadlineStream {
+    stream: UnixStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineStream {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            wait_ready(self.stream.as_raw_fd(), libc::POLLIN, self.deadline)?;
+            match self.stream.read(bytes) {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) => {}
+                result => return result,
+            }
+        }
+    }
+}
+
+impl Write for DeadlineStream {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        loop {
+            wait_ready(self.stream.as_raw_fd(), libc::POLLOUT, self.deadline)?;
+            match self.stream.write(bytes) {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) => {}
+                result => return result,
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn command_for(action: Option<(Action, &str)>, budget: Duration) -> Result<String> {
     if let Some((_, id)) = action {
         ensure!(valid_id(id), "capture ID must be 32 hex characters");
@@ -404,6 +561,19 @@ fn command_for(action: Option<(Action, &str)>, budget: Duration) -> Result<Strin
         .max(Duration::from_millis(1));
     let deadline_ms = clock_ms() + timeout.as_millis() as u64;
     let path = socket_path(false)?;
+    command_at(action, timeout, deadline_ms, &path)
+}
+
+fn command_at(
+    action: Option<(Action, &str)>,
+    timeout: Duration,
+    deadline_ms: u64,
+    path: &std::path::Path,
+) -> Result<String> {
+    let deadline = Instant::now()
+        + timeout.min(Duration::from_millis(
+            deadline_ms.saturating_sub(clock_ms()),
+        ));
     let meta = std::fs::symlink_metadata(&path).context("no running GUI control socket")?;
     ensure!(
         meta.file_type().is_socket()
@@ -411,10 +581,9 @@ fn command_for(action: Option<(Action, &str)>, budget: Duration) -> Result<Strin
             && meta.mode() & 0o777 == 0o600,
         "unsafe control socket"
     );
-    let mut stream = UnixStream::connect(path).context("GUI capture control unavailable")?;
+    let stream = connect_until(path, deadline).context("GUI capture control unavailable")?;
     same_user(&stream)?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
+    let mut stream = DeadlineStream { stream, deadline };
     let request = match action {
         None => "state".to_owned(),
         Some((action, id)) => format!(
@@ -459,7 +628,13 @@ fn execute_with(
         }
         let response = send(next, remaining)
             .and_then(|text| Ok(serde_json::from_str::<serde_json::Value>(&text)?));
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline
+            || response.as_ref().err().is_some_and(|error| {
+                error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
+            })
+        {
             return serde_json::json!({"capture_id": id, "error": "timeout", "message": "Inspect the same ID; an admitted capture is not cancelled on timeout."});
         }
         let mut value = match response {
@@ -537,6 +712,110 @@ fn execute_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn transport_fixture() -> (PathBuf, UnixListener) {
+        // Short enough for sun_path, private and unrelated to the live GUI socket.
+        let dir = std::env::temp_dir().join(format!("ac-{}", new_id().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = dir.join("s");
+        let listener = UnixListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        (path, listener)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn transport_full_backlog_obeys_absolute_deadline() {
+        let (path, listener) = transport_fixture();
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
+        let queued = [
+            UnixStream::connect(&path).unwrap(),
+            UnixStream::connect(&path).unwrap(),
+        ];
+        // Bound even the buggy test: unblock its blocking connect only after the assertion's
+        // budget has been exceeded. No timed-out worker is abandoned.
+        let server = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(450));
+            drop(queued);
+            drop(listener);
+        });
+        let started = Instant::now();
+        let result = command_at(None, Duration::from_millis(80), clock_ms() + 80, &path);
+        let elapsed = started.elapsed();
+        server.join().unwrap();
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        assert!(result.is_err());
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "connect exceeded budget: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn transport_trickled_reply_obeys_absolute_deadline() {
+        let (path, listener) = transport_fixture();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            for byte in b"{\"state\":\"idle\"}\n" {
+                if stream.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        });
+        let started = Instant::now();
+        let result = command_at(None, Duration::from_millis(80), clock_ms() + 80, &path);
+        let elapsed = started.elapsed();
+        server.join().unwrap();
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        assert!(
+            result.is_err(),
+            "trickle must not restart the timeout: {result:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "read exceeded budget: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn transport_normal_reply_preserves_request_and_peer_checks() {
+        let (path, listener) = transport_fixture();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            assert_eq!(request, "state\n");
+            stream
+                .write_all(b"{\"state\":{\"phase\":\"idle\"}}\n")
+                .unwrap();
+        });
+        let response = command_at(None, Duration::from_secs(1), clock_ms() + 1000, &path);
+        server.join().unwrap();
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        assert_eq!(response.unwrap(), "{\"state\":{\"phase\":\"idle\"}}");
+    }
+
+    #[test]
+    fn transport_stalled_write_obeys_absolute_deadline() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        let started = Instant::now();
+        let mut stream = DeadlineStream {
+            stream,
+            deadline: started + Duration::from_millis(80),
+        };
+        // More than the socket send queue; peer deliberately never drains it.
+        let result = stream.write_all(&vec![0; 4 * 1024 * 1024]);
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_millis(300));
+    }
 
     #[test]
     fn owned_admission_is_once_only_and_rejections_cannot_start_later() {

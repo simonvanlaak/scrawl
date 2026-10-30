@@ -645,6 +645,9 @@ pub(crate) struct Sampler {
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
     pub real_frame_seen: Arc<AtomicBool>,
+    /// A terminal producer error, independent of worker lifetime (cleanup may still run).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub startup_failed: Arc<AtomicBool>,
     pub video_offset_ms: Arc<AtomicU64>,
 }
 
@@ -673,6 +676,7 @@ pub struct ScreenCaptureSession {
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
     real_frame_seen: Arc<AtomicBool>,
+    startup_failed: Arc<AtomicBool>,
     video_offset_ms: Arc<AtomicU64>,
     sampler_thread: Option<JoinHandle<Option<PathBuf>>>,
     _recording: crate::retention::Recording,
@@ -689,12 +693,15 @@ impl ScreenCaptureSession {
         let urgent_snapshot = Arc::new(AtomicBool::new(true));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
         let real_frame_seen = Arc::new(AtomicBool::new(false));
+        let startup_failed = Arc::new(AtomicBool::new(false));
         let video_offset_ms = Arc::new(AtomicU64::new(0));
 
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
         let thread_real_frame_seen = Arc::clone(&real_frame_seen);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let thread_startup_failed = Arc::clone(&startup_failed);
         let thread_offset = Arc::clone(&video_offset_ms);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
@@ -709,6 +716,8 @@ impl ScreenCaptureSession {
                     urgent: thread_urgent,
                     frames: thread_frames,
                     real_frame_seen: thread_real_frame_seen,
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    startup_failed: thread_startup_failed,
                     video_offset_ms: thread_offset,
                 })
             })
@@ -720,6 +729,7 @@ impl ScreenCaptureSession {
             urgent_snapshot,
             frames,
             real_frame_seen,
+            startup_failed,
             video_offset_ms,
             sampler_thread,
             _recording: crate::retention::Recording::start(),
@@ -742,9 +752,12 @@ impl ScreenCaptureSession {
         self.real_frame_seen.load(Ordering::Acquire)
     }
 
-    /// An ended sampler without a real frame is failure, not pending portal consent.
+    /// A known terminal error is failure even while the worker is alive or cleaning up.
+    /// A pending portal reply alone never sets this producer flag.
     pub fn failed_to_start(&self) -> bool {
-        !self.has_frames() && self.sampler_thread.as_ref().is_none_or(JoinHandle::is_finished)
+        !self.has_frames()
+            && (self.startup_failed.load(Ordering::Acquire)
+                || self.sampler_thread.as_ref().is_none_or(JoinHandle::is_finished))
     }
 
     pub fn stop(mut self) -> ScreenRecording {
@@ -1627,6 +1640,44 @@ pub fn write_bundle_artifacts(
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn producer_terminal_source_error_is_not_pending_consent() {
+        // Runs the actual Linux sampler and source resolver. An invalid selected window is
+        // refused before X11, D-Bus, microphone or any screen capture is opened.
+        let target = TargetInfo {
+            mode: CaptureMode::Window,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 0,
+            frame: TargetFrame {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+                scale: 1.0,
+            },
+        };
+        let session = ScreenCaptureSession::start(target, None, Arc::new(Mutex::new(vec![])));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !session.failed_to_start() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let failed = session.failed_to_start();
+        assert!(!session.has_frames());
+        assert!(!session.sampler_thread.as_ref().unwrap().is_finished());
+        // Explicit caller cleanup, not an Inspect side effect.
+        let recording = session.stop();
+        assert!(recording.frames.is_empty());
+        assert!(recording.video.is_none());
+        assert!(
+            failed,
+            "the source resolver returned a terminal error, not pending consent"
+        );
+    }
+
     #[test]
     fn synthetic_candidate_does_not_make_agent_capture_ready() {
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
@@ -1644,6 +1695,7 @@ mod tests {
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
             real_frame_seen: seen,
+            startup_failed: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),
@@ -1662,6 +1714,36 @@ mod tests {
         );
         assert!(session.has_frames(), "real pixels unlock agent Stop");
         assert!(!session.failed_to_start(), "real frames distinguish started from startup failure");
+    }
+
+    #[test]
+    fn pending_worker_is_not_failed_and_terminal_signal_does_not_discard_it() {
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_stopping = Arc::clone(&stopping);
+        let worker = thread::spawn(move || {
+            while !worker_stopping.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_millis(5));
+            }
+            None
+        });
+        let session = ScreenCaptureSession {
+            started_at: Instant::now(),
+            stopping,
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
+            startup_failed: Arc::new(AtomicBool::new(false)),
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: Some(worker),
+            _recording: crate::retention::Recording::start(),
+        };
+        assert!(!session.failed_to_start(), "a pending producer is not an error");
+        session.startup_failed.store(true, Ordering::Release);
+        assert!(session.failed_to_start());
+        assert!(session.failed_to_start(), "inspection must be read-only");
+        assert!(!session.stopping.load(Ordering::Acquire));
+        assert!(!session.sampler_thread.as_ref().unwrap().is_finished());
+        assert!(session.stop().frames.is_empty());
     }
 
     #[test]
@@ -1692,6 +1774,7 @@ mod tests {
             frames,
             real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(120)),
+            startup_failed: Arc::new(AtomicBool::new(false)),
             sampler_thread: Some(worker),
             _recording: crate::retention::Recording::start(),
         };
@@ -2181,6 +2264,7 @@ mod tests {
             frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
             real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
+            startup_failed: Arc::new(AtomicBool::new(false)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),
         };

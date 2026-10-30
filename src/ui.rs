@@ -3054,6 +3054,7 @@ impl ApparentCoordinator {
                 self.cancel_recording(cx);
                 return;
             };
+            self.agent_captures.begin(&id);
             self.agent_capture_id = Some(id);
         }
         self.recording_shortcut_key = false;
@@ -3109,7 +3110,11 @@ impl ApparentCoordinator {
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
-                    { self.agent_capture_id = None; }
+                    {
+                        if let Some(id) = self.agent_capture_id.take() {
+                            self.agent_captures.set(&id, "failed", None, Some("start_failed"));
+                        }
+                    }
                     self.telemetry.finish_session();
                     let _ = std::fs::remove_dir_all(&bundle_dir);
                     self.dismiss_island(cx);

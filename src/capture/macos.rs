@@ -999,6 +999,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         urgent: thread_urgent,
         frames: thread_frames,
         real_frame_seen: thread_real_frame_seen,
+        startup_failed,
         video_offset_ms: thread_offset,
     } = sampler;
     let initial_excluded = excluded_window_ids
@@ -1022,6 +1023,10 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     };
     let shot_config = sck_config(&sampler_target, shot_edge);
     let mut filter_and_config = filter.map(|f| (f, shot_config));
+    if filter_and_config.is_none() {
+        apparent_log("Screen capture failed to start: no ScreenCaptureKit filter");
+        startup_failed.store(true, Ordering::Release);
+    }
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -1066,12 +1071,23 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             thread::park_timeout(Duration::from_millis(30));
             continue;
         }
-        if urgent || last_sample.elapsed() >= interval {
+        // A terminal startup error cannot recover into a different readiness result. Keep
+        // servicing privacy exclusions above until the owner explicitly Stops or Cancels.
+        if !startup_failed.load(Ordering::Acquire) && (urgent || last_sample.elapsed() >= interval) {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            let frame = filter_and_config
-                .as_ref()
-                .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
+            let frame = filter_and_config.as_ref().and_then(|(filter, config)| {
+                match capture_sck_frame(filter, config, t_ms) {
+                    Ok(frame) => Some(frame),
+                    Err(error) => {
+                        if !thread_real_frame_seen.load(Ordering::Acquire) {
+                            apparent_log(format!("Screen capture failed to start: {error}"));
+                            startup_failed.store(true, Ordering::Release);
+                        }
+                        None
+                    }
+                }
+            });
             push_sck_candidate(&thread_frames, &thread_real_frame_seen, frame, urgent);
         }
         thread::park_timeout(Duration::from_millis(30));
@@ -1240,24 +1256,27 @@ fn capture_sck_frame(
     filter: &SCContentFilter,
     config: &SCStreamConfiguration,
     t_ms: u64,
-) -> Option<RgbaFrame> {
+) -> Result<RgbaFrame, String> {
     // Development-only fault injection: keep the movie recording, but force the
     // privacy-filtered screenshot path to fail for an end-to-end GUI check.
     #[cfg(debug_assertions)]
     if std::env::var("APPARENT_TEST_DROP_SCK_FRAMES").as_deref() == Ok("1") {
-        return None;
+        return Err("test-injected screenshot failure".into());
     }
-    let image = SCScreenshotManager::capture_image(filter, config).ok()?;
-    let width = u32::try_from(image.width()).ok()?;
-    let height = u32::try_from(image.height()).ok()?;
+    // This wrapper waits for native asynchronous completion. An explicit completion error
+    // must not look like a still-pending consent prompt.
+    let image = SCScreenshotManager::capture_image(filter, config)
+        .map_err(|error| format!("{error:?}"))?;
+    let width = u32::try_from(image.width()).map_err(|error| error.to_string())?;
+    let height = u32::try_from(image.height()).map_err(|error| error.to_string())?;
     if width == 0 || height == 0 {
-        return None;
+        return Err("screenshot has zero dimensions".into());
     }
-    let rgba = image.rgba_data().ok()?;
+    let rgba = image.rgba_data().map_err(|error| format!("{error:?}"))?;
     if rgba.len() != (width as usize) * (height as usize) * 4 {
-        return None;
+        return Err("screenshot has invalid pixel length".into());
     }
-    Some(RgbaFrame::new(t_ms, width, height, rgba))
+    Ok(RgbaFrame::new(t_ms, width, height, rgba))
 }
 
 /// macOS prompts over a capture (`windows::system_prompts_over`): ScreenCaptureKit's "bypass

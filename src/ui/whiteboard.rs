@@ -2,20 +2,44 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, Context, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent, MouseButton,
+    App, Bounds, Context, Entity, FocusHandle, FontWeight, Image, ImageFormat, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, Point, Render, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div, point,
-    prelude::*, px, rgb, size,
+    img, prelude::*, px, rgb, size,
 };
 
-use super::{ApparentCoordinator, platform};
+use super::{ApparentCoordinator, pill_theme::{CARBON, PAPER}, platform};
 
 pub(super) const PAPER_WIDTH: f32 = 1600.0;
 pub(super) const PAPER_HEIGHT: f32 = 1100.0;
-const TOOLBAR_HEIGHT: f32 = 46.0;
+const TOOLBAR_HEIGHT: f32 = 64.0;
+const LILAC: u32 = 0xb7a5d8;
+
+fn toolbar_button(id: &'static str, label: &'static str, close: bool) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .h(px(36.0))
+        .px(px(12.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .border_1()
+        .border_color(rgb(if close { LILAC } else { 0x645a69 }))
+        .when(close, |button| button.bg(rgb(LILAC)).text_color(rgb(CARBON)))
+        .rounded(px(2.0))
+        .cursor_pointer()
+        .hover(move |style| {
+            style
+                .bg(rgb(if close { 0xc4a9e6 } else { 0x302442 }))
+                .border_color(rgb(LILAC))
+        })
+        .child(label)
+}
 
 #[derive(Default, Clone)]
 pub(super) struct Board {
@@ -72,6 +96,7 @@ pub(super) struct WhiteboardWindow {
     board: Rc<RefCell<Board>>,
     coordinator: Entity<ApparentCoordinator>,
     focus: FocusHandle,
+    mark: Arc<Image>,
 }
 
 impl WhiteboardWindow {
@@ -112,7 +137,8 @@ impl Render for WhiteboardWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0xffffff))
+            .bg(rgb(PAPER))
+            .font_family("Host Grotesk")
             .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if key.eq_ignore_ascii_case("escape") {
@@ -132,19 +158,31 @@ impl Render for WhiteboardWindow {
                 div()
                     .h(px(TOOLBAR_HEIGHT))
                     .flex_none()
-                    .px(px(14.0))
+                    .px(px(16.0))
                     .flex()
                     .items_center()
-                    .gap(px(12.0))
-                    .bg(rgb(0xf2f2f2))
-                    .text_size(px(13.0))
-                    .text_color(rgb(0x222222))
-                    .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child("Whiteboard"))
+                    .gap(px(8.0))
+                    .bg(rgb(CARBON))
+                    .border_b_1()
+                    .border_color(rgb(LILAC))
+                    .text_size(px(14.0))
+                    .text_color(rgb(PAPER))
                     .child(
                         div()
-                            .id("whiteboard-undo")
-                            .cursor_pointer()
-                            .child("Undo")
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .child(
+                                img(self.mark.clone())
+                                .size(px(28.0))
+                                .flex_none(),
+                            )
+                            .child(div().text_size(px(16.0)).font_weight(FontWeight::MEDIUM).child("Whiteboard")),
+                    )
+                    .child(
+                        toolbar_button("whiteboard-undo", "Undo", false)
                             .on_click(cx.listener(|view, _, _, cx| {
                                 view.board.borrow_mut().undo();
                                 view.snapshot_soon(cx);
@@ -152,10 +190,7 @@ impl Render for WhiteboardWindow {
                             })),
                     )
                     .child(
-                        div()
-                            .id("whiteboard-clear")
-                            .cursor_pointer()
-                            .child("Clear")
+                        toolbar_button("whiteboard-clear", "Clear", false)
                             .on_click(cx.listener(|view, _, _, cx| {
                                 view.board.borrow_mut().clear();
                                 view.snapshot_soon(cx);
@@ -163,10 +198,7 @@ impl Render for WhiteboardWindow {
                             })),
                     )
                     .child(
-                        div()
-                            .id("whiteboard-close")
-                            .cursor_pointer()
-                            .child("Close")
+                        toolbar_button("whiteboard-close", "Close", true)
                             .on_click(cx.listener(|_, _, window, _| window.remove_window())),
                     ),
             )
@@ -244,7 +276,15 @@ pub(super) fn open(coord: &Entity<ApparentCoordinator>, cx: &mut App) {
             platform::decorate_app_window(window);
             let focus = cx.focus_handle();
             window.focus(&focus);
-            cx.new(|_| WhiteboardWindow { board: shared, coordinator, focus })
+            cx.new(|_| WhiteboardWindow {
+                board: shared,
+                coordinator,
+                focus,
+                mark: Arc::new(Image::from_bytes(
+                    ImageFormat::Png,
+                    include_bytes!("../../assets/brand/apparent-a.png").to_vec(),
+                )),
+            })
         },
     );
     if opened.is_ok() {
@@ -485,6 +525,28 @@ fn render_paper(strokes: &[Vec<[f32; 2]>], t_ms: u64) -> crate::model::RgbaFrame
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branded_buttons_construct_with_one_hover_style_each() {
+        for (id, label, close) in [
+            ("whiteboard-undo", "Undo", false),
+            ("whiteboard-clear", "Clear", false),
+            ("whiteboard-close", "Close", true),
+        ] {
+            let _ = toolbar_button(id, label, close);
+        }
+    }
+
+    #[test]
+    fn branded_toolbar_keeps_pointer_coordinates_on_the_paper() {
+        let mut board = Board::default();
+        board.start(paper_point(point(px(20.0), px(TOOLBAR_HEIGHT - 1.0))));
+        assert!(board.active.is_none(), "toolbar clicks must never become ink");
+        board.start(paper_point(point(px(20.0), px(TOOLBAR_HEIGHT))));
+        board.extend(paper_point(point(px(80.0), px(TOOLBAR_HEIGHT + 60.0))));
+        board.finish();
+        assert_eq!(board.strokes, vec![vec![[20.0, 0.0], [80.0, 60.0]]]);
+    }
 
     #[test]
     fn stopping_closes_the_board_after_preserving_its_last_drawing() {

@@ -5,7 +5,7 @@ const FEATURES = [
   { title: "Sketch what you mean", path: "how-it-works", description: "Sketch an idea on the whiteboard, finish recording, and show the change to your agent." },
   { title: "Every moment adds context", path: "timeline", description: "Voice, marks, clicks, and whiteboard sketches tell one story along a timeline." },
   { title: "Give your agent the full picture", path: "handoff", description: "Stop recording and paste file references, timestamped words, and interactions into your agent." },
-  { title: "Wherever you’re working", path: "anywhere", description: "Keep recording while moving between a website, an app, and an agent preview." },
+  { title: "See what your agent changed", path: "anywhere", description: "Your agent shows its changes in a captioned walkthrough." },
 ]
 
 function FeatureAnimation({ path, title, paused }: { path: string; title: string; paused: boolean }) {

@@ -1,3 +1,5 @@
+import "./homepage-revision.js"
+import "./homepage-revision.css"
 import { createRoot, type Root } from "react-dom/client"
 import { FeatureGrid } from "./FeatureGrid"
 

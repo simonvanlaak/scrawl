@@ -22,6 +22,17 @@
   ],
   "features": [
     {
+      "id": "native-launch",
+      "group": "install",
+      "name": "Open the installed app by URL",
+      "says": "The exact apparent://open URL opens the idle app without recording or sending. Active selection, recording and processing are left untouched. OS registration requires an updated app.",
+      "status": "experiment:nativeLaunch",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Candidate implementation: native browser-to-app proof is required separately on each OS; no website integration or installation detection is supplied.",
+      "docs": ["docs/native-launch.md"]
+    },
+    {
       "id": "site-team",
       "group": "install",
       "name": "Homepage team",

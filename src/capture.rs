@@ -201,6 +201,8 @@ pub enum LiveOverlayEvent {
     PhoneEnded,
     /// The welcome window: a button, fresh permission states, or the helper exiting.
     Onboarding(crate::onboarding::Event),
+    /// The initial permission check is finished, including when grants are unavailable.
+    OnboardingInitialized,
     /// The Settings window: an action, fresh permission states, or the helper exiting.
     Settings(crate::settings::Event),
 

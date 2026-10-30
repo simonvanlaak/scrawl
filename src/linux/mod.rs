@@ -19,6 +19,7 @@ pub mod clipboard;
 pub mod hyprland;
 pub mod input;
 pub mod ipc;
+pub mod launch_handler;
 pub mod login;
 pub mod media;
 pub mod microphone;

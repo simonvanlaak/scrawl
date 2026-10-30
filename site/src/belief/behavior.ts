@@ -62,7 +62,10 @@ async function makeRoom() {
   // site/src/FrogPond.tsx. Only distance and arc height fit this smaller stage.
   // Percentage x keeps the landing in the central gap if the viewport resizes.
   const distance = 69.733 / 26.333 * 100;
-  const arc = scene.clientWidth * .12;
+  // The heading wraps independently of scene width. Keep the apex below it,
+  // including on wide screens where the proportional arc can reach the text.
+  const clearance = newcomer.getBoundingClientRect().top - belief.getBoundingClientRect().bottom;
+  const arc = Math.max(0, Math.min(scene.clientWidth * .12, clearance - 8));
   const transform = (progress: number, y: number, squash = '') => `translate(${distance * progress}%, ${y}px) ${squash}`;
   animate(newcomer, [
     { transform: transform(0, 0), offset: 0 },

@@ -1,10 +1,11 @@
 # Homepage link preview
 
 The homepage declares `https://app.tryapparent.com/social-preview-v1.png` in its
-static Open Graph and Twitter metadata. The 1200 × 630 PNG uses the homepage's
-Host Grotesk font, canonical wordmark, Paper/Carbon/Lilac colors and waving frog.
-It is a brand illustration, not a screenshot of a running app. No JavaScript,
-video or external font request is needed for a crawler to display it.
+static Open Graph and Twitter metadata. The 512 × 512 PNG contains only the
+canonical lilac-on-carbon app mark, so it stays legible as a tiny thumbnail.
+Twitter uses the compact `summary` card rather than a large poster. Other
+receivers choose their own layout; these tags cannot force Slack's display size.
+No JavaScript, video or font request is needed to display the image.
 
 Rebuild the checked-in image from `site/`:
 

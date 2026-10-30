@@ -70,6 +70,16 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Other commands
 
+### Two-pass agent walkthroughs
+
+For an explicit explanatory share copy, use `apparent walkthrough record --duration 20 --out /private/take.apparent`, then `apparent walkthrough inspect /private/take.apparent --template /private/cues.json`. These print JSON with readiness and exact paths. Timed recording has no click/ink telemetry; prefer the normal app shortcut when interaction camera motion matters, and use `capture state|stop` below for capture ownership. Never call a pending/finalizing take ready.
+
+Inspect the entire saved movie, summary, contact sheet and frames before filling the blank cue template with short natural sentences tied to evidence. Cues are `[start_seconds,end_seconds,text]` on the movie clock, not wallclock; subtract `videoOffsetMs` from bundle milliseconds before dividing by 1000. Missing text must not become invented narration. Then run `apparent walkthrough export /private/take.apparent --experiment agentWalkthrough --cues /private/cues.json --out-dir /private/share-1 --source-audio drop --allow-online-tts`.
+
+Captions and synthetic voice are on only in this opted-in workflow. Consent sends cue TEXT ONLY to Microsoft Edge TTS (en-GB-RyanNeural +10%), not footage/audio. `--no-voice` and `--no-captions` are independent; `--silent` requires source-audio drop. Choose keep only after reviewing microphone privacy. The installed binary embeds its renderer; Python 3.11+, Pillow==11.3.0, edge-tts==7.2.3 (voice), FFmpeg/ffprobe and a TTF must be prepared separately. Use `--python`/`--font` when necessary; the CLI installs nothing. Shared CLI supports macOS/Linux but Mac execution remains unverified.
+
+Existing crop/camera planning is reused (`--crop`, `--no-zoom`). Speech that does not fit fails: shorten text, never rush speech or retime actions. Edit cues and use a new output directory rather than recording again. Raw bundle/movie/audio are hashed and preserved; output must be outside the bundle. JSON names final video, cues, provenance and timing/QA reports. Keep intermediates and sidecars private, inspect the complete final movie before delivery, and never upload media without destination approval. Ordinary human capture and export defaults are unchanged. See `docs/proof-video.md` in the source distribution for the full contract.
+
 For a running GUI app on macOS or Linux, `apparent capture state` prints its live phase and
 `capture_id` (only while pending or recording). If you initiated that capture and have retained
 its ID, `apparent capture stop <capture_id>` saves it after frames arrive, while

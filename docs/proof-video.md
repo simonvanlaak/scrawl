@@ -1,12 +1,24 @@
-# Agent proof-video share copies
+# Agent walkthroughs: record first, explain second
 
-This is repository agent tooling, **not** an `apparent` app subcommand or an automatic capture change. It never adds narration to a bundle, microphone WAV, contact sheet or source movie. First record and inspect real evidence with `skills/make-it-apparent/SKILL.md`. If useful, run the installed app's `apparent export` for its activity camera first; this helper accepts that existing movie too. No Rust build or app restart is needed.
+`apparent walkthrough` connects the real recorder, evidence inspection and a separate polished share copy. Ordinary captures and `apparent export` defaults are unchanged. Rendering is an off-by-default `agentWalkthrough` experiment: opt in per export with `--experiment agentWalkthrough`, or set `"experiments": {"agentWalkthrough": true}` in `~/.config/apparent/config.json` (read at invocation, no restart).
 
-## Setup and run
+## Two passes
 
-Requires Python 3.11+, `uv`, FFmpeg/ffprobe with libx264 and AAC, and a regular sans-serif TTF. `uv` installs the helper's declared Pillow and edge-tts dependencies in an isolated environment. Linux is exercised; macOS commands and fonts are not yet exercised. No Mac allocation is required for Linux postproduction. Select an actual installed font path on your host (the Linux example below is not a Mac font path).
+```sh
+apparent walkthrough record --duration 20 --out /private/take.apparent \
+  --note 'A factual task note, not a test verdict'
+apparent walkthrough inspect /private/take.apparent --template /private/cues.json
+# Inspect the entire movie, summary, contact sheet and frames. Edit cues.json.
+apparent walkthrough export /private/take.apparent \
+  --experiment agentWalkthrough --cues /private/cues.json \
+  --out-dir /private/share-1 --source-audio drop --allow-online-tts
+```
 
-Write a private UTF-8 JSON array of `[start_seconds, end_seconds, spoken_text]` against the **input movie clock**, for example:
+All three commands print machine-readable JSON on stdout; recorder progress goes to stderr. `record` delegates to the existing timed recorder, supports its unique `--window` selector, refuses an existing bundle, and waits through finalization. It records screen and microphone but **no click/Shift-ink telemetry**; a changing UI can still be visible in the movie. It does not perform your task for you. Arrange actions concurrently with recording. No wall clock is used for cues.
+
+For interaction-driven camera motion, use the running app's normal recording shortcut instead, retain its `capture_id` from `apparent capture state`, and finish only your capture with `apparent capture stop <capture_id>`. Do not toggle a shortcut to stop an unknown recording. See [capture control](capture.md#agent-control-of-the-running-gui). Then use `walkthrough inspect` on the exact completed bundle. The workflow does not introduce another recording engine or change input permissions.
+
+`inspect` returns `ready` only after loading a manifest and probing a real movie. A directory without a manifest returns `finalizing_or_incomplete` with instructions; this is not a guarantee an abandoned capture will finish. Invalid manifests or missing media fail. JSON includes absolute evidence paths, raw events/marks, telemetry limits, frame paths and movie times. Bundle milliseconds become movie seconds by `(t - videoOffsetMs) / 1000`; negative values precede the movie. The editable template is a JSON array of `[start_seconds, end_seconds, text]`, initially `[[0, duration, ""]]`. Empty text is intentionally rejected: the agent must supply meaning after inspection. Existing templates are never overwritten.
 
 ```json
 [
@@ -15,42 +27,47 @@ Write a private UTF-8 JSON array of `[start_seconds, end_seconds, spoken_text]` 
 ]
 ```
 
-Use natural short sentences describing the real action, evidence and result. Write the build/platform and caveat into the script when they matter. The tool does not invent claims, transcribe source speech, decide that a fix works, or certify footage privacy. Cues must be ordered, non-overlapping, finite, inside the input duration and at most two lines. Gaps are silent and caption-free. The same wording goes to TTS and captions. Long lines fail rather than shrink. Synthesized speech must fit its window with 100 ms spare; it is **never** time-stretched. Shorten the explanation if it fails; do not speed up footage or shift claims ahead of visible results. Default synthesis uses en-GB-RyanNeural at +10%, matching the reference voice; this is not Nova.
+Write natural short sentences tied to actual visible evidence. Notes are factual context, not inferred pass/fail claims. The app never calls a model to invent explanation. Cues must be finite, ordered, non-overlapping, within movie duration, nonempty and at most two lines. Gaps are caption-free and silent unless reviewed source audio is kept. Synthesized speech must fit its window with 100 ms spare. If it does not fit, shorten the text or choose a longer evidenced window: never rush speech or retime real actions. Default voice is **en-GB-RyanNeural at +10%**, not Nova. New text needs a new render directory, not a new recording.
 
-From the Apparent checkout, with an existing private parent directory:
+## Privacy and independent switches
 
-```sh
-uv run scripts/proof-video.py /absolute/private/walkthrough.mp4 \
-  --cues /absolute/private/cues.json \
-  --out-dir /absolute/private/proof-take-1 \
-  --source-audio drop --allow-online-tts \
-  --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-```
+Captions and TTS are ON in this explicitly selected workflow only. `--no-captions` omits burned explanation while retaining voice; `--no-voice` omits TTS while retaining captions and the chosen source-audio policy. Both can be used together. `--silent` implies no voice and requires `--source-audio drop`, so it produces no audio stream. A visible provenance badge remains even without captions.
 
-`--out-dir` must not exist. It is created with mode 0700; all artifacts stay there, including diagnostic files after a failed take. Never point it at public/static assets, a capture bundle, or git. Rerun into a new directory after editing cues. The original is opened read-only and SHA-256 checked before publication. `share.mp4` appears only after codec/duration/audio checks and a complete decode. Existing destinations are refused, never overwritten. The helper does not defend against a hostile same-user process mutating its private directory.
+`--source-audio keep|drop` is required. `keep` mixes reviewed movie/microphone audio at its original time, without ducking; loud input can mask narration or clip. `drop` removes it from **share.mp4**, not from the original or private working files. Always review microphone privacy before choosing `keep`.
 
-### Framing and safe areas
+`--allow-online-tts` explicitly permits sending **cue text only** to Microsoft's Edge TTS service. It does not upload footage or source audio and does not authorize publishing the result. Do not put secrets or private personal text in cues. Without consent, choose `--no-voice` or `--silent`; there is no silent network fallback. No credentials are read and no speaker playback occurs.
 
-Output is 1440×900, H264/YUV420p at 30 fps, AAC when narrated, with faststart. Real action timing and duration remain unchanged. Other aspect ratios are letterboxed, not stretched. A measured static close-up is available with `--crop x,y,width,height` in **source pixels**; it must fit entirely inside the source. For the approved 1440×900 meter footage the close-up is `--crop 350,0,760,475`. This is not an automatic activity camera. Check the full source before choosing a crop; don't hide context or failure.
+## Installed dependencies and rendering
 
-Captions use white regular 32 px text, 15 px padding, radius 8 and dark alpha 220 boxes. `--caption-box 40,730,1360,140` is the default allowed region in **output pixels**. Move it to a measured empty region so neither controls nor results are covered. The helper validates bounds and text fit, not semantic occlusion. A small disclosure occupies the top-left output area (12,12 to 620,48); keep that area clear too. Inspect every caption boundary, including gaps and final caveat; FFmpeg image timestamps are frame-quantized. Keep sentences readable at the intended player size.
+The Python renderer is embedded in the Apparent binary at build time. An installed/staged executable works without a checkout or `scripts/` directory. It invokes the same executable's ordinary `export` command for shared crop, ink and camera planning, then calls the **same** renderer as `scripts/proof-video.py`; there is no duplicate pipeline.
 
-### Audio privacy and silence
+External prerequisites, on both macOS and Linux:
 
-`--source-audio` is required. Choose `drop` for a clean synthetic explanation without exposing source conversation; the raw track remains untouched in the source. Choose `keep` only after reviewing it for privacy and relevance: it mixes original audio at its recorded timing with synthetic speech, without ducking, and can mask narration or clip if loud. Inspect the mix before delivery. This is postproduction, **not evidentiary source speech**. A persistent visible badge and MP4 metadata disclose synthetic voice-over and the source-audio choice.
+- Python 3.11+ with **Pillow==11.3.0** and, for voice, **edge-tts==7.2.3**. Prepare an environment separately and use `--python /absolute/venv/bin/python` if needed. The CLI never downloads or installs packages, runs `uv`, or installs system tools. The repository helper's PEP 723 metadata pins those same versions for explicit `uv run` use.
+- `ffmpeg`/`ffprobe` on PATH, with libx264 and AAC support.
+- A regular sans-serif TTF. Linux DejaVu Sans and macOS supplemental Arial locations are checked; use `--font /absolute/path/font.ttf` if absent. Font appearance on macOS is not yet verified.
+- The ordinary installed app/export prerequisites, including the signed Mac helper on macOS.
 
-`--allow-online-tts` explicitly permits sending **cue text only** to Microsoft's Edge TTS service; audio/video is not uploaded. Don't put secrets or private personal text in cues. This approval does not authorize publishing footage. The service needs network access and has no availability guarantee; a service error must not be replaced with invented narration. No credentials are required or fetched. `--voice` and `--rate` select a legitimate available Edge voice/rate, not another provider's identity. No speaker playback occurs.
+`--crop full|auto|x,y,w,h` uses the existing bundle exporter (rectangle coordinates are source pixels). Activity camera zoom is on by default; `--no-zoom` fixes the view. With no interaction telemetry it stays still. Output is H264/YUV420p, 1440×900 at 30 fps, AAC when audio is present, faststart. Other aspect ratios are letterboxed. Real duration and chronological action order remain unchanged.
 
-For Simon's silent opt-out, replace `--allow-online-tts` with `--silent` and retain `--source-audio drop`. This makes captioned H264 MP4 with **no audio stream** and no TTS request. Suitable existing live narration can use the ordinary app export instead; do not duplicate narration, and still supply explanatory subtitles through a separately reviewed workflow if needed.
+Caption style: regular 32 px white text, 15 px padding, radius 8, dark alpha 220 box, bottom safe area. Keep explanatory lines short. A disclosure occupies the upper left. Inspect actual output for semantic occlusion: bounds validation cannot know which result your caption hides. The standalone helper additionally has measured `--crop` and `--caption-box` controls for existing non-bundle movies; that is not fresh Apparent capture proof.
 
-## Inspect and deliver
+## Preservation, reproducibility and delivery
 
-Retained sidecars: `cues.json`, `spoken-script.txt`, `explanation.srt`, `provenance.json` (source hash, policy, voice and framing), `timing-report.json` (measured speech intervals), `qa.json` (ffprobe streams), caption PNGs and generated speech. These are editable/reproducible inputs and private diagnostics, not a public bundle. Do not commit them. Verify the complete raw take and share copy visually, full-decode the output (the CLI does this), check speech/caption synchronization and safe areas, and independently verify the claims. Never call an exported clip a passing test, release, Mac GUI proof of this helper, or a fresh capture. Deliver the playable file in the current conversation, naming source build/platform and limitations. Do not publish it to a PR or another destination without approval.
+Output must be a NEW private directory outside the bundle. Originals are read-only; all source bundle files are SHA-256 pinned before export and checked again before publishing. Symlinked bundle files are refused. A failure leaves diagnostics in the private output directory, not a completed share copy. `share.mp4` is exclusively published only after full decode, duration/codec/audio QA and source-hash comparison. Existing paths are never replaced. This does not defend against a hostile same-user process swapping private directories.
+
+JSON points to `share.mp4`, `provenance.json`, `timing-report.json`, `qa.json` and the copied `cues.json`. Sidecars also retain editable SRT, script, caption images, generated speech and **camera.mp4**, an intermediate that can contain source audio even when the final share drops it. Keep the entire work directory private. Provenance names original paths/hashes and chosen policies; do not publish these private sidecars unreviewed.
+
+Inspect the whole original and final movie, every caption boundary/gap, audio synchronization, result readability and private content before delivery. Full decode is not a truth or privacy certificate. Keep test results separate. Never commit media, host it or upload it to a PR without destination approval. Linux execution does not verify Mac capture, Swift rendering, or packaged fonts; macOS remains a separate platform gate.
 
 ## Tests
 
 ```sh
-uv run --with Pillow python -m unittest discover -s scripts/tests -p test_proof_video.py
+python3 -m unittest discover -s scripts/tests -p test_proof_video.py
+APPARENT_TEST_BINARY=/absolute/staged/apparent \
+  python3 -m unittest discover -s scripts/tests -p test_walkthrough_cli.py
+cargo test -j 3 --offline -- --test-threads=2
+cargo build -j 3 --offline
 ```
 
-Tests use temporary synthetic footage, real FFmpeg encode/decode, gap pixels, duration/stream QA, source preservation and refusal checks. Fixture speech replaces the online provider for narrated keep/drop assembly, verifying audible onset against a delayed source track and against the cue clock. Source metadata and chapters are stripped from share copies. Tests do not send text online. Real TTS/export integration must also be exercised on private existing footage before changing the synthesis/render path. Keep that media outside git. No Cargo manifests or app settings are involved.
+Helper tests use synthetic footage and fixture speech rather than network TTS. CLI tests exercise installed dispatch, offset mapping, missing evidence/template instructions, actual bundle export, independent policy and source preservation. Real TTS and a fresh Apparent GUI/portal or supported window capture still require private end-to-end proof.

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["Pillow>=10,<12", "edge-tts>=7,<8"]
+# dependencies = ["Pillow==11.3.0", "edge-tts==7.2.3"]
 # ///
 """Private agent proof-video postproduction; never edits an Apparent bundle."""
 import argparse
@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import wave
+import os
 
 
 def validate(cues, duration, crop, width, height):
@@ -49,6 +50,20 @@ def probe(path):
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def evidence_hashes(bundle):
+    """Pin all original bundle files, not just the exported intermediate movie."""
+    if bundle is None:
+        return {}
+    bundle = bundle.resolve(strict=True)
+    result = {}
+    for path in sorted(bundle.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('source bundle must not contain symlinks')
+        if path.is_file():
+            result[str(path)] = digest(path)
+    return result
 
 
 def rect(text):
@@ -95,6 +110,12 @@ def main():
     parser.add_argument('--out-dir', type=Path, required=True, help='new private directory; refuses existing paths')
     parser.add_argument('--source-audio', choices=['drop', 'keep'], required=True, help='explicit privacy decision; keep mixes source into voice-over')
     parser.add_argument('--silent', action='store_true', help='captions only, no TTS; requires source-audio drop')
+    parser.add_argument('--no-voice', action='store_true', help='omit TTS independently of source audio and captions')
+    parser.add_argument('--no-captions', action='store_true', help='omit burned explanatory captions independently of voice')
+    parser.add_argument('--bundle', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--apparent', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--bundle-crop', default='full', help=argparse.SUPPRESS)
+    parser.add_argument('--no-zoom', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--allow-online-tts', action='store_true', help='consent to send cue text ONLY to Microsoft Edge TTS')
     parser.add_argument('--voice', default='en-GB-RyanNeural')
     parser.add_argument('--rate', default='+10%')
@@ -104,15 +125,27 @@ def main():
     args = parser.parse_args()
     if args.silent and args.source_audio != 'drop':
         raise ValueError('--silent requires --source-audio drop')
-    if not args.silent and not args.allow_online_tts:
-        raise ValueError('TTS sends cue text externally: pass --allow-online-tts or --silent')
-    from PIL import Image, ImageDraw, ImageFont
+    voice = not (args.no_voice or args.silent)
+    if voice and not args.allow_online_tts:
+        raise ValueError('TTS sends cue text externally: pass --allow-online-tts or --no-voice/--silent')
+    if sys.version_info < (3, 11):
+        raise ValueError('Python 3.11+ required; select a prepared interpreter with --python')
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        tts_version = None
+        if voice:
+            import edge_tts
+            tts_version = getattr(edge_tts, '__version__', 'fixture/unreported')
+    except ImportError as exc:
+        raise ValueError('prepare a Python environment with Pillow==11.3.0 and edge-tts==7.2.3; pass its python using --python. Nothing is auto-installed.') from exc
+    original_hashes = evidence_hashes(args.bundle)
     source = args.source.resolve(strict=True)
     source_hash = digest(source)
     info = probe(source)
     video = next(s for s in info['streams'] if s['codec_type'] == 'video')
     duration = float(video.get('duration', info['format']['duration']))
-    cues = validate(json.loads(args.cues.read_text()), duration, args.crop, int(video['width']), int(video['height']))
+    cue_bytes = args.cues.read_bytes()
+    cues = validate(json.loads(cue_bytes), duration, args.crop, int(video['width']), int(video['height']))
     x, y, w, h = args.caption_box
     if min(x, y) < 0 or min(w, h) < 40 or x + w > 1440 or y + h > 900:
         raise ValueError('caption box must fit 1440x900 output')
@@ -124,18 +157,40 @@ def main():
         draw = ImageDraw.Draw(image)
         bb = draw.multiline_textbbox((0, 0), text, font=font, spacing=7, align='center')
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
-        if tw + 30 > w or th + 30 > h:
+        if not args.no_captions and (tw + 30 > w or th + 30 > h):
             raise ValueError('caption exceeds safe box: shorten or insert one line break')
         left, top = x + (w - tw) // 2, y + h - 15 - th
         draw.rounded_rectangle((left-15, top-15, left+tw+15, top+th+15), radius=8, fill=(10, 10, 10, 220))
         draw.multiline_text((left-bb[0], top-bb[1]), text, font=font, fill='white', spacing=7, align='center')
+        if args.no_captions:
+            image = Image.new('RGBA', (1440, 900))
         images.append(image)
     out = args.out_dir.resolve()
+    if args.bundle and out.is_relative_to(args.bundle.resolve()):
+        raise ValueError('output must be outside the source bundle')
     out.mkdir(mode=0o700, parents=False, exist_ok=False)
+    raw_source = source
+    if args.bundle:
+        if args.apparent is None:
+            raise ValueError('bundle workflow needs the installed Apparent executable')
+        command = [args.apparent, 'export', args.bundle, '--out', out / 'camera.mp4', '--fps', '30', '--crop', args.bundle_crop]
+        if args.no_zoom:
+            command.append('--no-zoom')
+        run(*command)
+        source = out / 'camera.mp4'
+        info = probe(source)
+        video = next(s for s in info['streams'] if s['codec_type'] == 'video')
+        if abs(float(video.get('duration', info['format']['duration'])) - duration) > 0.10:
+            raise ValueError('camera export changed real-time duration')
     (out / 'cues.json').write_text(json.dumps(cues, indent=2) + '\n')
     (out / 'spoken-script.txt').write_text('\n\n'.join(t.replace('\n', ' ') for _, _, t in cues) + '\n')
     (out / 'explanation.srt').write_text('\n'.join(f'{i+1}\n{stamp(a)} --> {stamp(b)}\n{t}\n' for i, (a, b, t) in enumerate(cues)))
-    policy = {'source': str(source), 'source_sha256': source_hash, 'source_audio': args.source_audio, 'synthetic_narration': not args.silent, 'voice': None if args.silent else args.voice, 'rate': args.rate, 'crop': args.crop, 'caption_box': args.caption_box, 'duration': duration}
+    policy = {'source': str(raw_source), 'source_sha256': source_hash, 'evidence_sha256': original_hashes, 'source_audio': args.source_audio, 'captions': not args.no_captions, 'synthetic_narration': voice, 'voice': args.voice if voice else None, 'rate': args.rate, 'crop': args.crop, 'bundle_crop': args.bundle_crop, 'zoom': not args.no_zoom, 'caption_box': args.caption_box, 'duration': duration}
+    import PIL
+    policy.update({'cue_input_sha256': hashlib.sha256(cue_bytes).hexdigest(), 'font_sha256': digest(args.font),
+                   'apparent_sha256': digest(args.apparent) if args.apparent else None,
+                   'python': sys.version, 'pillow': PIL.__version__,
+                   'edge_tts': tts_version})
     (out / 'provenance.json').write_text(json.dumps(policy, indent=2) + '\n')
     # All work files stay in the newly created private output directory, even on failure.
     timeline = ['ffconcat version 1.0']
@@ -152,12 +207,19 @@ def main():
     timeline += ["file 'blank.png'"]
     (out / 'captions.ffconcat').write_text('\n'.join(timeline) + '\n')
     timing = []
-    if not args.silent:
-        import edge_tts
+    if voice:
         async def synthesize():
             for i, (_, _, text) in enumerate(cues):
                 await edge_tts.Communicate(text.replace('\n', ' '), voice=args.voice, rate=args.rate).save(str(out / f'cue-{i:03}.mp3'))
-        asyncio.run(synthesize())
+        async def bounded_synthesis():
+            await asyncio.wait_for(synthesize(), timeout=180)
+        try:
+            asyncio.run(bounded_synthesis())
+        except Exception as exc:
+            # Provider exceptions can embed service URLs/tokens; disclose the failure, not those.
+            status = getattr(exc, 'status', None)
+            reason = f'HTTP {status}' if status else type(exc).__name__
+            raise ValueError(f'online TTS failed ({reason}); no share copy published. Retry later into a NEW out-dir, or explicitly use --no-voice/--silent. No audio fallback was substituted.') from None
         sample_rate = 48000
         mix = array.array('h', [0]) * round(duration * sample_rate)
         for i, (a, b, text) in enumerate(cues):
@@ -180,36 +242,42 @@ def main():
     # Visible disclosure survives detachment from this script and its sidecars.
     badge = Image.new('RGBA', (1440, 900))
     draw = ImageDraw.Draw(badge)
-    label = 'Explanatory captions' if args.silent else 'Synthetic voice-over · source audio ' + args.source_audio
+    label = ('Synthetic voice-over' if voice else 'Agent walkthrough') + ' · source audio ' + args.source_audio
     small = ImageFont.truetype(str(args.font), 20)
     draw.rounded_rectangle((12, 12, 620, 48), radius=8, fill=(10, 10, 10, 220))
     draw.text((24, 18), label, font=small, fill='white')
     badge.save(out / 'disclosure.png')
     command = ['ffmpeg', '-v', 'error', '-nostdin', '-i', str(source), '-f', 'concat', '-safe', '1', '-i', str(out / 'captions.ffconcat'), '-loop', '1', '-i', str(out / 'disclosure.png')]
-    if not args.silent:
+    if voice:
         command += ['-i', str(out / 'narration.wav')]
     crop = 'crop=' + ':'.join(map(str, (args.crop[2], args.crop[3], args.crop[0], args.crop[1]))) + ':exact=1,' if args.crop else ''
     filters = f'[0:v]setpts=PTS-STARTPTS,{crop}scale=1440:900:flags=lanczos:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1440:900:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[b];[b][1:v]overlay=0:0:eof_action=pass[c];[c][2:v]overlay=0:0[v]'
-    audio_map = '3:a'
-    if not args.silent:
-        if args.source_audio == 'keep' and any(s['codec_type'] == 'audio' for s in info['streams']):
+    audio_map = '3:a' if voice else None
+    if args.source_audio == 'keep' and any(s['codec_type'] == 'audio' for s in info['streams']):
             audio = next(s for s in info['streams'] if s['codec_type'] == 'audio')
             offset = float(audio.get('start_time', 0)) - float(video.get('start_time', 0))
             # amix ignores input start offsets: encode the common video origin
             # as actual silence (or trim pre-video audio), not independent PTS resets.
             align = f'adelay={offset*1000:.6f}:all=1' if offset >= 0 else f'atrim=start={-offset:.9f},asetpts=PTS-STARTPTS'
-            filters += f';[0:a]asetpts=PTS-STARTPTS,{align}[a0];[a0][3:a]amix=inputs=2:duration=longest:normalize=0[a]'
+            filters += f';[0:a]asetpts=PTS-STARTPTS,{align},apad[a0]'
+            if voice:
+                filters += ';[a0][3:a]amix=inputs=2:duration=longest:normalize=0[a]'
+            else:
+                filters += ';[a0]anull[a]'
             audio_map = '[a]'
     command += ['-filter_complex', filters, '-map', '[v]']
-    command += ['-an'] if args.silent else ['-map', audio_map, '-c:a', 'aac', '-b:a', '160k']
+    command += ['-an'] if audio_map is None else ['-map', audio_map, '-c:a', 'aac', '-b:a', '160k']
     partial = out / 'share.partial.mp4'
     command += ['-t', str(duration), '-c:v', 'libx264', '-crf', '20', '-preset', 'fast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-map_metadata', '-1', '-map_chapters', '-1', '-metadata', 'comment=' + label, str(partial)]
     run(*command)
-    report = qa(partial, duration, not args.silent)
-    if digest(source) != source_hash:
+    report = qa(partial, duration, audio_map is not None)
+    report['output_sha256'] = digest(partial)
+    if digest(raw_source) != source_hash or evidence_hashes(args.bundle) != original_hashes:
         raise ValueError('source changed during export; share copy not published')
     (out / 'qa.json').write_text(json.dumps(report, indent=2) + '\n')
-    partial.rename(out / 'share.mp4')
+    # Exclusive publication, so even a competing writer cannot be overwritten.
+    os.link(partial, out / 'share.mp4')
+    partial.unlink()
     print(out / 'share.mp4')
 
 

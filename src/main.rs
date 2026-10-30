@@ -15,6 +15,7 @@ mod capture;
 mod command_line;
 mod command_transcriber;
 mod export;
+mod walkthrough;
 #[cfg(test)]
 mod feature_map;
 mod handoff;
@@ -234,6 +235,8 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Two-pass agent walkthrough: record real actions, inspect evidence, then explain and render.
+    Walkthrough { #[command(subcommand)] command: walkthrough::WalkthroughCommand },
     /// Inspect or explicitly end a GUI capture. Same user and machine only; never toggles or sends.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     Capture { #[command(subcommand)] command: CaptureCommand },
@@ -1644,6 +1647,10 @@ fn main() -> Result<()> {
             ensure!(!matches!(value["outcome"].as_str(), Some("wrong_capture" | "not_ready")), "GUI capture control: {response}");
             Ok(())
         }
+        Command::Walkthrough { command } => {
+            println!("{}", serde_json::to_string_pretty(&walkthrough::run(command)?)?);
+            Ok(())
+        }
         Command::App { record, iphone } => {
             #[cfg(target_os = "windows")]
             {
@@ -2544,6 +2551,17 @@ mod tests {
     #[test]
     fn cli_identifies_as_apparent() {
         assert_eq!(<Cli as clap::CommandFactory>::command().get_name(), "apparent");
+    }
+
+    #[test]
+    fn walkthrough_cli_accepts_connected_workflow() {
+        for args in [
+            vec!["apparent", "walkthrough", "record", "--duration", "10", "--out", "/private/take.apparent"],
+            vec!["apparent", "walkthrough", "inspect", "/private/take.apparent", "--template", "/private/cues.json"],
+            vec!["apparent", "walkthrough", "export", "/private/take.apparent", "--cues", "/private/cues.json", "--out-dir", "/private/share", "--source-audio", "drop", "--allow-online-tts"],
+        ] {
+            assert!(Cli::try_parse_from(&args).is_ok(), "walkthrough command missing: {args:?}");
+        }
     }
 
     #[test]

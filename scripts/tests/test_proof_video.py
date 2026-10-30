@@ -38,6 +38,42 @@ class Validation(unittest.TestCase):
 
 
 class Export(unittest.TestCase):
+    def test_independent_caption_voice_switches(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as folder:
+            root = Path(folder)
+            source = root / 'source.mp4'
+            proof.run('ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=640x400:r=30:d=1', '-f', 'lavfi', '-i', 'sine=duration=1', '-c:v', 'libx264', '-c:a', 'aac', source)
+            cues = root / 'cues.json'
+            cues.write_text('[[0,1,"Real evidence."]]')
+            for captions in (True, False):
+                out = root / str(captions)
+                cmd = [sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'keep', '--no-voice', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+                if not captions:
+                    cmd += ['--no-captions']
+                result = subprocess.run(cmd, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                proof.qa(out / 'share.mp4', 1, True)
+                self.assertEqual(json.loads((out / 'provenance.json').read_text())['captions'], captions)
+
+    def test_negative_audio_offset_trims_pre_movie_samples(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as folder:
+            root = Path(folder)
+            source = root / 'negative.mp4'
+            proof.run('ffmpeg', '-v', 'error', '-itsoffset', 1, '-f', 'lavfi', '-i', 'color=c=blue:s=640x400:r=30:d=3', '-f', 'lavfi', '-i', 'sine=duration=2', '-c:v', 'libx264', '-c:a', 'aac', '-copyts', source)
+            info = proof.probe(source)
+            video = next(s for s in info['streams'] if s['codec_type'] == 'video')
+            audio = next(s for s in info['streams'] if s['codec_type'] == 'audio')
+            self.assertLess(float(audio['start_time']) - float(video['start_time']), -0.9)
+            cues = root / 'cues.json'
+            cues.write_text('[[0,1,"The real screen."]]')
+            subprocess.run([sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--source-audio', 'keep', '--no-voice', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'], check=True, capture_output=True)
+            def rms(t):
+                samples = array.array('h')
+                samples.frombytes(proof.run('ffmpeg', '-v', 'error', '-ss', t, '-i', root / 'out/share.mp4', '-t', 0.15, '-ar', 48000, '-ac', 1, '-f', 's16le', '-'))
+                return math.sqrt(sum(s*s for s in samples) / len(samples))
+            self.assertGreater(rms(0.3), 500)
+            self.assertLess(rms(1.5), 20)
+
     def test_narration_keep_drop_preserve_delayed_audio_and_strip_metadata(self):
         with tempfile.TemporaryDirectory(prefix='proof-audio-', dir=os.environ.get('TMPDIR')) as folder:
             root = Path(folder)
@@ -54,9 +90,11 @@ class Communicate:
 ''')
             cues = root / 'cues.json'
             cues.write_text('[[2,3,"Fixture speech."]]')
-            for policy in ('keep', 'drop'):
-                out = root / policy
-                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
+            for policy, captions in (('keep', True), ('drop', True), ('drop', False)):
+                out = root / (policy + str(captions))
+                switches = [] if captions else ['--no-captions']
+                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', *switches], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
+                self.assertEqual(json.loads((out / 'provenance.json').read_text())['captions'], captions)
                 movie = out / 'share.mp4'
                 def rms(t):
                     samples = array.array('h')

@@ -11,19 +11,22 @@ When Simon says "make it apparent," treat it as a request to run this skill and 
 
 Every delivered proof video needs timed natural sentences explaining the action, evidence and result, with matching burned subtitles and synchronized TTS by default. Retain editable cues, SRT and script. This is postproduction explanation, not a transcription or replacement of recorded evidence. Disclose synthetic narration; never play it through speakers during capture. Simon can request a silent captioned copy instead. Suitable live narration need not be duplicated.
 
-Use the repository helper, not a new per-video script. Read `docs/proof-video.md` for setup, cue format and privacy. From the Apparent checkout, write a private `cues.json` array of `[start_seconds, end_seconds, text]` against the existing video's clock, then run:
+Use the installed `apparent walkthrough` commands, not a new per-video script. Read `docs/proof-video.md` for dependency setup, cue format and privacy. First make a real Apparent capture. Then inspect its saved evidence and write a private `cues.json` array of `[start_seconds, end_seconds, text]` against the movie clock:
 
 ```sh
-uv run scripts/proof-video.py /absolute/private/walkthrough.mp4 \
+apparent walkthrough inspect /absolute/private/walkthrough.apparent --template /absolute/private/cues.json
+# Inspect the whole movie and images, then fill the blank template.
+apparent walkthrough export /absolute/private/walkthrough.apparent \
+  --experiment agentWalkthrough \
   --cues /absolute/private/cues.json \
   --out-dir /absolute/private/proof-take-1 \
   --source-audio drop --allow-online-tts \
   --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 ```
 
-The output directory must be new. The font example is Linux-specific; select a real regular sans-serif TTF on other hosts. `--allow-online-tts` consents to sending cue text only to Microsoft Edge TTS; never include secrets. Default voice is en-GB-RyanNeural at +10%, not Nova. Use `--silent` instead of that consent flag for silent opt-out. Explicit `--source-audio keep` mixes reviewed original audio; default practice is `drop` to avoid leaking source conversation. Neither choice changes the original. Do not publish media without destination approval.
+The output directory must be new and outside the source bundle. The installed binary embeds the renderer; it needs Python 3.11+, Pillow==11.3.0, edge-tts==7.2.3 (voice), FFmpeg/ffprobe and a regular TTF prepared separately (`--python` and `--font` select paths). It never installs packages. The font example is Linux-specific. `--allow-online-tts` consents to sending cue text only to Microsoft Edge TTS; never include secrets. Default voice is en-GB-RyanNeural at +10%, not Nova. `--no-voice` and `--no-captions` are independent; `--silent` guarantees no audio with `--source-audio drop`. Explicit `--source-audio keep` mixes reviewed original audio; default practice is `drop` to avoid leaking source conversation. Neither choice changes the original. Do not publish media without destination approval.
 
-Use measured `--crop x,y,width,height` for useful close-ups, and put `--caption-box x,y,width,height` in empty output space, away from results. Default output is 1440×900 with white regular 32 px sans-serif, padded rounded dark translucent boxes. The top-left disclosure also needs clear space. Keep captions to two short lines and natural spoken sentences. Reject overlapping/out-of-range cues and speech that exceeds its real window: shorten text rather than rush speech, retime real actions or invent claims. The helper emits H264/AAC/YUV420p faststart MP4 at 30 fps, fully decodes it and retains provenance/timing/QA reports; it does not certify truth, privacy or semantic caption placement. Inspect the complete `share.mp4`, caption boundaries, audio and final caveat before delivering it. Tooling has been exercised on Linux; macOS execution is not yet verified.
+The workflow reuses Apparent's crop and activity-camera export (`--crop full|auto|x,y,width,height`, zoom on, `--no-zoom` only when intentional). Default output is 1440×900 with white regular 32 px sans-serif, padded rounded dark translucent boxes. Captions sit at the bottom; the top-left disclosure also needs clear space. Keep captions to two short lines and natural spoken sentences. Reject overlapping/out-of-range cues and speech that exceeds its real window: shorten text rather than rush speech, retime real actions or invent claims. The CLI emits H264/AAC/YUV420p faststart MP4 at 30 fps, fully decodes it and retains source hashes and provenance/timing/QA reports; it does not certify truth, privacy or semantic caption placement. Edit cues and render to a new directory without re-recording. Inspect the complete `share.mp4`, caption boundaries, audio and final caveat before delivering it. Tooling has been exercised on Linux; macOS execution is not yet verified. The repository helper remains available for older or non-bundle movies, not as a substitute for the native bundle workflow.
 
 
 ## Point out the claim
@@ -66,11 +69,7 @@ If export works on this host, use `--fps 30` (or `--fps 60` on explicit request)
 apparent export /absolute/private/path/walkthrough.apparent --out /absolute/private/path/walkthrough.mp4 --fps 30
 ```
 
-<<<<<<< HEAD
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Add `--zoom` only when it makes the action easier to follow; compare the exported video to the source and watch it end-to-end too. Apparent export supplies crop/zoom and the recorded audio, **not** timed captions. Run the required proof-video helper above on the existing movie for the narrated share copy. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; `ffprobe` verifies format, not truth or privacy. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
-=======
-Do not invent a frame-rate flag for `apparent record`; set it during export or browser encoding without changing real-time duration. Check installed `export --help` before using the flags: older builds require `--zoom` to opt in, whereas current builds use `--no-zoom` to opt out. Compare the exported video to the source and watch it end-to-end too. If no camera motion appears, inspect the interaction telemetry rather than claiming the default flag guarantees motion. Browser-only recordings bypass Apparent's camera planner; prefer an Apparent capture of the browser when polished interaction zoom is required, and disclose an unpolished fallback rather than calling it equivalent. Apparent export supplies crop/zoom and the recorded audio, **not** timed caption or speed cues. If a separate editor is available and captions genuinely help, burn short captions into a separate MP4 for players that ignore subtitle tracks; check every caption's timing against the visible state and keep the original. Never promise captioning or fast-forward as built-in Apparent flags. Do not silently speed through a state transition or overlay a success claim before the result exists. Check the final file opens in the intended player; use `ffprobe` to verify frame rate and duration, but not truth or privacy. A browser WebM may need an approved MP4 conversion for its destination; do not re-encode reflexively. If the source media is missing or Apparent is unavailable, say so and provide a screenshot or written trace, never a claimed video.
->>>>>>> origin/main
+Do not invent a frame-rate flag for `apparent record`; the explicit walkthrough exports at 30 fps without retiming real actions. Check installed `walkthrough --help` first. Ordinary `export` still supplies no explanation captions; `walkthrough export` is the opt-in explanatory path. Compare both source and final movie end-to-end. No camera motion without telemetry is not a zoom-flag failure. Never overlay a success claim before the result exists or present browser-only footage as Apparent capture proof. If source media or the installed workflow is unavailable, report the exact blocker and provide a truthful screenshot or written trace, not a claimed walkthrough.
 
 ## Hand it back
 
@@ -80,9 +79,5 @@ Embed or link the **verified playable file** in a channel the viewer can reach. 
 
 - A staged click after the result was already present proves nothing; reset to the starting state and capture the action.
 - A smooth mock or browser replay is not evidence for a live native app; name the provenance visibly and in the handoff.
-<<<<<<< HEAD
 - Timed spoken-style explanation, matching captions and default TTS are delivery requirements; silent opt-out keeps captions. A measured crop or zoom helps readability, never conceals failures or invents causality.
-=======
-- Automatic zoom is the default presentation; captions and fast-forward are optional explanation. None is permission to conceal failures or invent causality.
->>>>>>> origin/main
 - A complete source bundle is not a shareable artifact until its entire media and delivery destination have been checked.

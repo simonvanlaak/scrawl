@@ -1,0 +1,27 @@
+/* One rounded action style for the hero download and footer launch/download. */
+.pond-download .btn-primary,
+.pond-download .btn-primary.btn-unavailable,
+.frog-footer .footer-try {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  background: #19161d;
+  color: #f5f0e8;
+  box-shadow: none;
+  padding: 15px 22px;
+  min-height: 53px;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 550;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-decoration: none;
+  transform: none;
+}
+.pond-download a.btn-primary:hover,
+.frog-footer .footer-try:hover { background: #39313f; transform: none; }
+.pond-download a.btn-primary:focus-visible,
+.frog-footer .footer-try:focus-visible { outline: 2px solid #6c4a8c; outline-offset: 4px; }

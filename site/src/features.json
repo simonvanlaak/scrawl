@@ -32,10 +32,32 @@
       "docs": ["docs/proof-video.md"]
     },
     {
+      "id": "native-launch",
+      "group": "install",
+      "name": "Open the installed app by URL",
+      "says": "The exact apparent://open URL opens the idle app without recording or sending. Active selection, recording and processing are left untouched. OS registration requires an updated app.",
+      "status": "experiment:nativeLaunch",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Candidate implementation: native browser-to-app proof is required separately on each OS; no website integration or installation detection is supplied.",
+      "docs": ["docs/native-launch.md"]
+    },
+    {
+      "id": "site-team",
+      "group": "install",
+      "name": "Homepage team",
+      "says": "The public homepage shows Olivia and Simon with uncropped portraits and links each affiliation logo to its organization.",
+      "status": "review:#138",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "pr": 138,
+      "docs": ["site/docs/clanker-deploy.md"]
+    },
+    {
       "id": "site-frog-footer",
       "group": "install",
       "name": "Frog theatre feedback footer",
-      "says": "Paper fades into the frog theatre behind a feedback invitation. A compact Made … in Berlin credit sits beside the wordmark, rotates whole phrases and respects reduced motion. Install-first and LinkedIn dialogs do not record or send feedback.",
+      "says": "Paper fades into the frog theatre behind a feedback invitation. Try first attempts apparent://open, then the same button offers an explicit second-click platform download; no installation detection or automatic download. Hero and footer share a rounded button style. The compact Berlin credit respects reduced motion; the LinkedIn chooser does not record or send feedback.",
       "status": "main",
       "added": "2026-10-30",
       "platforms": ["mac", "linux"],

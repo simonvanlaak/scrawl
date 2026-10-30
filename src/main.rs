@@ -1612,6 +1612,20 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBu
     )
 }
 
+// Stop microphone input at the capture boundary, not after movie encoding finishes.
+fn stop_screen_and_audio<S, A, V, W>(screen: S, audio: A) -> (V, W)
+where
+    S: FnOnce() -> V + Send,
+    A: FnOnce() -> W,
+    V: Send,
+{
+    std::thread::scope(|scope| {
+        let screen = scope.spawn(screen);
+        let audio = audio();
+        (screen.join().unwrap(), audio)
+    })
+}
+
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     linux::prepare_process();
@@ -1785,11 +1799,16 @@ fn main() -> Result<()> {
             });
             std::thread::sleep(Duration::from_secs(duration.max(1)));
             drop(playback);
-            let recording = session.stop();
-            let activity = window_log
-                .map(windows::WindowLogger::stop)
-                .unwrap_or_default();
-            let recorded_audio = audio.and_then(|a| a.stop().ok());
+            let (recording, (recorded_audio, activity)) = stop_screen_and_audio(
+                || session.stop(),
+                || {
+                    let recorded_audio = audio.and_then(|a| a.stop().ok());
+                    let activity = window_log
+                        .map(windows::WindowLogger::stop)
+                        .unwrap_or_default();
+                    (recorded_audio, activity)
+                },
+            );
             let (_dir, _bundle, summary) = finalize_capture_bundle(
                 &bundle_dir,
                 target,
@@ -2498,6 +2517,31 @@ fn copy_confirmation(dir: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timed_cli_stops_audio_while_screen_finalization_is_slow() {
+        let (screen_started_tx, screen_started_rx) = std::sync::mpsc::channel();
+        let (allow_screen_tx, allow_screen_rx) = std::sync::mpsc::channel();
+        let (audio_stopped_tx, audio_stopped_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            stop_screen_and_audio(
+                move || {
+                    screen_started_tx.send(()).unwrap();
+                    allow_screen_rx.recv().unwrap();
+                    "video"
+                },
+                move || {
+                    audio_stopped_tx.send(()).unwrap();
+                    "audio"
+                },
+            )
+        });
+        screen_started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let stopped_before_finalization = audio_stopped_rx.recv_timeout(Duration::from_millis(200));
+        allow_screen_tx.send(()).unwrap();
+        assert_eq!(worker.join().unwrap(), ("video", "audio"));
+        assert!(stopped_before_finalization.is_ok(), "audio kept recording during screen finalization");
+    }
 
     #[test]
     fn safe_screenshots_without_a_movie_survive_uncertified_video_state() {

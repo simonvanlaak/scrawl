@@ -1627,10 +1627,10 @@ impl ApparentCoordinator {
         let _ = self.telemetry.finish_session();
         match rec.source {
             CaptureSource::Screen { session, audio, .. } => {
-                let _ = session.stop();
-                if let Some(audio) = audio {
-                    let _ = audio.stop();
-                }
+                stop_discarded_screen_and_audio(
+                    || session.stop(),
+                    || audio.map(|audio| audio.stop()),
+                );
             }
             CaptureSource::Phone(session) => session.cancel(),
             CaptureSource::Lab => return Some((rec.target, rec._metal_overlay)),
@@ -6307,9 +6307,29 @@ pub fn run_app(
     });
 }
 
+// Cancelling discards the video, but it must stop listening before the video
+// writer spends time finalizing (or timing out) its candidate.
+fn stop_discarded_screen_and_audio<S, A, V, W>(screen: S, audio: A)
+where
+    S: FnOnce() -> V,
+    A: FnOnce() -> W,
+{
+    let _ = audio();
+    let _ = screen();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancel_stops_audio_before_screen_finalization() {
+        let audio_stopped = std::cell::Cell::new(false);
+        stop_discarded_screen_and_audio(
+            || assert!(audio_stopped.get(), "screen teardown must not delay microphone shutdown"),
+            || { audio_stopped.set(true); },
+        );
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]

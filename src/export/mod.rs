@@ -16,6 +16,7 @@
 pub mod camera;
 pub mod crop;
 pub mod ink;
+mod narration;
 #[cfg(target_os = "linux")]
 mod linux;
 
@@ -32,6 +33,16 @@ use crate::model::{ApparentBundle, InteractionEvent};
 use self::camera::{CameraKey, Focus};
 use self::crop::CropArg;
 
+#[derive(Clone, Debug, Default)]
+pub enum AudioPolicy {
+    #[default]
+    Recorded,
+    Silent,
+    Narration(PathBuf),
+    /// Preserve the existing menu contract; it has no script/silence chooser yet.
+    RecordedIfAvailable,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub out: Option<PathBuf>,
@@ -45,6 +56,7 @@ pub struct Options {
     pub fps: Option<u32>,
     /// Run the encode at utility priority (the app, so a recording in progress isn't hurt).
     pub background: bool,
+    pub audio: AudioPolicy,
 }
 
 impl Default for Options {
@@ -59,6 +71,7 @@ impl Default for Options {
             hevc: false,
             fps: None,
             background: false,
+            audio: AudioPolicy::Recorded,
         }
     }
 }
@@ -220,6 +233,11 @@ pub fn export(
     let probe = linux::probe(&video).context("Could not read the recording's video")?;
     #[cfg(not(target_os = "linux"))]
     let probe = crate::helper::probe(&video).context("Could not read the recording's video")?;
+    #[cfg(target_os = "macos")]
+    let probe = crate::helper::Probe {
+        duration_ms: probe.video_duration_ms.unwrap_or(probe.duration_ms),
+        ..probe
+    };
     ensure!(
         probe.width > 0 && probe.height > 0 && probe.duration_ms > 0,
         "The recording has no video"
@@ -239,6 +257,17 @@ pub fn export(
         None => 30,
     };
 
+    let out = options.out.clone().unwrap_or_else(|| default_output(dir));
+    if let AudioPolicy::Narration(script) = &options.audio {
+        if out.exists() {
+            ensure!(
+                std::fs::canonicalize(&out)? != std::fs::canonicalize(script)
+                    .with_context(|| format!("[NARRATION_SCRIPT] Read {}", script.display()))?,
+                "Export output cannot replace narration script"
+            );
+        }
+    }
+
     // The audio: an iPhone movie's own track (full quality, on the movie's clock), else
     // `audio.wav`, which Apparent records from the bundle's start, `video_offset_ms` before the
     // video's.
@@ -247,8 +276,19 @@ pub fn export(
         .as_ref()
         .map(|name| dir.join(name))
         .filter(|p| p.is_file());
-    let (audio, audio_start, audio_length) =
-        if bundle.source.as_deref() == Some("iphone") && probe.audio_tracks > 0 {
+    let generated;
+    let embedded_audio_usable = probe.audio_tracks > 0;
+    #[cfg(target_os = "macos")]
+    let embedded_audio_usable = embedded_audio_usable && probe.audio_overlaps_video;
+    let (audio, audio_start, audio_length) = if let AudioPolicy::Narration(script) = &options.audio {
+        generated = Some(narration::render(script, probe.duration_ms)?);
+        (Some(generated.as_ref().unwrap().path()), 0, probe.duration_ms)
+    } else if matches!(options.audio, AudioPolicy::Silent) {
+        generated = None;
+        (None, 0, 0)
+    } else {
+        generated = None;
+        if bundle.source.as_deref() == Some("iphone") && embedded_audio_usable {
             (Some(video.clone()), 0, probe.duration_ms)
         } else if let Some(wav) = wav.as_ref() {
             let wav_ms = wav_duration_ms(wav)?;
@@ -258,7 +298,11 @@ pub fn export(
             }
         } else {
             (None, 0, 0)
-        };
+        }
+    };
+    if audio.is_none() && matches!(options.audio, AudioPolicy::Recorded) {
+        bail!("[AUDIO_MISSING] No usable recorded audio overlaps the video in bundle {}. No export was written. Rerun this resolved bundle with --narration <script> to generate local speech, or --no-audio to deliberately export silent video. Source files are unchanged.", std::fs::canonicalize(dir)?.display());
+    }
 
     let camera = options
         .zoom
@@ -270,7 +314,6 @@ pub fn export(
     };
     let ink = ink::plan(bundle, video_px, layers);
 
-    let out = options.out.clone().unwrap_or_else(|| default_output(dir));
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
@@ -354,6 +397,7 @@ pub fn export(
         return Err(error).with_context(|| format!("Could not write {}", out.display()));
     }
     progress(1.0);
+    drop(generated);
     Ok(Exported {
         path: out,
         width,
@@ -649,6 +693,14 @@ mod tests {
         );
         assert_eq!(std::fs::read(&movie).unwrap(), original_video);
         assert_eq!(std::fs::read(&wav).unwrap(), original_audio);
+        let silent = export(&root, &b, &Options {
+            out: Some(root.join("silent.mp4")),
+            audio: AudioPolicy::Silent,
+            ..options.clone()
+        }, &mut |_| {}).unwrap();
+        assert!(!silent.audio);
+        assert_eq!(linux::probe(&silent.path).unwrap().audio_tracks, 0,
+            "explicit silence removes an existing microphone track");
         options.out = Some(root.join("./recording.mp4"));
         assert!(export(&root, &b, &options, &mut |_| {}).is_err());
         options.out = Some(root.join("./audio.wav"));
@@ -658,6 +710,10 @@ mod tests {
         options.out = Some(alias.join("recording.mp4"));
         assert!(export(&root, &b, &options, &mut |_| {}).is_err());
         b.video_offset_ms = 3_000; // WAV exists, but ends before the movie begins.
+        options.out = Some(root.join("no-overlap/out.mp4"));
+        let error = export(&root, &b, &options, &mut |_| {}).unwrap_err();
+        assert!(format!("{error:#}").contains("[AUDIO_MISSING]"));
+        assert!(!root.join("no-overlap").exists());
         options.out = Some(root.join("./audio.wav"));
         assert!(export(&root, &b, &options, &mut |_| {}).is_err());
         let manifest = root.join("apparent.json");
@@ -725,12 +781,22 @@ mod tests {
         b.audio = None;
         b.events.clear();
         b.strokes.clear();
+        let missing_out = root.join("not-created/out.mp4");
+        let missing = export(&root, &b, &Options {
+            out: Some(missing_out.clone()), ..Default::default()
+        }, &mut |_| {});
+        assert!(missing.is_err(), "missing recorded audio must not silently export");
+        let message = format!("{:#}", missing.unwrap_err());
+        assert!(message.contains("--narration") && message.contains("--no-audio"), "{message}");
+        assert!(message.contains(&root.display().to_string()), "{message}");
+        assert!(!missing_out.parent().unwrap().exists());
         let result = export(
             &root,
             &b,
             &Options {
                 out: Some(root.join("out.mp4")),
                 crop: CropArg::Full,
+                audio: AudioPolicy::Silent,
                 ..Default::default()
             },
             &mut |_| {},
@@ -738,6 +804,25 @@ mod tests {
         .unwrap();
         assert!((result.duration_ms as i64 - 267).abs() < 100);
         assert!(!result.audio);
+        // Saved iPhone movies prefer their own track; a disjoint track is not usable.
+        b.source = Some("iphone".into());
+        let phone = export(&root, &b, &Options {
+            out: Some(root.join("phone.mp4")), ..Default::default()
+        }, &mut |_| {}).unwrap();
+        assert!(phone.audio);
+        let delayed = root.join("delayed.mp4");
+        let status = Command::new("ffmpeg").args([
+            "-v", "error", "-f", "lavfi", "-i", "color=s=320x180:r=30:d=0.3",
+            "-itsoffset", "2", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2",
+            "-c:v", "libx264", "-c:a", "aac", "-y",
+        ]).arg(&delayed).status().unwrap();
+        assert!(status.success());
+        b.video = Some("delayed.mp4".into());
+        let error = export(&root, &b, &Options {
+            out: Some(root.join("disjoint/out.mp4")), ..Default::default()
+        }, &mut |_| {}).unwrap_err();
+        assert!(format!("{error:#}").contains("[AUDIO_MISSING]"), "{error:#}");
+        assert!(!root.join("disjoint").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

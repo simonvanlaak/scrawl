@@ -568,6 +568,7 @@ fn start_video_export() {
                 |(dir, bundle)| {
                     let options = crate::export::Options {
                         background: true,
+                        audio: crate::export::AudioPolicy::RecordedIfAvailable,
                         ..Default::default()
                     };
                     crate::export::export(&dir, &bundle, &options, &mut |fraction| {

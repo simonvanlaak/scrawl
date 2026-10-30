@@ -149,6 +149,10 @@ struct ViewState {
     fix: bool,
     #[serde(default)]
     shortcut_editing: bool,
+    #[serde(default)]
+    first_capture_required: bool,
+    #[serde(default)]
+    shortcut_chosen: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1098,7 +1102,7 @@ impl OnboardingWindow {
                 "continue",
                 state.ready,
             )),
-            Step::Shortcut => Some(("Continue", "continue", true)),
+            Step::Shortcut => Some(("Continue", "continue", !state.first_capture_required || state.shortcut_chosen)),
             Step::Done => Some(("Done", "continue", true)),
             Step::TryIt => None,
         };
@@ -1106,7 +1110,7 @@ impl OnboardingWindow {
             Step::Permissions => {
                 Some((if state.fix { "Not now" } else { "Set up later" }, "later"))
             }
-            Step::TryIt => Some(("Close", "continue")),
+            Step::TryIt => Some((if state.first_capture_required { "Try later" } else { "Close" }, if state.first_capture_required { "later" } else { "continue" })),
             Step::Done => Some(("Open Settings", "settings")),
             _ => None,
         };
@@ -1310,7 +1314,15 @@ impl Render for OnboardingWindow {
                         .into_any_element(),
                     200.0,
                     "Choose your shortcut",
-                    if state.shortcut_editing {
+                    if state.first_capture_required {
+                        if state.shortcut_chosen {
+                            "Shortcut saved. Continue to make your first capture.".to_owned()
+                        } else if self.editor.as_ref().is_some_and(|editor| editor.externally_managed) {
+                            "Your desktop manages this shortcut. Choose it below, then try it.".to_owned()
+                        } else {
+                            "Choose a key combination and press it here. You will use it to start and finish recordings.".to_owned()
+                        }
+                    } else if state.shortcut_editing {
                         if self.editor.as_ref().is_some_and(|editor| editor.recording) {
                             "Press the new shortcut now. Esc cancels; Continue keeps the current one.".to_owned()
                         } else {
@@ -1342,16 +1354,16 @@ impl Render for OnboardingWindow {
                             d.child(quiet_button("onboarding-cancel-shortcut", "Cancel")
                                 .on_click(cx.listener(|view, _, _, _| (view.events)(Event::Shortcut(crate::settings::Action::CancelShortcut)))))
                         })
-                        .when(self.editor.as_ref().is_some_and(|editor| !editor.is_default && !editor.externally_managed), |d| {
+                        .when(!state.first_capture_required && self.editor.as_ref().is_some_and(|editor| !editor.is_default && !editor.externally_managed), |d| {
                             d.child(quiet_button("onboarding-reset-shortcut", "Reset to default")
                                 .on_click(cx.listener(|view, _, _, _| (view.events)(Event::Shortcut(crate::settings::Action::ResetShortcut { kind: crate::capture::ShortcutKind::Record })))))
                         }),
                 ))
                 .child(
-                    quiet_button("onboarding-change-shortcut", "Change shortcut")
+                    quiet_button("onboarding-change-shortcut", if !state.first_capture_required { "Change shortcut" } else if self.editor.as_ref().is_some_and(|editor| editor.externally_managed) { "Use desktop shortcut" } else { "Set shortcut" })
                         .on_click(cx.listener(|view, _, window, _| {
                             if let Some(focus) = &view.focus { window.focus(focus); }
-                            view.act("change-shortcut");
+                            view.act(if view.state.as_ref().is_some_and(|state| state.first_capture_required) && view.editor.as_ref().is_some_and(|editor| editor.externally_managed) { "use-desktop-shortcut" } else { "change-shortcut" });
                         })),
                 )
                 .into_any_element(),
@@ -1360,7 +1372,11 @@ impl Render for OnboardingWindow {
                     self.try_art(phase),
                     164.0,
                     if cfg!(target_os = "windows") { "Make your first Apparent" } else { "Make your first capture" },
-                    format!("Tap {s} now. Talk, point at something, then tap {s} again."),
+                    if state.first_capture_required {
+                        format!("Tap {s} to start. Try giving feedback on this onboarding: talk and point at something. Tap {s} again to finish. The capture stays local; nothing is sent to us.")
+                    } else {
+                        format!("Tap {s} now. Talk, point at something, then tap {s} again.")
+                    },
                 )
                 .into_any_element(),
             Step::Done => self

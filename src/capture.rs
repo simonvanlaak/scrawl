@@ -1917,6 +1917,10 @@ mod tests {
             frames,
             real_frame_seen: seen,
             video_offset_ms: Arc::new(AtomicU64::new(0)),
+            #[cfg(target_os = "macos")]
+            unsafe_video: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            stop_requested_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),
         };

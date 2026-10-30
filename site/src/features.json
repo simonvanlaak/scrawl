@@ -943,7 +943,7 @@
       "id": "export-cli",
       "group": "export",
       "name": "apparent export",
-      "says": "One .mp4 with ink, pins, clicks and aligned audio. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out and explicit crops are respected.",
+      "says": "One .mp4 with ink, pins, clicks and aligned recorded audio. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out.",
       "status": "main",
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
@@ -953,12 +953,23 @@
       "id": "export-cli-linux",
       "group": "export",
       "name": "apparent export on Linux",
-      "says": "The CLI burns ink, pins and click ripples into an MP4 with aligned WAV audio, using FFmpeg and ffprobe. Opens on the whole capture for 0.5 s before smooth activity zoom; --no-zoom opts out and explicit crops are respected.",
+      "says": "The CLI burns ink, pins and click ripples into an MP4 with aligned WAV audio, using FFmpeg and ffprobe. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s before smooth activity zoom; --no-zoom opts out.",
       "status": "main",
       "added": "2026-10-29",
       "platforms": ["linux"],
       "note": "The menu export experiment remains Mac-only. Requires FFmpeg with H.264/AAC encoders; the timed CLI recorder does not collect click or ink telemetry.",
       "docs": ["docs/export-and-retention.md", "docs/linux.md"]
+    },
+    {
+      "id": "export-narration",
+      "group": "export",
+      "name": "Local timed export narration",
+      "says": "Explicit --narration script generates Kokoro bm_fable speech locally for the export only; --no-audio deliberately exports silence. Sources stay unchanged.",
+      "status": "experiment:exportNarration",
+      "platforms": ["mac", "linux"],
+      "note": "Requires separate verified worker/model provisioning. Native platform proof remains required before release.",
+
+      "docs": ["docs/export-and-retention.md#explicit-export-audio", "docs/keyframes-and-text.md"]
     },
     {
       "id": "export-menu",

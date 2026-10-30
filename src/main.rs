@@ -40,6 +40,8 @@ mod live_word_probe;
 mod live_word_warning;
 #[cfg(target_os = "linux")]
 mod pause_transcribe;
+#[cfg(target_os = "linux")]
+mod warm_recognizer;
 mod mic;
 mod model;
 mod native;

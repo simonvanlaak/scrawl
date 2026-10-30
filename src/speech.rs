@@ -28,9 +28,13 @@ pub struct Incremental {
 impl Incremental {
     pub fn new() -> Result<Self> {
         let path = installed_models().into_iter().next().context("No Parakeet model installed")?;
+        Self::load(&path)
+    }
+
+    pub fn load(path: &Path) -> Result<Self> {
         init_backends()?;
-        let session = Model::load(&path)?.session()?;
-        Ok(Self { session, name: model_name(&path) })
+        let session = Model::load(path)?.session()?;
+        Ok(Self { session, name: model_name(path) })
     }
 
     pub fn transcribe(&mut self, samples: &[f32], offset_ms: u64) -> Result<TranscriptData> {
@@ -39,6 +43,8 @@ impl Incremental {
             language: Some("en".into()),
             ..Default::default()
         };
+        // One-shot runs replace native results (including word times); the binding
+        // materializes owned output. Do not use a streaming context across captures.
         let result = self.session.run(samples, &options)?;
         let text = result.text.split_whitespace().collect::<Vec<_>>().join(" ");
         let at = |ms: i64| offset_ms + ms.max(0) as u64;

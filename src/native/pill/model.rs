@@ -14,8 +14,9 @@
 //!   across `Recording (chips) -> Selecting`) travel on a `0.24 s` zero-bounce spring with up to
 //!   `4 pt` blur in transit that clears before landing.
 
-use crate::audio::InputWarning;
+use crate::audio::{InputActivity, InputWarning};
 use crate::ui::SelectionMode;
+use std::time::Instant;
 
 // ─── Geometry (pt in the fixed 640 × 84 panel) ──────────────────────────────────────────────
 
@@ -340,10 +341,11 @@ pub enum ElemId {
     DividerWarning = 18,
     LiveWarning = 19,
     Whiteboard = 20,
+    InputEqualizer = 21,
 }
 
 impl ElemId {
-    pub const COUNT: usize = 21;
+    pub const COUNT: usize = 22;
     pub const ROUTES: [ElemId; 2] = [Self::Route0, Self::Route1];
     pub const ALL: [ElemId; Self::COUNT] = [
         Self::Lead,
@@ -367,6 +369,7 @@ impl ElemId {
         Self::DividerWarning,
         Self::LiveWarning,
         Self::Whiteboard,
+        Self::InputEqualizer,
     ];
 
     pub const fn trace_key(self) -> &'static str {
@@ -392,6 +395,7 @@ impl ElemId {
             Self::DividerWarning => "divider.mic",
             Self::LiveWarning => "warning:no-words",
             Self::Whiteboard => "whiteboard",
+            Self::InputEqualizer => "input.equalizer",
         }
     }
 
@@ -417,7 +421,7 @@ impl ElemId {
     pub const fn is_interactive(self) -> bool {
         !matches!(
             self,
-            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing | Self::LiveWarning
+            Self::DividerLead | Self::DividerClose | Self::DividerWarning | Self::MicWarning | Self::Processing | Self::LiveWarning | Self::InputEqualizer
         )
     }
 
@@ -440,6 +444,7 @@ impl ElemId {
             Self::Inspect => "Inspect",
             Self::Route0 | Self::Route1 => "Send to session",
             Self::LiveWarning => "No words recognized yet",
+            Self::InputEqualizer => "Microphone input level (not speech recognition)",
         }
     }
 }
@@ -702,12 +707,16 @@ fn layout_of_warning(
         | Pres::RecordingWarning { chips, has_iphone } => {
             let clock_w = m.clock_width(clock);
             let lead_w = CHIP_H + clock_w + LEAD_TRAIL;
+            // Four mode chips plus a warning can reach the fixed panel edge. Keep the
+            // separators and meter legible without sacrificing the outer Close target.
+            let compact = *chips && warning.is_some();
             raw.push((ElemId::Lead, lead_w, CHIP_CORE_ROUND, 0.0, true));
-            raw.push((ElemId::DividerLead, DIVIDER_W, 0.0, 0.0, false));
+            raw.push((ElemId::DividerLead, if compact { 1.0 } else { DIVIDER_W }, 0.0, 0.0, false));
+            raw.push((ElemId::InputEqualizer, if compact { 20.0 } else { 28.0 }, 0.0, 0.0, false));
             if let Some(warning) = warning {
                 raw.push((ElemId::MicWarning, Metrics::chip_width(m.mic_warning_width(warning)),
                     CHIP_CORE_ROUND, 0.0, false));
-                raw.push((ElemId::DividerWarning, DIVIDER_W, 0.0, 0.0, false));
+                raw.push((ElemId::DividerWarning, if compact { 1.0 } else { DIVIDER_W }, 0.0, 0.0, false));
             }
             if *chips {
                 for &seg in SelectionMode::available(*has_iphone) {
@@ -885,6 +894,7 @@ pub struct FrameState {
     pub ghost: Option<Silhouette>,
     pub is_completed: bool,
     pub mic_warning: Option<InputWarning>,
+    pub input_level: f32,
     pub completed_warning: bool,
     pub content_blur: f32,
     pub content_alpha: f32,
@@ -917,6 +927,11 @@ pub struct PillModel {
     pub labels: LabelWidths,
     pub metrics: Metrics,
     pub mic_warning: Option<InputWarning>,
+    input_count: usize,
+    input_at: Instant,
+    input_updated_at: Instant,
+    input_target: f32,
+    input_level: f32,
 }
 
 impl PillModel {
@@ -948,7 +963,68 @@ impl PillModel {
             labels: LabelWidths::default(),
             metrics,
             mic_warning: None,
+            input_count: 0,
+            input_at: Instant::now(),
+            input_updated_at: Instant::now(),
+            input_target: 0.0,
+            input_level: 0.0,
         }
+    }
+
+    /// Captured PCM only. Sample arrival does not establish intelligibility.
+    pub fn set_input_activity(&mut self, input: Option<InputActivity>) -> bool {
+        self.set_captured_input_at(input, Instant::now())
+    }
+
+    #[cfg(test)]
+    fn set_input_activity_at(&mut self, input: Option<(usize, f32)>, now: Instant) -> bool {
+        self.set_input_activity_captured_at(input, now, now)
+    }
+
+    #[cfg(test)]
+    fn set_input_activity_captured_at(&mut self, input: Option<(usize, f32)>, captured_at: Instant, now: Instant) -> bool {
+        self.set_captured_input_at(input.map(|(count, level)| InputActivity { count, level, captured_at }), now)
+    }
+
+    pub fn set_captured_input_at(&mut self, input: Option<InputActivity>, now: Instant) -> bool {
+        let mut changed = self.update_input_activity(now);
+        if input.is_none_or(|input| input.count < self.input_count) {
+            changed |= self.input_target > 0.0 || self.input_level > 0.001;
+            self.input_count = 0;
+            self.input_target = 0.0;
+        }
+        if let Some(input) = input {
+            let InputActivity { count, level, captured_at } = input;
+            if count > self.input_count {
+                // Neither a delayed first read nor a repeated read renews PCM age.
+                self.input_at = captured_at;
+                self.input_target = if input.is_recent(now) && level.is_finite()
+                    && matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
+                    level.clamp(0.0, 1.0)
+                } else { 0.0 };
+                changed |= self.input_target > 0.0 || self.input_level > 0.001;
+            }
+            self.input_count = count;
+        }
+        changed
+    }
+
+    fn update_input_activity(&mut self, now: Instant) -> bool {
+        let dt = now.saturating_duration_since(self.input_updated_at).as_secs_f32();
+        self.input_updated_at = now;
+        // Expire before the entire elapsed filter step: a frame crossing the boundary
+        // conservatively releases for the whole interval rather than rising on old PCM.
+        if now.checked_duration_since(self.input_at).is_none_or(|age| age.as_secs_f32() >= 0.12)
+            || !matches!(self.pres, Pres::Recording { .. } | Pres::RecordingWarning { .. })
+        {
+            self.input_target = 0.0;
+        }
+        let before = self.input_level;
+        // Unlike spring integration, elapsed meter decay is neither scaled nor capped.
+        let rate = if self.input_target > self.input_level { 18.0 } else { 8.0 };
+        let alpha = if self.reduced { 1.0 } else { 1.0 - (-dt * rate).exp() };
+        self.input_level += (self.input_target - self.input_level) * alpha;
+        before != self.input_level
     }
 
     pub fn set_mic_warning(&mut self, warning: Option<InputWarning>) {
@@ -964,6 +1040,10 @@ impl PillModel {
     pub fn set_pres(&mut self, next: Pres) {
         if self.pres == next {
             return;
+        }
+        if !matches!(next, Pres::Recording { .. } | Pres::RecordingWarning { .. }) {
+            self.input_target = 0.0;
+            self.input_level = 0.0;
         }
         let layout_changed = !self.pres.same_layout(&next);
         let was_visible = !matches!(self.pres, Pres::Hidden);
@@ -1318,13 +1398,18 @@ impl PillModel {
         (cur_w - self.morph_start_w) / span >= CONTENT_DELAY
     }
 
+    /// Meter time is monotonic real time, independent of bounded/scaled spring `dt`.
+    pub fn advance_at(&mut self, dt: f32, now: Instant) {
+        self.update_input_activity(now);
+        let dt = dt.clamp(0.0, 0.1);
+        if dt > 0.0 {
+            self.integrate(dt);
+        }
+    }
+
     /// Advances the simulation by `dt` seconds.
     pub fn advance(&mut self, dt: f32) {
-        let dt = dt.clamp(0.0, 0.1);
-        if dt <= 0.0 {
-            return;
-        }
-        self.integrate(dt);
+        self.advance_at(dt, Instant::now());
     }
 
     fn integrate(&mut self, dt: f32) {
@@ -1668,6 +1753,7 @@ impl PillModel {
             ghost,
             is_completed: matches!(self.geo_pres, Pres::Completed { .. }),
             mic_warning: self.mic_warning,
+            input_level: self.input_level,
             completed_warning: matches!(self.geo_pres, Pres::Completed { warning: true, .. }),
             content_blur: max_blur,
             content_alpha: max_alpha,
@@ -1677,6 +1763,11 @@ impl PillModel {
 
     /// True once every spring has settled and no delayed geometry transition is pending.
     pub fn is_at_rest(&self) -> bool {
+        if self.input_level > 0.001
+            || self.input_target > 0.0
+        {
+            return false;
+        }
         if self.geo_pres != self.pres {
             return false;
         }
@@ -2242,7 +2333,7 @@ mod tests {
         let ids: Vec<ElemId> = items.iter().map(|i| i.id).collect();
         assert_eq!(
             ids,
-            [ElemId::Lead, ElemId::DividerLead, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish]
+            [ElemId::Lead, ElemId::DividerLead, ElemId::InputEqualizer, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish]
         );
         let last = items.last().unwrap().rect;
         assert!((layout.r - (last[0] + last[2]) - ISLAND_INSET).abs() < 0.5);
@@ -2254,7 +2345,7 @@ mod tests {
             for chips in [false, true] {
                 let pres = Pres::Recording { chips, has_iphone: true };
                 let (layout, items) = layout_of_warning(
-                    &pres, "0:00", LabelWidths::default(), &Metrics::default(), Some(warning),
+                    &pres, "00:00", LabelWidths::default(), &Metrics::default(), Some(warning),
                 );
                 let ids: Vec<_> = items.iter().map(|item| item.id).collect();
                 assert_eq!(ids[0], ElemId::Lead);
@@ -2264,6 +2355,9 @@ mod tests {
                     < ids.iter().position(|id| *id == if chips { ElemId::Close } else { ElemId::Finish }).unwrap());
                 assert!(chips || ids.contains(&ElemId::Finish));
                 assert!(layout.width() < PANEL_W, "warning cut off recording controls");
+                let rightmost = items.last().unwrap().rect;
+                assert!(rightmost[0] + rightmost[2] <= PANEL_W - ISLAND_INSET,
+                    "rightmost recording control is outside the Mac panel: {warning:?}, chips={chips}");
             }
         }
         let mut model = PillModel::new(Metrics::default());
@@ -2273,6 +2367,217 @@ mod tests {
         model.set_pres(Pres::Processing);
         model.set_mic_warning(None);
         assert!(model.frame().mic_warning.is_none());
+    }
+
+    #[test]
+    fn recording_reserves_meter_beside_warning_without_stealing_finish_hit_target() {
+        let mut model = PillModel::new(Metrics::default());
+        for chips in [false, true] {
+            model.set_pres(Pres::Recording { chips, has_iphone: true });
+            model.set_mic_warning(Some(InputWarning::Unavailable));
+            for _ in 0..180 { model.advance(FRAME_DT); }
+            let (_, items) = layout_of_warning(&model.pres, "0:00", model.labels, &model.metrics, model.mic_warning);
+            let ids: Vec<_> = items.iter().map(|item| item.id.trace_key()).collect();
+            let meter = ids.iter().position(|id| *id == "input.equalizer").expect("meter slot missing");
+            let warning = ids.iter().position(|id| *id == "mic.warning").unwrap();
+            let control = if chips { "close" } else { "finish" };
+            let action = ids.iter().position(|id| *id == control).unwrap();
+            assert!(meter < warning && warning < action);
+            let frame = model.frame();
+            assert!(frame.shape.l >= 0.0 && frame.shape.r <= PANEL_W);
+            let target = items[action].rect;
+            assert_eq!(model.hit_element(target[0] + target[2] / 2.0, target[1] + target[3] / 2.0), Some(items[action].id));
+        }
+    }
+
+    #[test]
+    fn input_meter_rejects_delayed_first_observation_of_old_pcm() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let produced = Instant::now();
+            let resumed = produced + std::time::Duration::from_millis(121);
+            model.set_input_activity_captured_at(Some((640, 0.0)), produced, produced);
+            // Producer appended while the GUI was stalled; this is its FIRST read.
+            model.set_input_activity_captured_at(Some((1280, 0.8)), produced, resumed);
+            model.advance_at(0.025, resumed + std::time::Duration::from_millis(10));
+            assert_eq!(model.frame().input_level, 0.0,
+                "obsolete PCM rose on first observation (reduced={reduced})");
+            let fresh = resumed + std::time::Duration::from_millis(20);
+            assert!(model.set_input_activity_captured_at(Some((2560, 0.8)), fresh, fresh));
+            model.advance_at(0.025, fresh + std::time::Duration::from_millis(20));
+            assert!(model.frame().input_level > 0.0);
+        }
+    }
+
+    #[test]
+    fn input_meter_expiry_boundary_releases_over_the_entire_filter_step() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let start = Instant::now();
+            model.set_input_activity_captured_at(Some((1280, 0.8)), start, start);
+            model.advance_at(0.025, start + std::time::Duration::from_millis(119));
+            let before = model.frame().input_level;
+            assert!(before > 0.0);
+            model.advance_at(0.0001, start + std::time::Duration::from_millis(120));
+            let expected = if reduced { 0.0 } else { before * (-0.001_f32 * 8.0).exp() };
+            assert!((model.frame().input_level - expected).abs() < 0.000001);
+            assert!(model.frame().input_level < before, "expiry must release, not rise");
+        }
+    }
+
+    #[test]
+    fn input_meter_rejects_future_timestamp_and_zero_count() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let now = Instant::now();
+            model.set_input_activity_captured_at(Some((1280, 0.8)), now + std::time::Duration::from_secs(1), now);
+            model.advance_at(0.025, now + std::time::Duration::from_millis(20));
+            assert_eq!(model.frame().input_level, 0.0);
+            model.set_input_activity_captured_at(Some((0, 0.8)), now, now + std::time::Duration::from_millis(20));
+            model.advance_at(0.025, now + std::time::Duration::from_millis(40));
+            assert_eq!(model.frame().input_level, 0.0);
+        }
+    }
+
+    #[test]
+    fn input_meter_does_not_rise_when_renderer_resumes_after_pcm_stalls() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            model.set_input_activity_at(Some((1280, 0.8)), Instant::now());
+            let now = std::time::Instant::now();
+            // No new PCM. A delayed frame still advances springs by only their bounded dt.
+            model.advance_at(0.025, now + std::time::Duration::from_secs(2));
+            assert_eq!(model.frame().input_level, 0.0,
+                "stale PCM must not rise on resume (reduced={reduced})");
+        }
+    }
+
+    #[test]
+    fn input_meter_tracks_new_pcm_and_settles_on_silence_or_stalled_samples() {
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+        for _ in 0..180 { model.advance(FRAME_DT); }
+        assert!(model.is_at_rest());
+        let start = Instant::now();
+        let at = |ms| start + std::time::Duration::from_millis(ms);
+        assert!(model.set_input_activity_at(Some((1280, 0.8)), at(0)));
+        assert!(!model.is_at_rest(), "new PCM must wake a settled pill");
+        model.advance_at(0.05, at(50));
+        assert!(model.frame().input_level > 0.0);
+
+        model.set_input_activity_at(Some((2560, 0.0)), at(50));
+        for i in 1..=50 { model.advance_at(0.02, at(50 + i * 20)); }
+        assert!(model.frame().input_level < 0.01, "silence must settle the bars");
+
+        model.set_input_activity_at(Some((3840, 0.9)), at(1050));
+        model.advance_at(0.05, at(1100));
+        assert!(model.frame().input_level > 0.0);
+        for i in 1..=50 {
+            model.set_input_activity_at(Some((3840, 0.9)), at(1100 + i * 20));
+            model.advance_at(0.02, at(1100 + i * 20));
+        }
+        assert!(model.frame().input_level < 0.01, "a repeated sample count cannot hold a peak");
+    }
+
+    #[test]
+    fn input_meter_real_elapsed_decay_ignores_spring_time_scale_and_settles() {
+        for reduced in [false, true] {
+            for spring_dt in [0.0, 0.00025, 0.025] {
+                let mut model = PillModel::new(Metrics::default());
+                model.reduced = reduced;
+                model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+                for _ in 0..180 { model.advance(FRAME_DT); }
+                let now = Instant::now();
+                model.set_input_activity_at(Some((1280, 0.8)), now);
+                model.advance_at(0.025, now + std::time::Duration::from_millis(50));
+                let active = model.frame().input_level;
+                assert!(active > 0.0);
+                // Both snapshot and renderer pause, then the unchanged producer count is read.
+                let resumed = now + std::time::Duration::from_secs(2);
+                model.set_input_activity_at(Some((1280, 0.8)), resumed);
+                model.advance_at(spring_dt, resumed);
+                assert!(model.frame().input_level < 0.001, "real elapsed decay was capped");
+                assert!(model.frame().input_level < active);
+                assert!(model.is_at_rest(), "a stalled peak must not keep the display link awake");
+                model.set_input_activity_at(Some((2560, 0.8)), resumed);
+                assert!(!model.is_at_rest(), "new PCM must wake after a stall");
+                model.advance_at(spring_dt, resumed + std::time::Duration::from_millis(50));
+                assert!(model.frame().input_level > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn input_meter_reset_restart_and_nonrecording_do_not_retain_peaks() {
+        for reduced in [false, true] {
+            let mut model = PillModel::new(Metrics::default());
+            model.reduced = reduced;
+            model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+            let start = Instant::now();
+            let at = |ms| start + std::time::Duration::from_millis(ms);
+            model.set_input_activity_at(Some((2560, 0.8)), at(0));
+            model.advance_at(0.025, at(50));
+            assert!(model.frame().input_level > 0.0);
+            model.set_input_activity_at(None, at(50));
+            model.advance_at(0.025, at(1050));
+            assert!(model.frame().input_level < 0.001);
+            model.set_input_activity_at(Some((1280, 0.8)), at(1050));
+            model.advance_at(0.025, at(1100));
+            assert!(model.frame().input_level > 0.0, "reset permits a new recorder");
+            model.set_input_activity_at(Some((640, 0.0)), at(1100));
+            model.advance_at(0.025, at(2100));
+            assert!(model.frame().input_level < 0.001, "a lower count resets the old target");
+            for (i, pres) in [Pres::Hidden, Pres::Processing].into_iter().enumerate() {
+                let base = 2100 + i as u64 * 200;
+                model.set_input_activity_at(Some((2560 + i * 2560, 0.8)), at(base));
+                model.advance_at(0.025, at(base + 50));
+                assert!(model.frame().input_level > 0.0);
+                model.set_pres(pres);
+                assert_eq!(model.frame().input_level, 0.0, "leaving recording clears the peak");
+                model.set_input_activity_at(Some((3840 + i * 2560, 0.9)), at(base + 50));
+                model.advance_at(0.025, at(base + 100));
+                assert_eq!(model.frame().input_level, 0.0);
+                model.set_pres(Pres::Recording { chips: false, has_iphone: false });
+                model.set_input_activity_at(Some((3840 + i * 2560, 0.9)), at(base + 100));
+                model.advance_at(0.025, at(base + 150));
+                assert_eq!(model.frame().input_level, 0.0, "return cannot revive the same PCM");
+            }
+        }
+    }
+
+    #[test]
+    fn recording_meter_and_controls_survive_sixteen_tile_transition_limit() {
+        let mut model = PillModel::new(Metrics::default());
+        model.set_pres(Pres::Completed {
+            label: "Copied".into(), routes: vec!["Editor".into(), "Notes".into()],
+            warning: false,
+        });
+        for _ in 0..180 { model.advance(FRAME_DT); }
+        model.set_pres(Pres::Recording { chips: true, has_iphone: true });
+        model.set_mic_warning(Some(InputWarning::Unavailable));
+        let mut saw_meter = false;
+        for _ in 0..60 {
+            model.advance(FRAME_DT);
+            let frame = model.frame();
+            if let Some(index) = frame.elems.iter().position(|elem| elem.id == ElemId::InputEqualizer) {
+                saw_meter = true;
+                assert!(index < 16, "Metal compositor would discard meter tile");
+            }
+            for control in [ElemId::Close, ElemId::Cancel, ElemId::Whiteboard, ElemId::Finish] {
+                if let Some(index) = frame.elems.iter().position(|elem| elem.id == control) {
+                    assert!(index < 16, "Metal compositor would discard {control:?}");
+                }
+            }
+        }
+        assert!(saw_meter);
     }
 
     #[test]

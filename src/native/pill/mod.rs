@@ -580,6 +580,9 @@ impl NativePill {
                 st.model.set_mic_warning(snapshot.mic_warning);
                 st.dirty = true;
             }
+            if st.model.set_input_activity(snapshot.input_activity) {
+                st.dirty = true;
+            }
             if (motion::now() - st.last_tick_now) >= f64::from(0.045 * motion::time_scale()) {
                 needs_fallback_tick = true;
             }
@@ -762,9 +765,7 @@ impl SharedNativePill {
             return;
         }
 
-        if dt > 0.0 {
-            st.model.advance(dt);
-        }
+        st.model.advance_at(dt, std::time::Instant::now());
         st.dirty = false;
 
         let frame = st.model.frame();
@@ -1061,6 +1062,7 @@ impl MetalPipelines {
                 [slot_x + TILE_PAD_PT, slot_y + TILE_PAD_PT],
                 frame.t,
                 frame.mic_warning,
+                frame.input_level,
                 frame.completed_warning,
                 theme,
                 frame
@@ -1245,6 +1247,7 @@ fn emit_elem_prims(
     [ox, oy]: [f32; 2],
     t: f32,
     mic_warning: Option<crate::audio::InputWarning>,
+    input_level: f32,
     completed_warning: bool,
     theme: PillTheme,
     recording_warning: bool,
@@ -1386,6 +1389,19 @@ fn emit_elem_prims(
                     1.0,
                 ),
             );
+        }
+        ElemId::InputEqualizer => {
+            // A five-bar PCM input meter, not a speech/recognition indicator.
+            let heights = [0.48, 0.82, 1.0, 0.68, 0.4];
+            for (index, factor) in heights.into_iter().enumerate() {
+                let h = 3.0 + input_level * factor * 16.0;
+                push_shape(
+                    out,
+                    [ox + (bw - 18.0) * 0.5 + index as f32 * 4.0, oy + (bh - h) * 0.5, 2.0, h],
+                    1.5,
+                    color(theme.text(), 0.4 + 0.55 * input_level),
+                );
+            }
         }
         ElemId::MicWarning => {
             if let Some(warning) = mic_warning {
@@ -1752,6 +1768,37 @@ mod tests {
                     crate::render::save_png(&frame, &dir.join(format!("{name}-{}.png", if dark { "dark" } else { "light" }))).unwrap();
                 }
             }
+        }
+    }
+
+    #[test]
+    fn metal_recording_meter_responds_to_pcm_without_moving_controls() {
+        let mut pipelines = MetalPipelines::new(2.0).expect("MetalPipelines::new failed");
+        let mut model = PillModel::new(atlas::measure_metrics());
+        let pres = Pres::Recording { chips: false, has_iphone: false };
+        let silent = still(&mut pipelines, &mut model, &pres, 1.0);
+        let (_, items) = model::layout_of(&pres, "0:00", model.labels, &model.metrics);
+        let meter = items.iter().find(|item| item.id == ElemId::InputEqualizer).unwrap().rect;
+        assert!(model.set_input_activity(Some(crate::audio::InputActivity {
+            count: 1280, level: 0.8, captured_at: std::time::Instant::now(),
+        })));
+        model.advance_at(0.05, std::time::Instant::now() + std::time::Duration::from_millis(50));
+        let active = still(&mut pipelines, &mut model, &pres, 0.0);
+        let scale = pipelines.scale as usize;
+        let x0 = (meter[0] as usize + 2) * scale;
+        let x1 = ((meter[0] + meter[2] - 2.0) as usize) * scale;
+        let y0 = (meter[1] as usize) * scale;
+        let y1 = ((meter[1] + meter[3]) as usize) * scale;
+        let changed = (y0..y1).any(|y| (x0..x1).any(|x| {
+            let i = (y * silent.width as usize + x) * 4;
+            silent.rgba[i..i + 3] != active.rgba[i..i + 3]
+        }));
+        assert!(changed, "Metal meter pixels did not respond to captured PCM");
+        if let Some(dir) = std::env::var_os("APPARENT_PILL_STILLS") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            crate::render::save_png(&silent, &dir.join("meter-silent.png")).unwrap();
+            crate::render::save_png(&active, &dir.join("meter-active.png")).unwrap();
         }
     }
 

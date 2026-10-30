@@ -246,7 +246,7 @@
       "says": "The capsule shows the time with Finish and Cancel on the display in use; on a Mac it's a native Metal panel, black or glass.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "linux"],
-      "note": "Linux draws the GPUI capsule; glass needs macOS 26.",
+      "note": "Linux draws the GPUI capsule; glass needs macOS 26. On main, the Hyprland capsule stays pinned across workspaces without pinning other app windows.",
       "config": [
         { "key": "nativePill", "value": "false", "does": "Draw the GPUI capsule instead of the Metal one (Mac)" },
         { "key": "pillStyle", "value": "\"black\" | \"glass\"", "does": "The Metal capsule's look" }

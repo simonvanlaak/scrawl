@@ -388,6 +388,52 @@ fn run(command: &str) -> Result<()> {
     }
 }
 
+/// XWayland's override-redirect keeps the capsule above windows, but Hyprland still
+/// assigns it to one workspace. Pin only the exact capsule, never the whole app.
+pub fn pin_pill(xid: u32) -> Result<()> {
+    if let Some(command) = pill_pin_command(
+        &request("j/clients")?,
+        std::process::id(),
+        xid,
+        syntax()?,
+    )? {
+        run(&command)?;
+    }
+    Ok(())
+}
+
+pub fn pill_title(xid: u32) -> String {
+    format!("Apparent Recording Controls {xid:x}")
+}
+
+fn pill_pin_command(clients: &str, pid: u32, xid: u32, syntax: Syntax) -> Result<Option<String>> {
+    let clients: Vec<serde_json::Value> = serde_json::from_str(clients)?;
+    let title = pill_title(xid);
+    let mut matching = clients.iter().filter(|client| {
+        client["pid"].as_u64() == Some(u64::from(pid))
+            && client["xwayland"].as_bool() == Some(true)
+            && client["title"].as_str() == Some(title.as_str())
+    });
+    let pill = matching.next().context("Recording pill not mapped in Hyprland yet")?;
+    anyhow::ensure!(matching.next().is_none(), "Recording pill identity is ambiguous");
+    if pill["pinned"].as_bool() == Some(true) {
+        return Ok(None);
+    }
+    let address = pill["address"].as_str().context("Recording pill has no address")?;
+    anyhow::ensure!(
+        address.starts_with("0x") && address.len() > 2
+            && address[2..].bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "Invalid Hyprland pill address"
+    );
+    Ok(Some(match syntax {
+        Syntax::Lua => format!(
+            "eval hl.dispatch(hl.dsp.window.pin({{ action = 'set', window = 'address:{address}' }}))"
+        ),
+        // Legacy pin toggles; only send it after observing this exact window unpinned.
+        Syntax::Hyprlang => format!("dispatch pin address:{address}"),
+    }))
+}
+
 /// A normal GPUI window is tiled by Hyprland. Float only the whiteboard, not Apparent's
 /// picker or capsule, so the browser can stay beside a movable, resizable paper window.
 pub fn float_whiteboard() -> Result<()> {
@@ -588,6 +634,39 @@ mod tests {
     use super::*;
 
     const ALT_SHIFT: u32 = CARBON_OPTION_KEY | CARBON_SHIFT_KEY;
+
+    #[test]
+    fn pill_pin_targets_only_its_xid_and_process() {
+        let clients = r#"[
+            {"pid":42,"xwayland":true,"title":"Apparent Recording Controls 18000005","stableId":"18000007","address":"0x111","pinned":false},
+            {"pid":43,"xwayland":true,"title":"Apparent Recording Controls 18000007","address":"0x222","pinned":false},
+            {"pid":42,"xwayland":false,"title":"Apparent Recording Controls 18000007","address":"0x333","pinned":false},
+            {"pid":42,"xwayland":true,"title":"Apparent Recording Controls 18000007","stableId":"7","address":"0x444","pinned":false}
+        ]"#;
+        assert_eq!(
+            pill_pin_command(clients, 42, 0x18000007, Syntax::Lua).unwrap(),
+            Some("eval hl.dispatch(hl.dsp.window.pin({ action = 'set', window = 'address:0x444' }))".into())
+        );
+        assert_eq!(
+            pill_pin_command(clients, 42, 0x18000007, Syntax::Hyprlang).unwrap(),
+            Some("dispatch pin address:0x444".into())
+        );
+        assert!(pill_pin_command(clients, 42, 0x18000009, Syntax::Lua).is_err());
+        assert!(pill_pin_command("[]", 42, 0x18000007, Syntax::Lua).is_err());
+    }
+
+    #[test]
+    fn pill_pin_is_idempotent_and_rejects_invalid_identity() {
+        let clients = r#"[{"pid":42,"xwayland":true,"title":"Apparent Recording Controls 18000007","address":"0x444","pinned":true}]"#;
+        for syntax in [Syntax::Lua, Syntax::Hyprlang] {
+            assert_eq!(pill_pin_command(clients, 42, 0x18000007, syntax).unwrap(), None);
+        }
+        let unpinned = clients.replace("true}]", "false}]");
+        assert!(pill_pin_command(&unpinned.replace("0x444", "0x444';oops"), 42, 0x18000007, Syntax::Lua).is_err());
+        assert!(pill_pin_command(&unpinned.replace("18000007", "unknown"), 42, 0x18000007, Syntax::Lua).is_err());
+        let duplicate = format!("[{},{}]", &unpinned[1..unpinned.len()-1], &unpinned[1..unpinned.len()-1]);
+        assert!(pill_pin_command(&duplicate, 42, 0x18000007, Syntax::Lua).is_err());
+    }
 
     #[test]
     fn carbon_modifiers_become_hyprland_masks() {

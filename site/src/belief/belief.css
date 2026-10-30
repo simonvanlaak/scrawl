@@ -1,5 +1,5 @@
 .pond-page .pond-purpose { max-width: none; margin: 0; padding: 0; }
-.pond-purpose .belief-pond { display: grid; min-height: 100svh; place-items: center; padding: 56px 40px 36px; }
+.pond-purpose .belief-pond { display: grid; min-height: 100svh; justify-items: center; align-items: start; padding: 48px 40px 32px; }
 .pond-purpose .belief-pond #study { width: 100%; max-width: 1160px; text-align: center; }
 .pond-purpose .belief-pond h2 { margin: 0 auto; max-width: 1140px; font-size: clamp(42px, 6.25vw, 84px); line-height: 1.02; letter-spacing: -.052em; font-weight: 650; text-wrap: balance; }
 .pond-purpose .belief-pond .word { display: inline-block; position: relative; isolation: isolate; white-space: nowrap; }
@@ -9,7 +9,7 @@
 .pond-purpose .belief-pond .enjoyable svg { left: -3%; top: 0; width: 106%; height: 110%; z-index: 0; }
 .pond-purpose .belief-pond .enjoyable > span { position: relative; z-index: 1; }
 .pond-purpose .belief-pond .enjoy-highlight { fill: none; stroke: #b7a5d8; stroke-opacity: .65; stroke-width: 53; stroke-linecap: butt; stroke-dasharray: 1; stroke-dashoffset: 1; }
-.pond-purpose .belief-pond .scene { position: relative; width: min(100%, 1080px); height: 350px; margin: 80px auto 0; isolation: isolate; }
+.pond-purpose .belief-pond .scene { position: relative; width: min(100%, 1080px); height: 350px; margin: 60px auto 0; isolation: isolate; }
 .pond-purpose .belief-pond .frog { position: absolute; display: block; height: auto; bottom: 105px; image-rendering: pixelated; user-select: none; pointer-events: none; }
 .pond-purpose .belief-pond .pair-left { width: 19.333%; left: 58%; z-index: 2; }
 .pond-purpose .belief-pond .pair-right { width: 18%; left: 82%; z-index: 2; }

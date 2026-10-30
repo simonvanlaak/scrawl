@@ -1,10 +1,11 @@
-//! Local, same-user control of the running GUI capture. Never starts or sends a capture.
+//! Local, same-user control of the running GUI. Never launches an app or sends a capture.
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
@@ -29,8 +30,86 @@ pub struct State {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    Start,
+    Inspect,
     Stop,
     Cancel,
+}
+
+/// Small in-process receipts, not capture history on disk. Media stays in the bundle.
+#[derive(Default)]
+pub struct Registry(HashMap<String, serde_json::Value>);
+
+impl Registry {
+    pub fn decide(&self, state: &State, action: Action, id: &str) -> Outcome {
+        if action == Action::Stop
+            && matches!(
+                self.inspect(id)["status"].as_str(),
+                Some("processing" | "saved" | "cancelled" | "failed")
+            )
+        {
+            return Outcome::AlreadyEnded;
+        }
+        decide(state, action, id)
+    }
+    /// Called on the GUI thread, before any recording side effect. Rejected IDs are
+    /// tombstoned too: retrying a rejected/expired request cannot launch later.
+    pub fn admit(&mut self, id: &str, occupied: bool, expired: bool) -> bool {
+        if self.0.contains_key(id) {
+            return false;
+        }
+        if expired || occupied {
+            self.set(
+                id,
+                "rejected",
+                None,
+                Some(if expired {
+                    "admission_expired"
+                } else {
+                    "occupied"
+                }),
+            );
+            return false;
+        }
+        self.begin(id);
+        true
+    }
+
+    pub fn begin(&mut self, id: &str) {
+        self.set(id, "starting", None, None);
+    }
+
+    pub fn set(
+        &mut self,
+        id: &str,
+        status: &str,
+        path: Option<&std::path::Path>,
+        error: Option<&str>,
+    ) {
+        self.0.insert(
+            id.into(),
+            serde_json::json!({
+                "capture_id": id, "status": status, "bundle_path": path, "error": error,
+            }),
+        );
+    }
+
+    /// Only the successful production finalizer can publish a saved path.
+    pub fn finish(&mut self, id: &str, result: Result<&std::path::Path, String>) {
+        match result {
+            Ok(path) => self.set(id, "saved", Some(path), None),
+            Err(message) => {
+                self.set(id, "failed", None, Some("finalization_failed"));
+                self.0.get_mut(id).unwrap()["message"] = message.into();
+            }
+        }
+    }
+
+    pub fn inspect(&self, id: &str) -> serde_json::Value {
+        self.0.get(id).cloned().unwrap_or_else(|| serde_json::json!({
+            "capture_id": id, "status": "unknown", "bundle_path": null, "error": "unknown_capture",
+        }))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -121,6 +200,50 @@ fn same_user(stream: &UnixStream) -> Result<()> {
 pub struct Request {
     pub action: Option<(Action, String)>,
     pub reply: std::sync::mpsc::SyncSender<String>,
+    pub deadline_ms: u64,
+}
+
+/// Same-host monotonic deadline, including time spent in the socket accept queue.
+fn clock_ms() -> u64 {
+    let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+    // CLOCK_MONOTONIC is available on both supported Unix targets.
+    assert_eq!(
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) },
+        0
+    );
+    time.tv_sec as u64 * 1000 + time.tv_nsec as u64 / 1_000_000
+}
+
+impl Request {
+    pub fn expired(&self) -> bool {
+        clock_ms() >= self.deadline_ms
+    }
+}
+
+fn parse_request(line: &str) -> Option<(Option<(Action, String)>, u64)> {
+    let parts: Vec<_> = line.split_whitespace().collect();
+    if parts == ["state"] {
+        return Some((None, clock_ms() + 3000));
+    }
+    if !(2..=3).contains(&parts.len()) || !valid_id(parts[1]) {
+        return None;
+    }
+    let action = match parts[0] {
+        "start" if parts.len() == 3 => Action::Start,
+        "inspect" => Action::Inspect,
+        "stop" => Action::Stop,
+        "cancel" => Action::Cancel,
+        _ => return None,
+    };
+    let deadline = if parts.len() == 3 {
+        parts[2].parse().ok()?
+    } else {
+        clock_ms() + 3000
+    };
+    Some((
+        Some((action, parts[1].into())),
+        deadline.min(clock_ms() + 3000),
+    ))
 }
 
 /// Separate from Linux's shortcut socket: no toggle, no unacknowledged mutation.
@@ -186,24 +309,26 @@ fn listen_at(path: PathBuf) -> Result<flume::Receiver<Request>> {
                     .read_line(&mut line)
                     .is_ok()
                 {
-                    let action = match line.trim().split_once(' ') {
-                        Some(("stop", id)) if valid_id(id) => Some((Action::Stop, id.to_owned())),
-                        Some(("cancel", id)) if valid_id(id) => {
-                            Some((Action::Cancel, id.to_owned()))
-                        }
-                        _ => None,
-                    };
-                    if line.trim() != "state" && action.is_none() {
-                        "{\"error\":\"invalid_request\"}".to_owned()
-                    } else {
+                    if let Some((action, deadline_ms)) = parse_request(line.trim()) {
                         let (reply, receive) = std::sync::mpsc::sync_channel(1);
-                        if tx.try_send(Request { action, reply }).is_ok() {
+                        if tx
+                            .try_send(Request {
+                                action,
+                                reply,
+                                deadline_ms,
+                            })
+                            .is_ok()
+                        {
                             receive
-                                .recv_timeout(Duration::from_secs(3))
+                                .recv_timeout(Duration::from_millis(
+                                    deadline_ms.saturating_sub(clock_ms()),
+                                ))
                                 .unwrap_or_else(|_| "{\"error\":\"app_unresponsive\"}".into())
                         } else {
                             "{\"error\":\"app_busy\"}".into()
                         }
+                    } else {
+                        "{\"error\":\"invalid_request\"}".to_owned()
                     }
                 } else {
                     "{\"error\":\"invalid_request\"}".into()
@@ -267,9 +392,17 @@ fn try_lock_owner(owner: &std::fs::File) -> Result<bool> {
 }
 
 pub fn command(action: Option<(Action, &str)>) -> Result<String> {
+    command_for(action, Duration::from_secs(4))
+}
+
+fn command_for(action: Option<(Action, &str)>, budget: Duration) -> Result<String> {
     if let Some((_, id)) = action {
         ensure!(valid_id(id), "capture ID must be 32 hex characters");
     }
+    let timeout = budget
+        .min(Duration::from_secs(4))
+        .max(Duration::from_millis(1));
+    let deadline_ms = clock_ms() + timeout.as_millis() as u64;
     let path = socket_path(false)?;
     let meta = std::fs::symlink_metadata(&path).context("no running GUI control socket")?;
     ensure!(
@@ -280,12 +413,19 @@ pub fn command(action: Option<(Action, &str)>) -> Result<String> {
     );
     let mut stream = UnixStream::connect(path).context("GUI capture control unavailable")?;
     same_user(&stream)?;
-    stream.set_read_timeout(Some(Duration::from_secs(4)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(4)))?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
     let request = match action {
         None => "state".to_owned(),
-        Some((Action::Stop, id)) => format!("stop {id}"),
-        Some((Action::Cancel, id)) => format!("cancel {id}"),
+        Some((action, id)) => format!(
+            "{} {id} {deadline_ms}",
+            match action {
+                Action::Start => "start",
+                Action::Inspect => "inspect",
+                Action::Stop => "stop",
+                Action::Cancel => "cancel",
+            }
+        ),
     };
     writeln!(stream, "{request}")?;
     let mut response = String::new();
@@ -297,9 +437,331 @@ pub fn command(action: Option<(Action, &str)>) -> Result<String> {
     Ok(response.trim().to_owned())
 }
 
+/// One mutation, then read-only polling by the original ID. Never infer ownership
+/// from global state and never resend Stop as a toggle after a timeout.
+pub fn execute(action: Option<(Action, &str)>, wait: bool, timeout: Duration) -> serde_json::Value {
+    execute_with(action, wait, timeout, command_for)
+}
+
+fn execute_with(
+    action: Option<(Action, &str)>,
+    wait: bool,
+    timeout: Duration,
+    mut send: impl FnMut(Option<(Action, &str)>, Duration) -> Result<String>,
+) -> serde_json::Value {
+    let deadline = Instant::now() + timeout;
+    let id = action.map(|(_, id)| id);
+    let mut next = action;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return serde_json::json!({"capture_id": id, "error": "timeout", "message": "Inspect the same ID; an admitted capture is not cancelled on timeout."});
+        }
+        let response = send(next, remaining)
+            .and_then(|text| Ok(serde_json::from_str::<serde_json::Value>(&text)?));
+        if Instant::now() >= deadline {
+            return serde_json::json!({"capture_id": id, "error": "timeout", "message": "Inspect the same ID; an admitted capture is not cancelled on timeout."});
+        }
+        let mut value = match response {
+            Ok(value) => value,
+            Err(error) => {
+                return serde_json::json!({"capture_id": id, "error": "control_unavailable", "message": format!("{error:#}"), "recovery": "Inspect the same ID before retrying; admission may have succeeded."});
+            }
+        };
+        if !value.is_object() {
+            return serde_json::json!({"capture_id": id, "error": "invalid_response"});
+        }
+        if value["error"].is_string() {
+            // Listener/transport errors may not yet have reached the GUI thread.
+            value["capture_id"] = serde_json::json!(id);
+            return value;
+        }
+        if let Some((action, id)) = action {
+            // A response for a different resource is never a successful receipt.
+            let status = value["status"].as_str();
+            if value["capture_id"].as_str() != Some(id)
+                || !matches!(
+                    status,
+                    Some(
+                        "starting"
+                            | "recording"
+                            | "processing"
+                            | "saved"
+                            | "cancelled"
+                            | "failed"
+                            | "rejected"
+                            | "unknown"
+                    )
+                )
+                || (status == Some("saved")
+                    && !value["bundle_path"].as_str().is_some_and(|p| !p.is_empty()))
+            {
+                return serde_json::json!({"capture_id": id, "error": "invalid_response"});
+            }
+            if !wait
+                || matches!(
+                    value["outcome"].as_str(),
+                    Some("wrong_capture" | "not_ready")
+                )
+            {
+                return value;
+            }
+            if (action == Action::Start && status == Some("recording"))
+                || (action == Action::Stop
+                    && status == Some("saved")
+                    && value["bundle_path"].is_string())
+            {
+                return value;
+            }
+            if matches!(
+                status,
+                Some("cancelled" | "failed" | "rejected" | "unknown" | "saved")
+            ) {
+                value["error"] = serde_json::json!(match status {
+                    Some("cancelled") => "cancelled",
+                    Some("unknown") => "unknown_capture",
+                    _ => "ended_before_ready",
+                });
+                return value;
+            }
+            next = Some((Action::Inspect, id));
+        } else {
+            return value;
+        }
+        std::thread::sleep(
+            Duration::from_millis(50).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_admission_is_once_only_and_rejections_cannot_start_later() {
+        let mut registry = Registry::default();
+        let mut starts = 0;
+        for (id, occupied, expired) in [
+            ("a", false, false),
+            ("b", true, false),
+            ("late", false, true),
+            ("a", false, false),
+            ("b", false, false),
+            ("late", false, false),
+        ] {
+            starts += usize::from(registry.admit(id, occupied, expired));
+        }
+        assert_eq!(starts, 1);
+        assert_eq!(registry.inspect("a")["status"], "starting");
+        assert_eq!(registry.inspect("b")["error"], "occupied");
+        assert_eq!(registry.inspect("late")["error"], "admission_expired");
+    }
+
+    #[test]
+    fn older_saved_result_survives_new_capture_and_stop_retry_does_not_stop_it() {
+        let mut registry = Registry::default();
+        registry.begin("old");
+        registry.finish("old", Ok(std::path::Path::new("/captures/exact.apparent")));
+        registry.begin("new");
+        let state = State {
+            phase: Phase::Recording,
+            capture_id: Some("new".into()),
+        };
+        assert_eq!(
+            registry.decide(&state, Action::Stop, "old"),
+            Outcome::AlreadyEnded
+        );
+        assert_eq!(
+            registry.inspect("old")["bundle_path"],
+            "/captures/exact.apparent"
+        );
+        assert_eq!(
+            registry.decide(&state, Action::Stop, "other"),
+            Outcome::WrongCapture
+        );
+        assert_eq!(
+            registry.decide(&state, Action::Stop, "new"),
+            Outcome::Stopping
+        );
+        registry.set("new", "processing", None, None);
+        assert_eq!(
+            registry.decide(&state, Action::Stop, "new"),
+            Outcome::AlreadyEnded
+        );
+    }
+
+    #[test]
+    fn finalization_error_or_cancel_never_publishes_a_saved_path() {
+        let mut registry = Registry::default();
+        registry.begin("failure");
+        registry.finish("failure", Err("disk full".into()));
+        let failure = registry.inspect("failure");
+        assert_eq!(failure["status"], "failed");
+        assert_eq!(failure["error"], "finalization_failed");
+        assert_eq!(failure["message"], "disk full");
+        assert!(failure["bundle_path"].is_null());
+        registry.set("cancel", "cancelled", None, None);
+        assert!(registry.inspect("cancel")["bundle_path"].is_null());
+        assert_eq!(registry.inspect("unknown")["error"], "unknown_capture");
+    }
+
+    #[test]
+    fn stop_wait_sends_one_stop_then_inspects_only_that_id_until_saved() {
+        let mut calls = vec![];
+        let replies = [
+            serde_json::json!({"capture_id":"owned", "status":"processing", "outcome":"stopping"}),
+            serde_json::json!({"capture_id":"owned", "status":"processing"}),
+            serde_json::json!({"capture_id":"owned", "status":"saved", "bundle_path":"/captures/exact.apparent"}),
+        ];
+        let value = execute_with(
+            Some((Action::Stop, "owned")),
+            true,
+            Duration::from_secs(1),
+            |action, _| {
+                calls.push(action.map(|(a, id)| (a, id.to_owned())));
+                Ok(replies[calls.len() - 1].to_string())
+            },
+        );
+        assert_eq!(value["bundle_path"], "/captures/exact.apparent");
+        assert_eq!(
+            calls,
+            vec![
+                Some((Action::Stop, "owned".into())),
+                Some((Action::Inspect, "owned".into())),
+                Some((Action::Inspect, "owned".into()))
+            ]
+        );
+    }
+
+    #[test]
+    fn start_wait_requires_real_readiness_receipt_for_the_owned_id() {
+        let mut calls = 0;
+        let value = execute_with(
+            Some((Action::Start, "owned")),
+            true,
+            Duration::from_secs(1),
+            |action, _| {
+                calls += 1;
+                assert_eq!(
+                    action.unwrap().0,
+                    if calls == 1 {
+                        Action::Start
+                    } else {
+                        Action::Inspect
+                    }
+                );
+                Ok(serde_json::json!({"capture_id":"owned", "status":if calls == 1 {"starting"} else {"recording"}}).to_string())
+            },
+        );
+        assert_eq!(value["status"], "recording");
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn wait_returns_failures_and_rejects_unknown_or_incomplete_receipts() {
+        for (reply, expected) in [
+            (
+                serde_json::json!({"capture_id":"owned", "status":"failed", "error":"start_failed"}),
+                "start_failed",
+            ),
+            (
+                serde_json::json!({"capture_id":"owned", "status":"failed", "error":"finalization_failed"}),
+                "finalization_failed",
+            ),
+            (
+                serde_json::json!({"capture_id":"owned", "status":"cancelled"}),
+                "cancelled",
+            ),
+            (
+                serde_json::json!({"capture_id":"owned", "status":"unknown", "outcome":"already_ended"}),
+                "unknown_capture",
+            ),
+            (
+                serde_json::json!({"capture_id":"foreign", "status":"saved", "bundle_path":"/foreign"}),
+                "invalid_response",
+            ),
+            (serde_json::json!({}), "invalid_response"),
+            (
+                serde_json::json!({"capture_id":"owned", "status":"saved"}),
+                "invalid_response",
+            ),
+        ] {
+            let value = execute_with(
+                Some((Action::Stop, "owned")),
+                true,
+                Duration::from_millis(10),
+                |_, _| Ok(reply.to_string()),
+            );
+            assert_eq!(value["error"], expected, "{reply}");
+        }
+    }
+
+    #[test]
+    fn wait_timeout_preserves_owned_id_and_retry_reads_terminal_result() {
+        let mut stops = 0;
+        let value = execute_with(
+            Some((Action::Stop, "owned")),
+            true,
+            Duration::from_millis(5),
+            |action, _| {
+                stops += usize::from(action.unwrap().0 == Action::Stop);
+                Ok(serde_json::json!({"capture_id":"owned", "status":"processing", "outcome":"stopping"}).to_string())
+            },
+        );
+        assert_eq!(value["error"], "timeout");
+        assert_eq!(value["capture_id"], "owned");
+        assert_eq!(stops, 1);
+        let saved = execute_with(
+            Some((Action::Stop, "owned")),
+            true,
+            Duration::from_secs(1),
+            |_, _| {
+                Ok(serde_json::json!({"capture_id":"owned", "status":"saved", "outcome":"already_ended", "bundle_path":"/exact"}).to_string())
+            },
+        );
+        assert_eq!(saved["bundle_path"], "/exact");
+        assert!(saved["error"].is_null());
+    }
+
+    #[test]
+    fn expired_wire_start_keeps_its_deadline_and_never_admits() {
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let (action, deadline_ms) = parse_request(&format!("start {id} 0")).unwrap();
+        let (reply, _) = std::sync::mpsc::sync_channel(1);
+        let request = Request {
+            action,
+            reply,
+            deadline_ms,
+        };
+        assert!(request.expired());
+        let mut registry = Registry::default();
+        assert!(!registry.admit(id, false, request.expired()));
+        assert!(!registry.admit(id, false, false));
+        for invalid in [
+            format!("start {id}"),
+            format!("start {id} bad"),
+            format!("stop {id} 0 extra"),
+            "start bad 1".into(),
+        ] {
+            assert!(parse_request(&invalid).is_none());
+        }
+    }
+
+    #[test]
+    fn late_reply_cannot_turn_an_expired_wait_into_success() {
+        let value = execute_with(
+            Some((Action::Start, "owned")),
+            true,
+            Duration::from_millis(1),
+            |_, _| {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(serde_json::json!({"capture_id":"owned", "status":"recording"}).to_string())
+            },
+        );
+        assert_eq!(value["error"], "timeout");
+        assert_eq!(value["capture_id"], "owned");
+    }
 
     #[test]
     fn running_owner_does_not_require_an_answering_ui() {
@@ -378,10 +840,12 @@ mod tests {
         std::fs::rename(&lock, &target).unwrap();
         std::os::unix::fs::symlink(&target, &lock).unwrap();
         assert!(running_owner_at(path.clone()).is_err());
-        assert!(std::fs::symlink_metadata(&lock)
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            std::fs::symlink_metadata(&lock)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         std::fs::remove_file(&lock).unwrap();
         std::fs::create_dir(&lock).unwrap();
         assert!(running_owner_at(path).is_err());

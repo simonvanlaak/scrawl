@@ -1,16 +1,18 @@
 # Agent video workflow
 
-Use this with [Make It Apparent](../skills/make-it-apparent/SKILL.md) when an agent needs real desktop proof. It describes the existing GUI capture controls, not a new recorder or a portable VM harness. Read the host's capture safety rules first. Keep recordings, private paths, logs and QA outside git and public assets.
+Use this with [Make It Apparent](../skills/make-it-apparent/SKILL.md) when an agent needs real desktop proof. The CLI controls a running GUI through its normal interaction-aware capture path; it is not a separate recorder or portable VM harness. Check installed help: older builds lack `capture start` and `stop --wait`. Read the host's capture safety rules first. Keep recordings, private paths, logs and QA outside git and public assets.
 
 ## Prepare and claim only your own take
 
 1. Record the exact build, OS, running executable and installed CLI capabilities in a private evidence directory. Check installed help before choosing a command. Experimental walkthrough tooling in another branch is not a shipped prerequisite.
 2. Choose one visible claim and rehearse it on a safe capture surface. Hide unrelated material before recording; post-production cropping cannot remove secrets from the retained raw movie.
 3. Set a startup deadline and a separate finalization deadline before running the driver. Poll with a bounded interval, recording the last response and elapsed time. On timeout, stop the driver and report the phase; do not toggle recording or cancel an unknown capture to recover.
-4. Require a successful `apparent capture state` response with `state.phase == "idle"` and `state.capture_id == null` before starting. A socket pathname is not readiness. A completed prior take is not an idle preflight; let the GUI return to idle or report the blocked precondition without issuing a shortcut that could affect someone else's work.
-5. Start using the configured GUI shortcut (`apparent shortcut record` on Linux). Wait for a successful state response with `state.phase == "recording"` and a non-null ID, then retain that ID as the take you initiated. `starting` is not recording: a portal picker may still need selection. Keep JSON stdout separate from stderr and reject failed, malformed or incomplete responses.
+4. Read `apparent capture state` to understand the running app. A socket pathname is not readiness. Do not toggle a shortcut or cancel an existing capture to obtain an idle app.
+5. Run `apparent capture start --wait --timeout 30`. Retain the top-level `capture_id` from its JSON reply, including a failed or timed-out reply. Success requires `status == "recording"`: a real screen frame has arrived. `starting` is not recording; portal consent may still be needed. Keep JSON stdout separate from stderr and reject failed, malformed or incomplete responses. Admission runs on the GUI thread and refuses a recording, pending chooser, picker, preview or processing job atomically.
 
-The state ID is not proof of ownership. Use an isolated app/session for unattended trials. On a shared GUI, idle followed by recording cannot distinguish your start from someone else's simultaneous start; if ownership is uncertain, do not stop or cancel it.
+The start reply identifies that request; a later global state read does not establish ownership. For crash-safe driver retries, generate and privately retain a 32-hex-character request ID before sending, then use `capture start --request-id <id> --wait --timeout 30`. Retrying that ID returns its existing receipt, never a second recording. Rejected IDs stay rejected; deliberately choose a new ID for a new attempt. Use an isolated app/session for unattended trials: CLI identity does not reserve the physical desktop from human input.
+
+An admission request queued too long expires and cannot start later. If admission succeeded but readiness times out, the owned capture remains intact. Use `capture inspect <id>`, retry the same request ID, or deliberately `capture cancel <id>`; do not send a new start just because a reply was lost. Receipts last only for that GUI process, not across an app restart.
 
 ## Drive a settled UI
 
@@ -20,18 +22,13 @@ Keep the result visible for a planned readable hold. For persistence proof, show
 
 ## Finish once, then verify
 
-For ordinary agent-authored videos, use `apparent capture stop <owned_id>` instead of whole-screen OCR for Finish. A visible Finish click is necessary only when that control is the subject of the test.
+For ordinary agent-authored videos, use `apparent capture stop <owned_id> --wait --timeout 60` instead of whole-screen OCR for Finish. A visible Finish click is necessary only when that control is the subject of the test.
 
-Immediately before stopping, require a fresh successful state read with phase `recording` and the same owned ID. The stop command checks the ID at the action, so a newer capture cannot be stopped by a stale ID. Do not use a shortcut as an automatic retry: a toggle could start or stop a different take.
+The stop command checks the ID at the action, so a newer capture cannot be stopped by a stale ID. Stop while `starting` fails with `not_ready` without saving or cancelling it. Do not use a shortcut as an automatic retry: a toggle could start or stop a different take.
 
-A successful `outcome == "stopping"` reply means finalization began, **not** that a valid bundle exists. Poll read-only until both conditions hold:
+Without `--wait`, `outcome == "stopping"` still means acceptance, **not** a saved bundle. With `--wait`, success requires `status == "saved"` and the exact `bundle_path` published by that capture's successful finalizer. The CLI polls only this ID, not global completion or directory contents. Inspect the returned bundle's manifest, summary, frames and nonempty decodable recording against the claim; successful storage does not certify the video's content.
 
-- State is `completed` or `idle` with a null active ID.
-- The exact bundle from this take has a valid manifest, summary, expected frames and a decodable nonempty recording. Inspect the saved content against the claim.
-
-Use an exact returned path when available. Otherwise, use a private per-trial captures directory and compare its before/after contents; require exactly one new valid bundle. Do not guess `latest` in a shared directory or accept an unrelated old bundle as success.
-
-If Finish already ended the take or a stop returns `already_ended`, do not send another stop. Check the owned take's saved bundle and ended state. A wrong ID, malformed reply, missing bundle or finalization timeout is not success; retain the diagnostic evidence without acting on another take.
+If GUI Finish already ended the take, `capture inspect <id>` or repeating `stop <id> --wait` recovers its result without another stop. A retained result stays addressable after a new recording starts. Unknown, cancelled, failed, wrong-ID and timeout results are not saved success. After timeout or disconnect, inspect the same ID or retry Stop with that ID. Never guess `latest` or scan for another bundle to turn a failed wait into success.
 
 A self-recorded movie ends at the actual stop. Verify saved-state aftermath separately. Do not append a completion still and claim the source movie showed it.
 
@@ -49,4 +46,4 @@ Keep a private ledger of attempted action, observed result, elapsed time, retry 
 
 Measure meaningful-action-to-stop request, planned readable hold, stop acceptance and saved/ended verification separately. Replacing OCR with CLI control is a deliberate workflow change, not a like-for-like Finish-button benchmark. Different cache state, reused speech, capture lengths or environment setup prevent a controlled total-time claim.
 
-These practices came from a private Linux whiteboard persistence trial on Apparent 0.3.13, commit `e80e2141c989625c9080f4c9fed974e7715c0148`. The final take was caption-only; it did not test Mac capture or microphone audio. No app defect was confirmed. This guide adds no runtime behavior, narration dependency, experiment or platform-parity claim.
+The original driver practices came from a private Linux whiteboard persistence trial on Apparent 0.3.13, commit `e80e2141c989625c9080f4c9fed974e7715c0148`. That caption-only take did not test these new start/wait commands, Mac capture or microphone audio. Shared Rust contract tests are not live GUI proof; verify the exact candidate on each claimed platform before release. These controls do not change delivered media, add narration or authorize automatic paste/upload.

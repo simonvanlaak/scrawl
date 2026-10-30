@@ -742,6 +742,11 @@ impl ScreenCaptureSession {
         self.real_frame_seen.load(Ordering::Acquire)
     }
 
+    /// An ended sampler without a real frame is failure, not pending portal consent.
+    pub fn failed_to_start(&self) -> bool {
+        !self.has_frames() && self.sampler_thread.as_ref().is_none_or(JoinHandle::is_finished)
+    }
+
     pub fn stop(mut self) -> ScreenRecording {
         let duration_ms = self.elapsed_ms();
         self.stopping.store(true, Ordering::Release);
@@ -1647,6 +1652,7 @@ mod tests {
             !session.has_frames(),
             "synthetic pixels are not a real capture"
         );
+        assert!(session.failed_to_start(), "no sampler and no real frames must fail start");
         push_candidate(
             &session.frames,
             &session.real_frame_seen,
@@ -1655,6 +1661,7 @@ mod tests {
             true,
         );
         assert!(session.has_frames(), "real pixels unlock agent Stop");
+        assert!(!session.failed_to_start(), "real frames distinguish started from startup failure");
     }
 
     #[test]

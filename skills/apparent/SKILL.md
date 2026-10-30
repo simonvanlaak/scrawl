@@ -78,13 +78,25 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Other commands
 
-For a running GUI app on macOS or Linux, `apparent capture state` prints its live phase and
-`capture_id` (only while pending or recording). If you initiated that capture and have retained
-its ID, `apparent capture stop <capture_id>` saves it after frames arrive, while
-`apparent capture cancel <capture_id>` discards it even when the portal is pending. Do not use
-the record shortcut as a stop toggle or act on an ID you did not establish as yours. A wrong ID
-fails; repeating an ended ID does nothing. These commands do not control a separate timed
-`record --duration` invocation and never send a capture to a session.
+For a running GUI app on macOS or Linux, use `apparent capture start --wait --timeout 30`
+to start through the normal interaction-aware screen path and wait for a real frame. It refuses
+occupied sessions rather than toggling. Retain the reply's top-level `capture_id`, including on
+failure or timeout; do not infer ownership from `capture state`. For driver crash recovery,
+retain your own 32-hex request ID first and pass `--request-id <id>`; retrying that ID cannot
+start twice. Portal consent and existing permission checks still apply; no app is auto-launched.
+
+`apparent capture stop <id> --wait --timeout 60` stops only that ID and returns `status: "saved"`
+with its exact `bundle_path` only after successful save. Without `--wait`, Stop still returns
+acceptance, not completion. Stop while starting is `not_ready`; `capture cancel <id>` can discard
+that owned pending capture. `capture inspect <id>` recovers its status/result after a timeout or
+disconnect; retrying Stop cannot stop a newer capture. Receipts survive only in this GUI process,
+not an app restart. Rejected start IDs remain rejected; use a new ID only for a deliberate new take.
+
+`capture state` remains a read-only global phase/active-ID view. Keep stdout JSON separate from
+stderr; failures exit nonzero. Never use a shortcut toggle, `latest` or a directory scan to recover
+an owned take. These commands do not control timed `record --duration`, change export audio,
+send to a session or add automatic paste. See `docs/agent-video-workflow.md` in the repository
+for bounded recovery and video QA. Check installed help before using new flags on an older build.
 
 ```sh
 apparent inspect <bundle>               # summary.md, the text above

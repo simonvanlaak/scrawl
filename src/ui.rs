@@ -837,6 +837,8 @@ pub struct ApparentCoordinator {
     capture_generation: u64,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     agent_capture_id: Option<String>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    agent_captures: crate::agent_capture::Registry,
     #[cfg(target_os = "linux")]
     agent_finishing: bool,
     last_live_no_words: bool,
@@ -952,6 +954,8 @@ impl ApparentCoordinator {
             capture_generation: 0,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             agent_capture_id: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            agent_captures: crate::agent_capture::Registry::default(),
             #[cfg(target_os = "linux")]
             agent_finishing: false,
             last_live_no_words: false,
@@ -1160,13 +1164,49 @@ impl ApparentCoordinator {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn agent_request(&mut self, request: crate::agent_capture::Request, cx: &mut Context<Self>) {
-        use crate::agent_capture::{Action, Outcome, decide};
+        use crate::agent_capture::{Action, Outcome};
+        // Report an ended sampler, but never discard another session as a side
+        // effect of State, Inspect or a competing Start. Cancellation stays explicit.
+        if matches!(self.active_recording.as_ref().map(|r| &r.source),
+            Some(CaptureSource::Screen { session, .. }) if session.failed_to_start()) {
+            if let Some(id) = &self.agent_capture_id {
+                self.agent_captures.set(&id, "failed", None, Some("start_failed"));
+            }
+        }
         let before = self.agent_state();
+        if before.phase == crate::agent_capture::Phase::Recording
+            && let Some(id) = &before.capture_id {
+            self.agent_captures.set(id, "recording", None, None);
+        }
+        if let Some((Action::Start, id)) = &request.action {
+            let occupied = self.lab || self.active_recording.is_some()
+                || self.is_selecting() || self.is_processing()
+                || self.iphone_preview.is_some() || self.agent_capture_id.is_some()
+                || self.recording_shortcut_key;
+            if self.agent_captures.admit(id, occupied, request.expired()) {
+                self.agent_capture_id = Some(id.clone());
+                self.record_screen_now(cx);
+                if self.active_recording.is_none() {
+                    self.agent_capture_id = None;
+                    self.agent_captures.set(id, "failed", None, Some("start_failed"));
+                }
+            }
+            let _ = request.reply.send(self.agent_captures.inspect(id).to_string());
+            return;
+        }
+        if let Some((Action::Inspect, id)) = &request.action {
+            let _ = request.reply.send(self.agent_captures.inspect(id).to_string());
+            return;
+        }
+        if request.action.is_some() && request.expired() {
+            let _ = request.reply.send(serde_json::json!({"error": "admission_expired", "state": before}).to_string());
+            return;
+        }
         let outcome = request
             .action
             .as_ref()
-            .map(|(action, id)| decide(&before, *action, id));
-        match (request.action, outcome) {
+            .map(|(action, id)| self.agent_captures.decide(&before, *action, id));
+        match (&request.action, outcome) {
             (Some((Action::Stop, _)), Some(Outcome::Stopping)) => {
                 #[cfg(target_os = "linux")]
                 { self.agent_finishing = true; }
@@ -1176,7 +1216,16 @@ impl ApparentCoordinator {
             _ => {}
         }
         let response = match outcome {
-            Some(outcome) => serde_json::json!({"outcome": outcome, "state": self.agent_state()}),
+            Some(outcome) => {
+                let mut response = self.agent_captures.inspect(&request.action.as_ref().unwrap().1);
+                // Preserve non-wait Stop/Cancel's existing outcome semantics.
+                response["outcome"] = serde_json::json!(outcome);
+                response["state"] = serde_json::json!(self.agent_state());
+                if outcome == Outcome::AlreadyEnded && response["status"] == "unknown" {
+                    response["error"] = serde_json::Value::Null;
+                }
+                response
+            },
             None => serde_json::json!({"state": before}),
         };
         let _ = request.reply.send(response.to_string());
@@ -1716,7 +1765,9 @@ impl ApparentCoordinator {
     /// its target and overlay.
     fn discard_recording(&mut self) -> Option<(TargetInfo, Option<LaserOverlay>)> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        { self.agent_capture_id = None; }
+        if let Some(id) = self.agent_capture_id.take() {
+            self.agent_captures.set(&id, "cancelled", None, None);
+        }
         let rec = self.active_recording.take()?;
         let _ = self.telemetry.finish_session();
         match rec.source {
@@ -2785,11 +2836,12 @@ impl ApparentCoordinator {
         whiteboard::reset_for_capture(&self.whiteboard);
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            let Ok(id) = crate::agent_capture::new_id() else {
+            let Ok(id) = self.agent_capture_id.clone().map_or_else(crate::agent_capture::new_id, Ok) else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
                 self.cancel_recording(cx);
                 return;
             };
+            self.agent_captures.begin(&id);
             self.agent_capture_id = Some(id);
         }
         self.begin_playback();
@@ -3134,7 +3186,11 @@ impl ApparentCoordinator {
             return;
         };
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        { self.agent_capture_id = None; }
+        let finishing_id = self.agent_capture_id.take();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(id) = &finishing_id {
+            self.agent_captures.set(id, "processing", None, None);
+        }
         let feedback_capture = std::mem::take(&mut self.feedback_capture);
         #[cfg(target_os = "linux")]
         let auto_active = !std::mem::take(&mut self.agent_finishing)
@@ -3264,6 +3320,12 @@ impl ApparentCoordinator {
                         return;
                     }
                     let (finalized, duration_ms) = result;
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if let Some(id) = &finishing_id {
+                        coord.agent_captures.finish(id, finalized.as_ref()
+                            .map(|(dir, _, _)| dir.as_path())
+                            .map_err(|error| format!("{error:#}")));
+                    }
                     coord.completed_dir = None;
                     let (dir, bundle, _) = match finalized {
                         Ok(capture) => capture,

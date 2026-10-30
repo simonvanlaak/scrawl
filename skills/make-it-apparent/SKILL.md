@@ -27,7 +27,7 @@ For a browser-only change, an existing browser recorder may be more precise **if
 
 ## Record the proof with Apparent
 
-For polished desktop demos, use the app's interactive recording shortcut to start and finish: it collects the clicks, marks and cursor path that drive automatic zoom. Check the installed app's capabilities and input permissions first. Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
+For polished desktop demos, start through the app's interactive recording shortcut: it collects the clicks, marks and cursor path that drive automatic zoom. For agent-authored videos, prefer `apparent capture stop <owned_id>` to hunting for Finish with OCR; require the visible button only when that button is the claim being tested. Follow [the agent video workflow](../../docs/agent-video-workflow.md) for ownership, readiness and saved-bundle checks. Check the installed app's capabilities and input permissions first. Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
 
 ```sh
 apparent record --window 'Window title or app' --duration 15 --out /absolute/private/path/walkthrough.apparent
@@ -52,6 +52,14 @@ Do not invent a frame-rate flag for `apparent record`; set it during export or b
 ## Hand it back
 
 Embed or link the **verified playable file** in a channel the viewer can reach. Give one sentence for the change, the exact build/environment, and the principal limit (“local Linux build,” “mocked backend,” “browser only,” or “does not prove persistence”). Include a before/after image or timestamp when that makes inspection faster. A path on an inaccessible machine is not delivery. Do not upload, post to a PR, send to a person, or publish the raw or edited footage without authorization for that destination; attachment visibility may inherit repository visibility. If recording or delivery is blocked, say precisely which step failed and provide the best truthful screenshot or written evidence instead. Never claim a playable video exists until you have opened it.
+
+## Agent recording trial lessons
+
+- Wait for a successful `capture state` response, not merely a socket pathname. Require idle/null before initiating your own capture, then recording with its ID before acting. Never adopt or stop a capture that was already active.
+- Derive gestures from settled window bounds and verify the visible mark before continuing. A successful input command proves only that input was accepted.
+- Read state again immediately before the owned-ID stop. The command's ID check protects against a new capture starting between read and stop. A `stopping` reply proves only that finalization began; verify the exact new bundle and ended state without issuing another stop. If Finish already ended the take, verify that result rather than treating it as a controller failure.
+- Tie QA grids and cue-boundary frames to the final movie's hash; regenerate them after every edit. Inspect the actual deliverable before diagnosing a defect from an old grid.
+- Keep a private attempt ledger with build/runner identity, elapsed times, retries and evidence paths. Separate harness failures from product defects. When comparing workflow-only retests, keep app and runner bytes fixed; disclose a different stop route and measure readable holds separately. Do not call different routes a Finish-button benchmark or infer total-time improvements from unequal setup.
 
 ## Failure traps
 

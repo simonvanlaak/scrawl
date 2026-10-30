@@ -65,6 +65,10 @@ socket cannot answer. Neither sends a capture to a chat; finishing uses the ordi
 and clipboard path. A `stopping` reply means finalization has begun, not that the bundle has
 already been saved; read state again to observe processing or completion.
 
+For an agent-authored proof video, see [Agent video workflow](agent-video-workflow.md):
+start ownership, settled input geometry, bounded completion checks and final-file QA.
+These are driver practices for the existing controls, not new recording commands.
+
 ## Capture history
 
 In **Open Latest Capture**, the review window shows Newer and Older buttons and a position in the capture history. It reads completed `.apparent` bundles from the configured captures directory in reverse creation order, skips cancelled or invalid manifests, and loads images for the selected capture only. The first and last entries have no button past the end. The review window's Copy and Show in Files act on the capture currently open, not the newest one.

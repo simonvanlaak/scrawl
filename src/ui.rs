@@ -1224,6 +1224,16 @@ impl ApparentCoordinator {
             }
             Event::Grants(grants) => {
                 self.note_grants(&grants);
+                // A single app-wide Mac poller feeds both windows and the capture gate.
+                #[cfg(target_os = "macos")]
+                if let Some(session) = self.settings.as_mut() {
+                    session.event(
+                        crate::settings::Event::Grants(grants.clone()),
+                        &mut crate::settings::AppHost {
+                            telemetry: &self.telemetry,
+                        },
+                    );
+                }
                 self.onboarding
                     .as_mut()
                     .map_or(Effect::None, |session| session.grants(grants))
@@ -5729,9 +5739,41 @@ pub fn run_app(
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let agent_rx = crate::agent_capture::listen().map_err(|error| apparent_log(format!("Agent capture control unavailable: {error:#}"))).ok();
 
-        // Onboarding opens on first launch, or for a permission that went away.
         let mut onboarding_initialized = screenshot_out.is_some()
             || std::env::var_os("APPARENT_NO_ONBOARDING").is_some();
+        // Keep the Mac gate fresh even with Settings/onboarding closed. Helper processes
+        // run off the UI thread; only the first successful read may open onboarding.
+        #[cfg(target_os = "macos")]
+        if screenshot_out.is_none() {
+            let sender = telemetry.ui_sender.clone();
+            let initialized_sender = sender.clone();
+            let mut first_poll = true;
+            let mut launch = std::env::var_os("APPARENT_NO_ONBOARDING").is_none();
+            std::thread::spawn(move || {
+                crate::onboarding::poll_grants(
+                    crate::onboarding::read_grants,
+                    move |grants| {
+                        let event = if std::mem::take(&mut launch) {
+                            crate::onboarding::Event::Launch(grants)
+                        } else {
+                            crate::onboarding::Event::Grants(grants)
+                        };
+                        sender.send(LiveOverlayEvent::Onboarding(event)).is_ok()
+                    },
+                    move || {
+                        // Preserve native URL launch's startup barrier, even if the
+                        // first helper read fails. Successful Launch goes first.
+                        if std::mem::take(&mut first_poll) {
+                            let _ =
+                                initialized_sender.send(LiveOverlayEvent::OnboardingInitialized);
+                        }
+                        std::thread::sleep(Duration::from_millis(500));
+                    },
+                );
+            });
+        }
+        // Onboarding opens on first launch, or for a permission that went away.
+        #[cfg(not(target_os = "macos"))]
         if !onboarding_initialized {
             let sender = telemetry.ui_sender.clone();
             std::thread::spawn(move || {

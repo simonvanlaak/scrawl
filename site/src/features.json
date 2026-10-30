@@ -32,6 +32,17 @@
       "docs": ["README.md#saved-device-bundles", "docs/iphone-and-routing.md"]
     },
     {
+      "id": "site-social-preview",
+      "group": "install",
+      "name": "Website link preview",
+      "says": "Shared homepage links declare a minimal wide Apparent wordmark image for Open Graph and Twitter large-image cards, without requiring JavaScript.",
+      "status": "branch:t3/share-picker-visual-preview",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Candidate only. Deployment and a fresh receiver unfurl are required; existing previews may remain cached.",
+      "docs": ["site/docs/social-preview.md"]
+    },
+    {
       "id": "native-launch",
       "group": "install",
       "name": "Open the installed app by URL",
@@ -65,6 +76,7 @@
     },
     {
       "id": "site-belief-pond",
+      "added": "2026-10-30",
       "group": "install",
       "name": "Interactive homepage belief",
       "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
@@ -203,7 +215,7 @@
       "status": "main",
       "added": "2026-10-27",
       "platforms": ["mac", "linux"],
-      "note": "The board is captured as a window in the video and its final state is a paper tile, not a separate desktop-ink mark. Available from the recording controls by default on macOS and Linux.",
+      "note": "Available from the recording controls by default on macOS and Linux. Carbon toolbar, lilac controls and mark, Host Grotesk type, and warm Paper canvas; the final drawing tile stays plain white without UI chrome. The board is captured as a window in the video, not a separate desktop-ink mark.",
       "docs": ["docs/capture.md", "docs/linux.md"]
     },
     {
@@ -252,6 +264,7 @@
     },
     {
       "id": "agent-capture-control",
+      "added": "2026-10-28",
       "group": "record",
       "name": "Local capture inspection and explicit stop/cancel",
       "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
@@ -918,6 +931,7 @@
 
     {
       "id": "export-cli",
+      "added": "2026-10-29",
       "group": "export",
       "name": "apparent export",
       "says": "One .mp4 with ink, pins, clicks and aligned audio. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out and explicit crops are respected.",
@@ -1027,6 +1041,7 @@
     },
     {
       "id": "onboarding",
+      "added": "2026-10-29",
       "group": "install",
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",

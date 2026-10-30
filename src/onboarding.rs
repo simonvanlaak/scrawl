@@ -640,7 +640,9 @@ impl Flow {
 
 /// Required permissions that keep ⌥⇧S from recording now. Screen Recording and Accessibility
 /// are read in this process (a Screen Recording grant it can't use yet still blocks;
-/// Accessibility is live); Microphone comes from the last fresh read.
+/// Accessibility is live); Microphone comes from the last fresh read. On macOS a fresh
+/// Screen Recording denial also blocks: this process can retain a successful preflight/probe
+/// after revocation until it quits.
 pub fn missing_to_record(
     grants: Option<&Grants>,
     screen_usable: bool,
@@ -649,7 +651,11 @@ pub fn missing_to_record(
     Permission::REQUIRED
         .into_iter()
         .filter(|p| match p {
-            Permission::ScreenRecording => !screen_usable,
+            Permission::ScreenRecording => {
+                !screen_usable
+                    || (cfg!(target_os = "macos")
+                        && grants.is_some_and(|g| !g.usable(Permission::ScreenRecording)))
+            }
             Permission::Accessibility => !accessibility,
             p => grants.is_some_and(|g| !g.granted(*p)),
         })
@@ -863,8 +869,27 @@ enum Transport {
     InProcess(Option<flume::Sender<serde_json::Value>>),
 }
 
-/// The open welcome window: the `Flow`, the window drawing it, and a poller re-reading the
-/// grants every 0.5 s so each row's check appears by itself.
+/// Re-read permissions for the app's lifetime, not a permission window's lifetime. The
+/// caller owns delivery; a closed receiver stops the worker. Injection keeps the refresh
+/// path testable without asking the OS for permissions.
+#[cfg(any(target_os = "macos", test))]
+pub fn poll_grants(
+    mut read: impl FnMut() -> Option<Grants>,
+    mut deliver: impl FnMut(Grants) -> bool,
+    mut pause: impl FnMut(),
+) {
+    loop {
+        if let Some(grants) = read()
+            && !deliver(grants)
+        {
+            break;
+        }
+        pause();
+    }
+}
+
+/// The open welcome window: the `Flow` and the window drawing it. On macOS the app
+/// supplies permission updates even while this window is closed; other platforms poll here.
 pub struct Session {
     flow: Flow,
     transport: Transport,
@@ -881,7 +906,9 @@ impl Session {
         shortcut: &str,
         events: impl Fn(Event) + Send + Sync + Clone + 'static,
     ) -> anyhow::Result<Self> {
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::AtomicBool;
+        #[cfg(not(target_os = "macos"))]
+        use std::sync::atomic::Ordering;
 
         let transport = if cfg!(not(target_os = "macos")) {
             let (sender, receiver) = flume::unbounded();
@@ -897,7 +924,9 @@ impl Session {
         };
 
         let polling = std::sync::Arc::new(AtomicBool::new(true));
+        #[cfg(not(target_os = "macos"))]
         let alive = std::sync::Arc::clone(&polling);
+        #[cfg(not(target_os = "macos"))]
         std::thread::spawn(move || {
             while alive.load(Ordering::Acquire) {
                 if let Some(grants) = read_grants()
@@ -1894,5 +1923,77 @@ mod tests {
         // The helper may see a new screen grant before the running app does.
         assert_eq!(statuses[&ScreenRecording], Status::Granted);
         assert_eq!(statuses[&Microphone], Status::Granted);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn screen_revocation_blocks_recording_despite_a_cached_success() {
+        let mut grants = Grants {
+            statuses: BTreeMap::from([
+                (Accessibility, Status::Granted),
+                (ScreenRecording, Status::Granted),
+                (Microphone, Status::Granted),
+            ]),
+            screen_needs_relaunch: false,
+        };
+        assert!(missing_to_record(Some(&grants), true, true).is_empty());
+        for status in [Status::NotDetermined, Status::Denied] {
+            grants.statuses.insert(ScreenRecording, status);
+            assert_eq!(
+                missing_to_record(Some(&grants), true, true),
+                vec![ScreenRecording],
+                "a fresh screen denial must override a cached successful probe"
+            );
+        }
+        grants.statuses.insert(ScreenRecording, Status::Granted);
+        assert!(missing_to_record(Some(&grants), true, true).is_empty());
+        grants.screen_needs_relaunch = true;
+        assert_eq!(
+            missing_to_record(Some(&grants), true, true),
+            vec![ScreenRecording]
+        );
+        assert_eq!(
+            missing_to_record(Some(&grants), false, true),
+            vec![ScreenRecording]
+        );
+    }
+
+    #[test]
+    fn app_permission_refresh_observes_revocation_without_a_window() {
+        let mut reads = vec![
+            Some(grants(&ALL)),
+            None, // A failed helper read must not end the app-wide worker.
+            Some(Grants {
+                statuses: BTreeMap::from([
+                    (Accessibility, Status::Granted),
+                    (ScreenRecording, Status::Denied),
+                    (Microphone, Status::Granted),
+                ]),
+                screen_needs_relaunch: false,
+            }),
+            Some(grants(&ALL)),
+        ]
+        .into_iter();
+        let mut admission = Vec::new();
+        let mut pauses = 0;
+        // No Session/Settings exists here: the application owns the refresh and delivery.
+        poll_grants(
+            || reads.next().expect("the receiver must stop the worker"),
+            |fresh| {
+                admission.push(missing_to_record(Some(&fresh), true, true));
+                admission.len() < 3
+            },
+            || pauses += 1,
+        );
+        assert_eq!(pauses, 3);
+        assert_eq!(admission.len(), 3);
+        assert!(admission[0].is_empty());
+        if cfg!(target_os = "macos") {
+            assert_eq!(admission[1], vec![ScreenRecording]);
+        } else {
+            // Linux admission remains portal-owned, even with a cached helper denial.
+            assert!(admission[1].is_empty());
+        }
+        assert!(admission[2].is_empty());
     }
 }

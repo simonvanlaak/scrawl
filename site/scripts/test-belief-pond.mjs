@@ -50,14 +50,27 @@ try{
   await page.locator('#make-room').focus();assert.equal(await page.evaluate(()=>document.activeElement.id),'make-room');await page.keyboard.press('Enter');
   assert.equal(await page.locator('#study').getAttribute('data-state'),'moving');
   const animationCount=await page.evaluate(()=>document.querySelector('apparent-belief').getAnimations({subtree:true}).length);await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>document.querySelector('apparent-belief').getAnimations({subtree:true}).length),animationCount,'reentry guarded');
-  await page.waitForTimeout(480);
-  const flight={left:await box('.pair-left'),right:await box('.pair-right'),frog:await box('.newcomer')};
+  // Sample the actual apex, not a wall-clock delay plus several protocol trips.
+  // Pause every scene animation so screenshots and assertions see the same frame.
+  await page.waitForFunction(()=>document.querySelector('.newcomer').dataset.pose==='air');
+  const flight=await page.evaluate(async()=>{
+    const animations=document.querySelector('apparent-belief').getAnimations({subtree:true});
+    const jump=animations.find(a=>a.effect.target.matches('.newcomer')&&a.effect.getKeyframes().some(f=>f.transform));
+    if(!jump)throw new Error('Expected an active newcomer jump');
+    animations.forEach(a=>a.pause());
+    await Promise.all(animations.map(a=>a.ready));
+    const apex=jump.effect.getTiming().duration*.54;
+    animations.forEach(a=>{a.currentTime=apex;});
+    const bounds=selector=>document.querySelector(selector).getBoundingClientRect().toJSON();
+    return {left:bounds('.pair-left'),right:bounds('.pair-right'),frog:bounds('.newcomer'),heading:bounds('#belief')};
+  });
   assert(Math.abs(flight.left.x-initial.left.x)<1&&Math.abs(flight.right.x-initial.right.x)<1,'waiting frogs do not shuffle');
   assert(flight.frog.y<initial.frog.y-width*.055,'one high airborne arc, not a ground slide');
   assert(flight.frog.x>initial.frog.x+width*.04,'jump travels right');
   assert.equal(await page.locator('.newcomer').getAttribute('data-pose'),'air');
-  const heading=await box('#belief');assert(flight.frog.y>heading.y+heading.height,'jump stays clear of belief');
+  assert(flight.frog.y>flight.heading.bottom,`jump stays clear of belief at apex: ${JSON.stringify(flight)}`);
   await page.screenshot({path:`${evidence}/${name}-airborne.png`});
+  await page.evaluate(()=>document.querySelector('apparent-belief').getAnimations({subtree:true}).forEach(a=>a.play()));
   await page.waitForFunction(()=>document.querySelector('#study').dataset.state==='hugged');
   assert.equal(await page.locator('.hug').evaluate(e=>getComputedStyle(e).opacity),'1');
   assert.equal(await page.locator('#make-room').textContent(),'Again');

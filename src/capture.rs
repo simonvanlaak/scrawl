@@ -752,11 +752,29 @@ pub(crate) struct Sampler {
     pub stopping: Arc<AtomicBool>,
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
+    pub real_frame_seen: Arc<AtomicBool>,
     pub video_offset_ms: Arc<AtomicU64>,
     #[cfg(target_os = "macos")]
     pub unsafe_video: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     pub stop_requested_ms: Arc<AtomicU64>,
+}
+
+/// Synthetic fallback pixels can be kept for diagnostics, but never unlock agent Stop.
+pub(crate) fn push_candidate(
+    frames: &Mutex<CandidateBuffer>,
+    real_frame_seen: &AtomicBool,
+    frame: RgbaFrame,
+    urgent: bool,
+    real: bool,
+) {
+    frames
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(frame, urgent);
+    if real {
+        real_frame_seen.store(true, Ordering::Release);
+    }
 }
 
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture
@@ -766,6 +784,7 @@ pub struct ScreenCaptureSession {
     stopping: Arc<AtomicBool>,
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
+    real_frame_seen: Arc<AtomicBool>,
     video_offset_ms: Arc<AtomicU64>,
     #[cfg(target_os = "macos")]
     unsafe_video: Arc<AtomicBool>,
@@ -785,6 +804,7 @@ impl ScreenCaptureSession {
         let stopping = Arc::new(AtomicBool::new(false));
         let urgent_snapshot = Arc::new(AtomicBool::new(true));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
+        let real_frame_seen = Arc::new(AtomicBool::new(false));
         let video_offset_ms = Arc::new(AtomicU64::new(0));
         // A crashed sampler cannot certify a movie as prompt-free.
         #[cfg(target_os = "macos")]
@@ -795,6 +815,7 @@ impl ScreenCaptureSession {
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
+        let thread_real_frame_seen = Arc::clone(&real_frame_seen);
         let thread_offset = Arc::clone(&video_offset_ms);
         #[cfg(target_os = "macos")]
         let thread_unsafe_video = Arc::clone(&unsafe_video);
@@ -812,6 +833,7 @@ impl ScreenCaptureSession {
                     stopping: thread_stopping,
                     urgent: thread_urgent,
                     frames: thread_frames,
+                    real_frame_seen: thread_real_frame_seen,
                     video_offset_ms: thread_offset,
                     #[cfg(target_os = "macos")]
                     unsafe_video: thread_unsafe_video,
@@ -826,6 +848,7 @@ impl ScreenCaptureSession {
             stopping,
             urgent_snapshot,
             frames,
+            real_frame_seen,
             video_offset_ms,
             #[cfg(target_os = "macos")]
             unsafe_video,
@@ -845,6 +868,11 @@ impl ScreenCaptureSession {
 
     pub fn elapsed_ms(&self) -> u64 {
         self.started_at.elapsed().as_millis() as u64
+    }
+
+    /// A portal or ScreenCaptureKit session is still pending until a real frame arrives.
+    pub fn has_frames(&self) -> bool {
+        self.real_frame_seen.load(Ordering::Acquire)
     }
 
     pub fn stop(mut self) -> ScreenRecording {
@@ -1872,6 +1900,41 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_candidate_does_not_make_agent_capture_ready() {
+        let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
+        let seen = Arc::new(AtomicBool::new(false));
+        push_candidate(
+            &frames,
+            &seen,
+            crate::render::render_synthetic_demo_frame(1280, 800, 0, 0),
+            false,
+            false,
+        );
+        let session = ScreenCaptureSession {
+            started_at: Instant::now(),
+            stopping: Arc::new(AtomicBool::new(false)),
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames,
+            real_frame_seen: seen,
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: None,
+            _recording: crate::retention::Recording::start(),
+        };
+        assert!(
+            !session.has_frames(),
+            "synthetic pixels are not a real capture"
+        );
+        push_candidate(
+            &session.frames,
+            &session.real_frame_seen,
+            RgbaFrame::new(1, 1, 1, vec![1, 2, 3, 255]),
+            false,
+            true,
+        );
+        assert!(session.has_frames(), "real pixels unlock agent Stop");
+    }
+
+    #[test]
     fn screen_stop_joins_worker_before_collecting_its_final_media() {
         let stopping = Arc::new(AtomicBool::new(false));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
@@ -1897,6 +1960,7 @@ mod tests {
             stopping,
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(120)),
             #[cfg(target_os = "macos")]
             unsafe_video: Arc::new(AtomicBool::new(false)),
@@ -2390,6 +2454,7 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+            real_frame_seen: Arc::new(AtomicBool::new(false)),
             video_offset_ms: Arc::new(AtomicU64::new(0)),
             #[cfg(target_os = "macos")]
             unsafe_video: Arc::new(AtomicBool::new(false)),

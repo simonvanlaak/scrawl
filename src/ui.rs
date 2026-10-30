@@ -785,6 +785,10 @@ pub struct ApparentCoordinator {
     telemetry: Arc<SharedCaptureTelemetry>,
     whiteboard: Rc<RefCell<whiteboard::Board>>,
     active_recording: Option<ActiveRecording>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    agent_capture_id: Option<String>,
+    #[cfg(target_os = "linux")]
+    agent_finishing: bool,
     last_live_no_words: bool,
     playback: Option<crate::playback::Guard>,
     picker_metal_overlay: Option<LaserOverlay>,
@@ -895,6 +899,10 @@ impl ApparentCoordinator {
             telemetry,
             whiteboard: Rc::new(RefCell::new(whiteboard::Board::default())),
             active_recording: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            agent_capture_id: None,
+            #[cfg(target_os = "linux")]
+            agent_finishing: false,
             last_live_no_words: false,
             playback: None,
             picker_metal_overlay: None,
@@ -1065,6 +1073,62 @@ impl ApparentCoordinator {
 
     pub fn is_selecting(&self) -> bool {
         matches!(self.island_phase, IslandPhase::Selecting { .. })
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn agent_state(&self) -> crate::agent_capture::State {
+        use crate::agent_capture::{Phase, State};
+        if matches!(
+            self.active_recording.as_ref().map(|recording| &recording.source),
+            Some(CaptureSource::Lab)
+        ) {
+            return State {
+                phase: Phase::Idle,
+                capture_id: None,
+            };
+        }
+        let phase = if let Some(recording) = &self.active_recording {
+            match &recording.source {
+                CaptureSource::Screen { session, .. } if !session.has_frames() => Phase::Starting,
+                CaptureSource::Phone(session) if !session.has_recording() => Phase::Starting,
+                _ => Phase::Recording,
+            }
+        } else {
+            match self.island_phase {
+                IslandPhase::Selecting { .. } => Phase::Selecting,
+                IslandPhase::Processing => Phase::Processing,
+                IslandPhase::Completed { .. } => Phase::Completed,
+                _ => Phase::Idle,
+            }
+        };
+        State {
+            phase,
+            capture_id: self.agent_capture_id.clone(),
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn agent_request(&mut self, request: crate::agent_capture::Request, cx: &mut Context<Self>) {
+        use crate::agent_capture::{Action, Outcome, decide};
+        let before = self.agent_state();
+        let outcome = request
+            .action
+            .as_ref()
+            .map(|(action, id)| decide(&before, *action, id));
+        match (request.action, outcome) {
+            (Some((Action::Stop, _)), Some(Outcome::Stopping)) => {
+                #[cfg(target_os = "linux")]
+                { self.agent_finishing = true; }
+                self.finish_recording(cx)
+            }
+            (Some((Action::Cancel, _)), Some(Outcome::Cancelled)) => self.cancel_recording(cx),
+            _ => {}
+        }
+        let response = match outcome {
+            Some(outcome) => serde_json::json!({"outcome": outcome, "state": self.agent_state()}),
+            None => serde_json::json!({"state": before}),
+        };
+        let _ = request.reply.send(response.to_string());
     }
 
     pub fn open_onboarding(&mut self, flow: crate::onboarding::Flow) {
@@ -1557,6 +1621,8 @@ impl ApparentCoordinator {
     /// Stops the active recording and deletes its bundle, leaving the island as it is. Returns
     /// its target and overlay.
     fn discard_recording(&mut self) -> Option<(TargetInfo, Option<LaserOverlay>)> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        { self.agent_capture_id = None; }
         let rec = self.active_recording.take()?;
         let _ = self.telemetry.finish_session();
         match rec.source {
@@ -2310,7 +2376,10 @@ impl ApparentCoordinator {
         let dt = (real * motion::time_scale()).min(0.025);
         if let IslandPhase::Completed { finished_at, .. } = self.island_phase
             && finished_at.elapsed() >= Duration::from_millis(25_000)
-            && self.completed_note.as_deref() != Some("Saved · check draft")
+            && !matches!(
+                self.completed_note.as_deref(),
+                Some("Saved · paste manually" | "Saved · open bundle (copy failed)")
+            )
         {
             self.set_island_phase(IslandPhase::Dismissing);
         }
@@ -2613,6 +2682,15 @@ impl ApparentCoordinator {
             return;
         }
         whiteboard::reset_for_capture(&self.whiteboard);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let Ok(id) = crate::agent_capture::new_id() else {
+                apparent_log("Could not create capture identity; refusing an untracked recording");
+                self.cancel_recording(cx);
+                return;
+            };
+            self.agent_capture_id = Some(id);
+        }
         self.begin_playback();
         if let Ok(mut status) = CAPTURE_STATUS.lock() {
             *status = None;
@@ -2816,6 +2894,15 @@ impl ApparentCoordinator {
         whiteboard::reset_for_capture(&self.whiteboard);
         self.begin_playback();
         self.remember_mode(SelectionMode::Iphone);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let Ok(id) = crate::agent_capture::new_id() else {
+                apparent_log("Could not create capture identity; refusing an untracked recording");
+                self.cancel_recording(cx);
+                return;
+            };
+            self.agent_capture_id = Some(id);
+        }
         self.recording_shortcut_key = false;
         self.selection_drag = None;
         self.hovered_window = None;
@@ -2868,6 +2955,8 @@ impl ApparentCoordinator {
                 Ok(session) => session,
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    { self.agent_capture_id = None; }
                     self.telemetry.finish_session();
                     let _ = std::fs::remove_dir_all(&bundle_dir);
                     self.dismiss_island(cx);
@@ -2933,9 +3022,12 @@ impl ApparentCoordinator {
         let Some(rec) = self.active_recording.take() else {
             return;
         };
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        { self.agent_capture_id = None; }
         let feedback_capture = std::mem::take(&mut self.feedback_capture);
         #[cfg(target_os = "linux")]
-        let auto_active = crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
+        let auto_active = !std::mem::take(&mut self.agent_finishing)
+            && crate::handoff::experiment(crate::linux::auto_paste::EXPERIMENT)
             && crate::linux::hyprland::running()
             && crate::linux::wayland_session()
             && !self.lab
@@ -3087,22 +3179,30 @@ impl ApparentCoordinator {
                         }
                     }
                     // Feedback stays local until the user explicitly copies or attaches it.
+                    // For the blocked automatic trial, leave only text on Ctrl+V even if
+                    // the independent clipboardImage experiment is enabled.
                     let clipboard_ready = !feedback_capture
-                        && crate::handoff::copy_bundle_to_clipboard(&dir)
-                            .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
-                            .is_ok();
+                        && (if auto_active {
+                            #[cfg(target_os = "linux")]
+                            { crate::handoff::copy_bundle_text_to_clipboard(&dir) }
+                            #[cfg(not(target_os = "linux"))]
+                            { crate::handoff::copy_bundle_to_clipboard(&dir) }
+                        } else {
+                            crate::handoff::copy_bundle_to_clipboard(&dir)
+                        })
+                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                        .is_ok();
                     #[cfg(target_os = "linux")]
                     if auto_active && clipboard_ready {
-                        let handoff_dir = dir.clone();
-                        std::thread::spawn(move || {
-                            if let Err(error) = crate::linux::auto_paste::paste_bundle(&handoff_dir) {
-                                apparent_log(format!("Automatic draft paste skipped: {error:#}"));
-                                crate::linux::shell::notify(
-                                    "Draft paste skipped",
-                                    &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", handoff_dir.display()),
-                                );
-                            }
-                        });
+                        // Do not dispatch a paste until the receiver can prove its
+                        // draft identity and acknowledge the image attachment.
+                        if let Err(error) = crate::linux::auto_paste::auto_receiver_preflight() {
+                            apparent_log(format!("Automatic draft paste skipped: {error:#}"));
+                            crate::linux::shell::notify(
+                                "Draft paste skipped",
+                                &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", dir.display()),
+                            );
+                        }
                     } else if auto_active {
                         crate::linux::shell::notify("Draft paste skipped", "Could not copy the handoff. Use the saved bundle from the paper tile.");
                     }
@@ -3112,10 +3212,11 @@ impl ApparentCoordinator {
                         // No automatic clipboard write: the completed pill must not claim
                         // that this private capture was copied.
                         coord.completed_note = Some("Saved · review".into());
-                    } else if auto_active {
-                        // A dispatched shortcut is not proof that the editor accepted either
-                        // paste. Keep the paper tile and give the user the final say.
-                        coord.completed_note = Some("Saved · check draft".into());
+                    }
+                    #[cfg(target_os = "linux")]
+                    if auto_active {
+                        // No receiver receipt: keep the manual handoff visible.
+                        coord.completed_note = Some(crate::linux::auto_paste::completion_note(clipboard_ready).into());
                     }
                     coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
                     if feedback_capture {
@@ -6013,6 +6114,8 @@ pub fn run_app(
         crate::hex::watch();
         crate::speech_model::ensure();
         let menu_rx = install_status_bar();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let agent_rx = crate::agent_capture::listen().map_err(|error| apparent_log(format!("Agent capture control unavailable: {error:#}"))).ok();
 
         // Onboarding opens on first launch, or for a permission that went away.
         if screenshot_out.is_none() && std::env::var_os("APPARENT_NO_ONBOARDING").is_none() {
@@ -6085,6 +6188,12 @@ pub fn run_app(
                     platform::poll_status_bar();
                     crate::onboarding_window::poll(cx);
                     crate::settings_window::poll(cx);
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if let Some(ref rx) = agent_rx {
+                        while let Ok(request) = rx.try_recv() {
+                            loop_coord.update(cx, |coord, cx| coord.agent_request(request, cx));
+                        }
+                    }
                     if let Some(ref rx) = menu_rx {
                         while let Ok(action) = rx.try_recv() {
                             match action {
@@ -6201,6 +6310,17 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn failed_capture_start_discards_its_identity_without_an_active_recording() {
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        coordinator.agent_capture_id = Some("pending-capture".into());
+
+        assert!(coordinator.discard_recording().is_none());
+        assert_eq!(coordinator.agent_state().capture_id, None);
+    }
 
     #[test]
     fn feedback_issue_url_opens_a_public_template_without_capture_data() {

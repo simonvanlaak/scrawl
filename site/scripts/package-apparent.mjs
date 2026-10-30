@@ -19,7 +19,7 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 for (const name of [
   "index.html", "assets", "pond", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
-  "apparent-narration-mac.mp3",
+  "Apparent-ghost-demo-v4-lilac.mp4", "Apparent-ghost-demo-v4-lilac-poster.jpg",
 ]) {
   if (!existsSync(join(dist, name))) throw new Error(`Missing required asset: ${name}`)
   cpSync(join(dist, name), join(out, name), { recursive: true })

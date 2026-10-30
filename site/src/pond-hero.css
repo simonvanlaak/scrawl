@@ -20,6 +20,27 @@
 }
 
 .pond-nav img { display: block; width: 149px; height: auto; }
+.github-stars {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgb(2 1 2 / 12%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 35%);
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.github-stars:hover { background: rgb(255 255 255 / 70%); border-color: rgb(2 1 2 / 25%); }
+.github-stars-star { color: #c18b00; }
 .pond-nav a:focus-visible,
 .pond-page button:focus-visible,
 .pond-page .pond-download a:focus-visible { outline: 3px solid #7a58c7; outline-offset: 4px; }

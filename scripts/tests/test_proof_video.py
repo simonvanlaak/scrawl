@@ -10,6 +10,9 @@ import tempfile
 import array
 import math
 
+# Resolve before subprocesses switch to synthetic fixture directories.
+FONT = str(Path(__file__).resolve().parents[2] / 'assets/fonts/HostGrotesk-Variable.ttf')
+
 spec = importlib.util.spec_from_file_location('proof', Path(__file__).parents[1] / 'proof-video.py')
 assert spec and spec.loader
 proof = importlib.util.module_from_spec(spec)
@@ -47,7 +50,7 @@ class Export(unittest.TestCase):
             cues.write_text('[[0,1,"Real evidence."]]')
             for captions in (True, False):
                 out = root / str(captions)
-                cmd = [sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'keep', '--no-voice', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+                cmd = [sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', 'keep', '--no-voice', '--font', FONT]
                 if not captions:
                     cmd += ['--no-captions']
                 result = subprocess.run(cmd, capture_output=True)
@@ -66,7 +69,7 @@ class Export(unittest.TestCase):
             self.assertLess(float(audio['start_time']) - float(video['start_time']), -0.9)
             cues = root / 'cues.json'
             cues.write_text('[[0,1,"The real screen."]]')
-            subprocess.run([sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--source-audio', 'keep', '--no-voice', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'], check=True, capture_output=True)
+            subprocess.run([sys.executable, proof.__file__, str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--source-audio', 'keep', '--no-voice', '--font', FONT], check=True, capture_output=True)
             def rms(t):
                 samples = array.array('h')
                 samples.frombytes(proof.run('ffmpeg', '-v', 'error', '-ss', t, '-i', root / 'out/share.mp4', '-t', 0.15, '-ar', 48000, '-ac', 1, '-f', 's16le', '-'))
@@ -93,7 +96,7 @@ class Communicate:
             for policy, captions in (('keep', True), ('drop', True), ('drop', False)):
                 out = root / (policy + str(captions))
                 switches = [] if captions else ['--no-captions']
-                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', *switches], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
+                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', FONT, *switches], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
                 self.assertEqual(json.loads((out / 'provenance.json').read_text())['captions'], captions)
                 movie = out / 'share.mp4'
                 def rms(t):
@@ -118,7 +121,7 @@ class Communicate:
             before = source.read_bytes()
             cues = root / 'cues.json'
             cues.write_text(json.dumps([[0, 0.8, 'Start.'], [2, 3, 'Result.']]))
-            command = [sys.executable, str(Path(proof.__file__)), str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--silent', '--source-audio', 'drop', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+            command = [sys.executable, str(Path(proof.__file__)), str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--silent', '--source-audio', 'drop', '--font', FONT]
             subprocess.run(command, check=True, capture_output=True)
             exported = root / 'out/share.mp4'
             proof.qa(exported, 3, False)

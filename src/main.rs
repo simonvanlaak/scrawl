@@ -473,6 +473,12 @@ enum Command {
         /// Output frame rate (default 60 for a 60 fps recording, else 30).
         #[arg(long)]
         fps: Option<u32>,
+        /// Replace recorded audio with local Kokoro bm_fable speech from a timed JSON script.
+        #[arg(long, conflicts_with = "no_audio")]
+        narration: Option<PathBuf>,
+        /// Deliberately omit all audio, even when a recorded track exists.
+        #[arg(long)]
+        no_audio: bool,
     },
     /// Clean up old captures now, as the app does daily: video and audio past the Keep
     /// Recordings setting go to the Trash, then whole bundles; native iPhone video is shrunk.
@@ -2351,6 +2357,8 @@ fn main() -> Result<()> {
             no_clicks,
             hevc,
             fps,
+            narration,
+            no_audio,
         } => {
             let (dir, loaded) = handoff::load_bundle(&bundle)?;
             let options = export::Options {
@@ -2363,6 +2371,11 @@ fn main() -> Result<()> {
                 hevc,
                 fps,
                 background: false,
+                audio: match (narration, no_audio) {
+                    (Some(script), false) => export::AudioPolicy::Narration(script),
+                    (None, true) => export::AudioPolicy::Silent,
+                    _ => export::AudioPolicy::Recorded,
+                },
             };
             let mut last = -1;
             let exported = export::export(&dir, &loaded, &options, &mut |fraction| {
@@ -2635,6 +2648,24 @@ mod tests {
             vec!["apparent", "walkthrough", "export", "/private/take.apparent", "--cues", "/private/cues.json", "--out-dir", "/private/share", "--source-audio", "drop", "--allow-online-tts"],
         ] {
             assert!(Cli::try_parse_from(&args).is_ok(), "walkthrough command missing: {args:?}");
+        }
+    }
+
+    #[test]
+    fn export_cli_requires_explicit_audio_choices_to_be_unambiguous() {
+        for args in [
+            vec!["apparent", "export", "capture.apparent", "--no-audio"],
+            vec!["apparent", "export", "capture.apparent", "--narration", "cues.json"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        for args in [
+            vec!["apparent", "export", "--narration"],
+            vec!["apparent", "export", "--no-audio", "--narration", "cues.json"],
+            vec!["apparent", "export", "--no-audio=false"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+
         }
     }
 

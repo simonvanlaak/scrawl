@@ -244,6 +244,10 @@ def main():
         if args.apparent is None:
             raise ValueError('bundle workflow needs the installed Apparent executable')
         command = [args.apparent, 'export', args.bundle, '--out', out / 'camera.mp4', '--fps', '30', '--crop', args.bundle_crop]
+        # Carry the explicit walkthrough policy into the ordinary exporter too.
+        # A drop choice must not require recorded audio for the camera intermediate.
+        if args.source_audio == 'drop':
+            command.append('--no-audio')
         if args.no_zoom:
             command.append('--no-zoom')
         run(*command)

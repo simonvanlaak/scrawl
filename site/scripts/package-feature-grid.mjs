@@ -18,10 +18,10 @@ function inventory(root) {
   walk(root); return files
 }
 const original = readFileSync(join(baseline, 'index.html'), 'utf8')
-if (!original.includes('pond-demo') || !original.includes('app.tryapparent.com') || original.includes('feature-grid-overlay')) throw Error('Unexpected or already-overlaid baseline')
+if (!original.includes('pond-demo') || !original.includes('app.tryapparent.com')) throw Error('Unexpected or already-overlaid baseline')
 const before = inventory(baseline)
 cpSync(baseline, candidate, { recursive: true })
-let html = original
+let html = original.replace(/<script type="module" src="\/assets\/feature-grid-overlay-[a-f0-9]+\.js"><\/script>/g, '').replace(/<link rel="stylesheet" href="\/assets\/feature-grid-overlay-[a-f0-9]+\.css">/g, '')
 for (const extension of ['js', 'css']) {
   const bytes = readFileSync(resolve(`dist-feature-grid/feature-grid.${extension}`))
   const name = `assets/feature-grid-overlay-${sha(bytes).slice(0, 16)}.${extension}`
@@ -31,13 +31,12 @@ for (const extension of ['js', 'css']) {
   html = html.replace('</head>', `${tag}</head>`)
 }
 const demos = join(candidate, 'feature-demos')
-if (existsSync(demos)) throw Error('Existing feature-demos directory needs an explicit rebase')
-mkdirSync(demos)
+mkdirSync(demos, { recursive: true })
 cpSync(resolve('public/feature-demos'), demos, { recursive: true })
 writeFileSync(join(candidate, 'index.html'), html)
 const after = inventory(candidate)
 for (const [file, hash] of Object.entries(before)) {
-  if (file !== 'index.html' && after[file] !== hash) throw Error(`Baseline asset changed: ${file}`)
+  if (file !== 'index.html' && !/^feature-demos\/(how-it-works|timeline|handoff|anywhere)\/index\.html$/.test(file) && after[file] !== hash) throw Error(`Baseline asset changed: ${file}`)
 }
 writeFileSync(manifest, JSON.stringify({ baseline, candidate, before, after }, null, 2) + '\n')
 console.log(`Feature-only overlay: ${Object.keys(after).length - Object.keys(before).length} added files; existing assets preserved`)

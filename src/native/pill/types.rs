@@ -66,6 +66,8 @@ pub struct PillSnapshot {
     pub pres: Pres,
     pub clock: String,
     pub mic_warning: Option<crate::audio::InputWarning>,
+    /// Coherent producer count, recent PCM level and arrival time; not speech evidence.
+    pub input_activity: Option<crate::audio::InputActivity>,
     pub reduced_motion: bool,
     pub style: PillStyle,
 }

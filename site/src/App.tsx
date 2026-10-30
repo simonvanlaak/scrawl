@@ -2,8 +2,7 @@ import { Demo } from "./demo/VideoDemo"
 import { BeliefPond } from "./BeliefPond"
 import { FrogPond } from "./FrogPond"
 import { GithubStars } from "./GithubStars"
-
-const REPO = "https://github.com/tryapparent/apparent"
+import { Footer } from "./Footer"
 
 export function App() {
   return (
@@ -24,10 +23,7 @@ export function App() {
         </section>
         <BeliefPond />
       </main>
-      <footer className="foot">
-        <img src="/apparent-wordmark.svg" width={130} height={30} decoding="async" alt="apparent" />
-        <a href={REPO}>GitHub</a>
-      </footer>
+      <Footer />
     </div>
   )
 }

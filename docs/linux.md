@@ -178,6 +178,25 @@ which may be newer than the still-running process; `pendingRestart` indicates th
 The update is installed for the *next* launch, not the current process. A corrupt config is
 left untouched rather than replaced when changing the channel or recording a launch.
 
+### Warm Parakeet recognizer
+
+Local Parakeet recordings use lazy cross-recording model/session reuse by default.
+Set the top-level `"warmRecognizer": false` in `~/.config/apparent/config.json`
+to disable reuse at the next recording start; remove it or set it to `true` to
+restore reuse. The retired `experiments.warmRecognizer` flag has no effect.
+A single owner worker retains at most one recognizer,
+and releases it after 30 minutes idle following the actual end of the last pause
+worker, never during capture or recognition. Cancellation waits for that worker's
+real completion before starting the idle clock, without blocking capture teardown.
+Model selection is pinned at first recognition per capture; selection/file changes
+invalidate reuse between captures, and native errors discard the unhealthy session.
+Disabling the flag or choosing Hex/command clears it at the next recording start
+once active work ends. No model RAM is reserved at app launch, and manual Paste
+is unchanged. Retaining the recognizer costs additional idle RAM (about 1 GiB in
+the two-capture Linux VM comparison). See
+[warm recognizer](keyframes-and-text.md#warm-recognizer-srcwarm_recognizerrs)
+for lifecycle and same-process replay limits.
+
 ## Not on Linux
 
 Menu-based video export (the CLI supports export), OS element lookups for `agentContext` (`ax_other.rs`), Sparkle (Linux instead updates AppImages itself) and the dev-site tab URL (`/sdk.js` registrations still route). With `agentContext` on, an unnamed Linux click says `clicked (element unavailable)` and a mark receives no OS-derived element label. AT-SPI cannot securely join an accessible top-level to the X11 window where the action occurred; matching PID, title and bounds do not rule out a stale window. Registered dev pages can still supply their own context. See `docs/keyframes-and-text.md`.

@@ -15,3 +15,9 @@ Validate with the public-site build (`APPARENT_PUBLIC_SITE=1 npm run build`), `n
 The live page can include approved overlays not yet reconciled into main. Build the isolated feature entry with `vite build --config vite.feature-grid.config.ts`, then run `node scripts/package-feature-grid.mjs BASELINE NEW_CANDIDATE PRIVATE_MANIFEST` from `site/`. It adds only the feature module/CSS and animation documents; existing files except the two new tags in `index.html` remain byte-identical. The entry mounts after the existing homepage hydrates.
 
 Stage and inventory the candidate privately. The publisher must honor `/opt/presentations/releases/.apparent-site-publish.lock`, verify the active release and baseline inventory, validate/reload the narrow `/feature-demos/*` Caddy allowlist addition, then atomically switch the site symlink. Keep the previous release and Caddyfile for guarded rollback. Verify normal public responses and browser behavior after activation. Never replace other approved live changes with a whole-site build just to add this section.
+
+## Approved homepage refinements
+
+The fourth example is an illustrative agent walkthrough inside a chat interface. It expands at playback and captions explain the ghost eyes and button changes. The button highlight follows its DOM bounds. All examples retain parent pause/play handling; captions use the same 25px design-space size. No private reference movie, narration, source frames, or captures are shipped.
+
+`homepage-revision.js` and `.css` retain the approved live footer/photo integration: handwritten names, removal of the two footer frog groups, and side-by-side LinkedIn names with the existing speech bubble. They are imported only by the isolated live overlay entry.

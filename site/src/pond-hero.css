@@ -116,19 +116,6 @@
 .pond-cover-frog:hover:not(:disabled), .pond-lounging-frog:hover { filter: drop-shadow(0 0 8px #7a58c766); }
 
 .pond-download { pointer-events: auto; margin-top: 45px; }
-.pond-download .btn-primary,
-.pond-download .btn-primary.btn-unavailable {
-  display: inline-flex;
-  background: #020102;
-  color: #fff;
-  border-radius: 0;
-  box-shadow: none;
-  padding: 13px 20px;
-  font-size: 17px;
-  font-weight: 400;
-  letter-spacing: 0;
-  transform: none;
-}
 .pond-download .download-meta { color: #524a55; }
 .pond-download .download-more { color: #524a55; }
 .pond-download .platforms { background: #eee7f2; box-shadow: inset 0 0 0 1px #d3c9d6; }

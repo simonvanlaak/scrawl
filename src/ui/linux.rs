@@ -62,6 +62,9 @@ pub(super) fn layout_size(
 /// recording to another display.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
 static PILL_WINDOW: AtomicU32 = AtomicU32::new(0);
+// Moving an override-redirect window remaps it in Hyprland, losing its pin.
+// Coalesce placements; compositor IPC stays off the UI/drag thread.
+static PILL_NEEDS_PIN: AtomicBool = AtomicBool::new(false);
 
 fn own_window(slot: &AtomicU32) -> Option<u32> {
     let id = slot.load(Ordering::Acquire);
@@ -368,6 +371,7 @@ pub(super) fn tick_pill_drag() {
     if (x - drag.panel[0]).abs() >= 1.0 || (y - drag.panel[1]).abs() >= 1.0 {
         PILL_USER_MOVED.store(true, Ordering::Release);
         x11::place(drag.id, [x, y, drag.panel[2], drag.panel[3]]);
+        PILL_NEEDS_PIN.store(true, Ordering::Release);
     }
 }
 
@@ -401,6 +405,7 @@ pub(super) fn place_hud_pill(point: [f64; 2]) {
     // Moving through detached threads lets an older placement run after a newer one when
     // the pointer crosses displays quickly. Keep the capsule's move in event order.
     x11::place(id, rect);
+    PILL_NEEDS_PIN.store(true, Ordering::Release);
 }
 
 /// The pill's window. Linux has no native shell for it: GPUI draws the capsule, its shadow and
@@ -418,7 +423,7 @@ impl Drop for PillChrome {
 }
 
 impl PillChrome {
-    pub(super) fn open(window: &mut Window, _cx: &mut App) -> Self {
+    pub(super) fn open(window: &mut Window, cx: &mut App) -> Self {
         let id = x11::window_id(window);
         if let Some(id) = id {
             PILL_WINDOW.store(id, Ordering::Release);
@@ -434,6 +439,40 @@ impl PillChrome {
             });
             x11::accept_pointer(id);
             x11::float(id, rect);
+            if linux::hyprland::running() {
+                x11::set_title(id, &linux::hyprland::pill_title(id));
+                PILL_NEEDS_PIN.store(true, Ordering::Release);
+                cx.spawn(async move |cx| {
+                    loop {
+                        cx.background_executor().timer(Duration::from_millis(120)).await;
+                        if own_window(&PILL_WINDOW) != Some(id) {
+                            return;
+                        }
+                        if !PILL_NEEDS_PIN.swap(false, Ordering::AcqRel) {
+                            continue;
+                        }
+                        let mut last_error = None;
+                        for _ in 0..8 {
+                            if own_window(&PILL_WINDOW) != Some(id) {
+                                return;
+                            }
+                            let result = cx.background_executor().spawn(async move {
+                                linux::hyprland::pin_pill(id)
+                            }).await;
+                            match result {
+                                Ok(()) => { last_error = None; break; }
+                                Err(error) => last_error = Some(error),
+                            }
+                            cx.background_executor().timer(Duration::from_millis(120)).await;
+                        }
+                        if let Some(error) = last_error {
+                            crate::capture::apparent_log(format!(
+                                "Recording pill: could not pin Hyprland window: {error}"
+                            ));
+                        }
+                    }
+                }).detach();
+            }
         }
         Self { id }
     }

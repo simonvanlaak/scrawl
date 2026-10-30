@@ -822,6 +822,20 @@ pub fn set_class(id: u32) {
     }
 }
 
+/// Gives the compositor a readable identity for an otherwise untitled popup.
+pub fn set_title(id: u32, title: &str) {
+    if let Some(x) = x() {
+        let _ = x.conn.change_property8(
+            PropMode::REPLACE,
+            id,
+            x.atom("_NET_WM_NAME"),
+            x.atom("UTF8_STRING"),
+            title.as_bytes(),
+        );
+        x.flush();
+    }
+}
+
 /// Sets a window's icon (`_NET_WM_ICON`: width, height, then ARGB pixels, for each size).
 pub fn set_icon(id: u32, data: &[u32]) {
     if let Some(x) = x() {

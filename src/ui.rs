@@ -534,10 +534,15 @@ fn status_bar_text(export: Option<String>, capture: Option<String>) -> Option<St
 }
 
 fn current_status_bar_text() -> Option<String> {
-    status_bar_text(
-        EXPORT_STATUS.lock().ok().and_then(|status| status.clone()),
-        CAPTURE_STATUS.lock().ok().and_then(|status| status.clone()),
-    )
+    let export = EXPORT_STATUS.lock().ok().and_then(|status| status.clone());
+    let capture = CAPTURE_STATUS.lock().ok().and_then(|status| status.clone());
+    // Linux retains the last export result in the menu. A capture failure must
+    // still be visible when no export is running.
+    #[cfg(target_os = "linux")]
+    if !EXPORTING.load(std::sync::atomic::Ordering::Acquire) && capture.is_some() {
+        return capture;
+    }
+    status_bar_text(export, capture)
 }
 
 fn refresh_status_bar(inbox_count: usize) {
@@ -548,8 +553,8 @@ fn refresh_status_bar(inbox_count: usize) {
     }
 }
 
-/// Exports the newest bundle to `~/Movies/Apparent/<name>.mp4` off the main thread, reporting
-/// through `EXPORT_STATUS`, then reveals the file in Finder.
+/// Export the newest bundle off the main thread. Linux asks for a destination;
+/// macOS keeps its automatic Movies/Apparent destination. Report and reveal the result.
 fn start_video_export() {
     use std::sync::atomic::Ordering;
     if EXPORTING.swap(true, Ordering::SeqCst) {
@@ -560,13 +565,26 @@ fn start_video_export() {
             *status = text;
         }
     };
+    #[cfg(target_os = "linux")]
+    say(Some("Choosing export destination…".into()));
+    #[cfg(not(target_os = "linux"))]
     say(Some("Exporting…".into()));
     let spawned = std::thread::Builder::new()
         .name("apparent-export".into())
         .spawn(move || {
             let result = crate::handoff::load_bundle(std::path::Path::new("latest")).and_then(
                 |(dir, bundle)| {
+                    #[cfg(target_os = "linux")]
+                    let out = match platform::choose_export_destination(
+                        &crate::export::default_output(&dir),
+                    )? {
+                        Some(path) => Some(path),
+                        None => return Ok(None),
+                    };
+                    #[cfg(not(target_os = "linux"))]
+                    let out = None;
                     let options = crate::export::Options {
+                        out,
                         background: true,
                         audio: crate::export::AudioPolicy::RecordedIfAvailable,
                         ..Default::default()
@@ -574,24 +592,53 @@ fn start_video_export() {
                     crate::export::export(&dir, &bundle, &options, &mut |fraction| {
                         say(Some(format!("Exporting {}%", (fraction * 100.0) as u32)));
                     })
+                    .map(Some)
                 },
             );
             match result {
-                Ok(exported) => {
+                Ok(Some(exported)) => {
                     apparent_log(format!("Exported {}", crate::export::describe(&exported)));
                     say(Some("Exported".into()));
+                    #[cfg(target_os = "linux")]
+                    crate::linux::shell::notify(
+                        "Video exported",
+                        &format!("Saved {}", exported.path.display()),
+                    );
                     let _ = crate::handoff::reveal_path(&exported.path);
                 }
+                Ok(None) => say(Some("Export cancelled".into())),
                 Err(error) => {
                     apparent_log(format!("Video export failed: {error:#}"));
+                    #[cfg(target_os = "linux")]
+                    {
+                        let detail = format!("{error:#}");
+                        say(Some(format!(
+                            "Export failed: {}",
+                            detail.chars().take(120).collect::<String>()
+                        )));
+                        crate::linux::shell::notify("Video export failed", &detail);
+                    }
+                    #[cfg(not(target_os = "linux"))]
                     say(Some("Export failed".into()));
                 }
             }
-            std::thread::sleep(Duration::from_secs(4));
-            say(None);
+            #[cfg(not(target_os = "linux"))]
+            {
+                std::thread::sleep(Duration::from_secs(4));
+                say(None);
+            }
             EXPORTING.store(false, Ordering::SeqCst);
         });
-    if spawned.is_err() {
+    if let Err(error) = spawned {
+        #[cfg(target_os = "linux")]
+        {
+            say(Some("Export failed: could not start worker; retry".into()));
+            crate::linux::shell::notify(
+                "Video export failed",
+                &format!("Could not start export worker: {error}"),
+            );
+        }
+        #[cfg(not(target_os = "linux"))]
         say(None);
         EXPORTING.store(false, Ordering::SeqCst);
     }
@@ -6287,6 +6334,7 @@ pub fn run_app(
         let loop_coord = coordinator.clone();
         cx.spawn(async move |cx| {
             let mut shown_status: Option<String> = None;
+            let mut shown_export_busy = false;
             let mut last_login_check = std::time::Instant::now();
             loop {
                 cx.background_executor()
@@ -6299,9 +6347,13 @@ pub fn run_app(
                         last_login_check = std::time::Instant::now();
                     }
                     let status = current_status_bar_text();
-                    if status != shown_status {
+                    let export_busy = EXPORTING.load(std::sync::atomic::Ordering::Acquire);
+                    if status != shown_status
+                        || (cfg!(target_os = "linux") && export_busy != shown_export_busy)
+                    {
                         refresh_status_bar(loop_coord.read(cx).inbox.len());
                         shown_status = status;
+                        shown_export_busy = export_busy;
                     }
                     platform::poll_status_bar();
                     crate::onboarding_window::poll(cx);

@@ -797,6 +797,9 @@ pub struct Config {
     /// malformed one can't reset this struct.
     #[serde(default)]
     pub transcriber: Option<String>,
+    /// Reuse Linux Parakeet across captures for 30 idle minutes (default true).
+    #[serde(default)]
+    pub warm_recognizer: Option<bool>,
     /// Lower the output volume while recording (`playback`) to `playbackLevel` percent of it.
     #[serde(default)]
     pub lower_playback: Option<bool>,
@@ -834,6 +837,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn warm_recognizer_enabled(&self) -> bool {
+        self.warm_recognizer.unwrap_or(true)
+    }
+
     /// The output volume while recording when `lowerPlayback` is on, in percent of what it was.
     pub fn recording_volume(&self) -> u8 {
         self.playback_level.unwrap_or(20).min(100)
@@ -988,6 +995,15 @@ fn config_from_value(value: serde_json::Value) -> Config {
 
 fn config() -> Config {
     load_config_from(&default_config_path())
+}
+
+/// Read at recording start; edits never interrupt an active capture. Tests use defaults.
+pub fn warm_recognizer() -> bool {
+    if cfg!(test) {
+        Config::default().warm_recognizer_enabled()
+    } else {
+        config().warm_recognizer_enabled()
+    }
 }
 
 
@@ -2699,6 +2715,31 @@ mod tests {
             assert!(set_config_value_in(&path, "autoSend", false.into()).is_err());
             assert_eq!(fs::read(&path).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn warm_recognizer_defaults_on_and_config_can_disable_it() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("config.json");
+        assert!(load_config_from(&path).warm_recognizer_enabled());
+        fs::write(&path, br#"{"unrelated":"kept","autoSend":false}"#).unwrap();
+        assert!(load_config_from(&path).warm_recognizer_enabled());
+        set_config_value_in(&path, "warmRecognizer", false.into()).unwrap();
+        let config = load_config_from(&path);
+        assert!(!config.warm_recognizer_enabled());
+        assert_eq!(config.auto_send, Some(false));
+        let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["unrelated"], "kept");
+        set_config_value_in(&path, "warmRecognizer", true.into()).unwrap();
+        assert!(load_config_from(&path).warm_recognizer_enabled());
+        // An invalid value drops only this key, leaving the default and other settings.
+        fs::write(&path, br#"{"warmRecognizer":"off","autoSend":false}"#).unwrap();
+        let config = load_config_from(&path);
+        assert!(config.warm_recognizer_enabled());
+        assert_eq!(config.auto_send, Some(false));
+        // The retired experiment cannot override an explicit top-level opt-out.
+        fs::write(&path, br#"{"warmRecognizer":false,"experiments":{"warmRecognizer":true}}"#).unwrap();
+        assert!(!load_config_from(&path).warm_recognizer_enabled());
     }
 
     #[test]

@@ -1053,8 +1053,18 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. Linux AppImages have their own updater.",
+      "note": "Mac previews use a separate Sparkle key/feed. Developer ID/notarization preparation is opt-in and awaits real-credential verification; see mac-developer-id. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
+    },
+    {
+      "id": "mac-developer-id",
+      "group": "install",
+      "name": "Developer ID signing and notarization setup",
+      "says": "The Mac preview release workflow can accept a Developer ID certificate and notarization credentials without changing its update channel.",
+      "status": "branch:t3/compare-mac-linux-release-commits",
+      "platforms": ["mac"],
+      "note": "Off by default via the repository Actions variable MAC_APPLE_SIGNING_ENABLED. Preparation only: native signing, Apple acceptance and the first signed Sparkle update still require real-credential verification. This is a release switch, not an app config setting.",
+      "docs": ["docs/mac-signing.md", "docs/release.md"]
     },
     {
       "id": "linux-appimage-updates",

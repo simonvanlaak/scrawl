@@ -9,7 +9,7 @@ use gpui::{
     App, Bounds, Context, Entity, FocusHandle, FontWeight, Image, ImageFormat, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, Point, Render, Window,
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div, point,
-    img, prelude::*, px, rgb, size,
+    img, prelude::*, px, rgb, size, svg,
 };
 
 use super::{ApparentCoordinator, pill_theme::{CARBON, PAPER}, platform};
@@ -38,7 +38,13 @@ fn toolbar_button(id: &'static str, label: &'static str, close: bool) -> gpui::S
                 .bg(rgb(if close { 0xc4a9e6 } else { 0x302442 }))
                 .border_color(rgb(LILAC))
         })
-        .child(label)
+        .when_else(
+            close,
+            |button| button.w(px(36.0)).px(px(0.0)).child(
+                svg().path(crate::icons::X).size(px(16.0)).text_color(rgb(CARBON)),
+            ),
+            |button| button.child(label),
+        )
 }
 
 #[derive(Default, Clone)]

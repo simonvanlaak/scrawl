@@ -9,3 +9,9 @@ These are illustrative examples, not live recording or agent connections. Handof
 The whiteboard movie is a silent cropped excerpt (17.8–27.4 seconds) of the already approved `public/Apparent-ghost-demo-v4-lilac.mp4`, excluding the webcam and terminal. The ghost graphics match that published demonstration. No private capture bundle or private audio is included.
 
 Validate with the public-site build (`APPARENT_PUBLIC_SITE=1 npm run build`), `node scripts/package-apparent.mjs`, and the public homepage/video tests. This section changes no desktop behavior and includes no deployment step.
+
+## Preserving the current live homepage
+
+The live page can include approved overlays not yet reconciled into main. Build the isolated feature entry with `vite build --config vite.feature-grid.config.ts`, then run `node scripts/package-feature-grid.mjs BASELINE NEW_CANDIDATE PRIVATE_MANIFEST` from `site/`. It adds only the feature module/CSS and animation documents; existing files except the two new tags in `index.html` remain byte-identical. The entry mounts after the existing homepage hydrates.
+
+Stage and inventory the candidate privately. The publisher must honor `/opt/presentations/releases/.apparent-site-publish.lock`, verify the active release and baseline inventory, validate/reload the narrow `/feature-demos/*` Caddy allowlist addition, then atomically switch the site symlink. Keep the previous release and Caddyfile for guarded rollback. Verify normal public responses and browser behavior after activation. Never replace other approved live changes with a whole-site build just to add this section.

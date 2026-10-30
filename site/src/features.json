@@ -26,7 +26,7 @@
       "group": "install",
       "name": "Animated homepage feature explanations",
       "says": "Four illustrative animations after the product video explain whiteboard feedback, the multimedia timeline, clipboard handoff, and recording across a website, app, and agent preview. Animations pause offscreen and respect reduced motion.",
-      "status": "branch:codex/website-feature-grid",
+      "status": "review:#169",
       "added": "2026-10-30",
       "platforms": [
         "mac",

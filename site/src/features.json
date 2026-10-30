@@ -22,6 +22,16 @@
   ],
   "features": [
     {
+      "id": "site-frog-footer",
+      "group": "install",
+      "name": "Frog theatre feedback footer",
+      "says": "Paper fades into the frog theatre behind a feedback invitation. A compact Made … in Berlin credit sits beside the wordmark, rotates whole phrases and respects reduced motion. Install-first and LinkedIn dialogs do not record or send feedback.",
+      "status": "main",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "docs": ["site/docs/footer-release.md"]
+    },
+    {
       "id": "site-belief-pond",
       "group": "install",
       "name": "Interactive homepage belief",
@@ -226,7 +236,7 @@
       "says": "The capsule shows the time with Finish and Cancel on the display in use; on a Mac it's a native Metal panel, black or glass.",
       "status": "stable@0.3.4",
       "platforms": ["mac", "linux"],
-      "note": "Linux draws the GPUI capsule; glass needs macOS 26.",
+      "note": "Linux draws the GPUI capsule; glass needs macOS 26. On main, the Hyprland capsule stays pinned across workspaces without pinning other app windows.",
       "config": [
         { "key": "nativePill", "value": "false", "does": "Draw the GPUI capsule instead of the Metal one (Mac)" },
         { "key": "pillStyle", "value": "\"black\" | \"glass\"", "does": "The Metal capsule's look" }

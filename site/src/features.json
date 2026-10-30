@@ -194,7 +194,7 @@
       "status": "main",
       "added": "2026-10-27",
       "platforms": ["mac", "linux"],
-      "note": "The board is captured as a window in the video and its final state is a paper tile, not a separate desktop-ink mark. Available from the recording controls by default on macOS and Linux.",
+      "note": "Available from the recording controls by default on macOS and Linux. Carbon toolbar, lilac controls and mark, Host Grotesk type, and warm Paper canvas; the final drawing tile stays plain white without UI chrome. The board is captured as a window in the video, not a separate desktop-ink mark.",
       "docs": ["docs/capture.md", "docs/linux.md"]
     },
     {

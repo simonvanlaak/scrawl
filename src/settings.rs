@@ -1805,6 +1805,9 @@ impl Session {
                         crate::retention::captures_size(&crate::handoff::default_captures_dir());
                     poll(Event::CapturesSize(size));
                 }
+                // macOS receives the app-wide permission refresh, including with this
+                // window closed. Keep the existing local polling on other platforms.
+                #[cfg(not(target_os = "macos"))]
                 if let Some(grants) = crate::onboarding::read_grants()
                     && alive.load(Ordering::Acquire)
                 {
@@ -1812,6 +1815,8 @@ impl Session {
                 } else {
                     poll(Event::Tick);
                 }
+                #[cfg(target_os = "macos")]
+                poll(Event::Tick);
                 n += 1;
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }

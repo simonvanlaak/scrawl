@@ -791,6 +791,12 @@ pub struct Config {
     pub agent_opencode: Option<String>,
     #[serde(default)]
     pub update_channel: Option<String>,
+    /// Overrides the package's automatic update check policy; manual checks are unaffected.
+    #[serde(default)]
+    pub automatic_update_checks: Option<bool>,
+    /// Overrides automatic downloads (and Linux background installation); manual checks remain explicit.
+    #[serde(default)]
+    pub automatic_update_downloads: Option<bool>,
     /// `false` turns Screen-capture auto-crop off; an object overrides its settings.
     #[serde(default)]
     pub autocrop: Option<serde_json::Value>,
@@ -846,6 +852,14 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn automatic_update_checks(&self, package_default: bool) -> bool {
+        self.automatic_update_checks.unwrap_or(package_default)
+    }
+
+    pub fn automatic_update_downloads(&self, package_default: bool) -> bool {
+        self.automatic_update_downloads.unwrap_or(package_default)
+    }
+
     pub fn warm_recognizer_enabled(&self) -> bool {
         self.warm_recognizer.unwrap_or(true)
     }
@@ -2180,6 +2194,30 @@ fn existing_keyframes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_update_policy_accepts_config_overrides_and_preserves_package_defaults() {
+        let dir = std::env::temp_dir().join(format!("apparent-update-policy-{}", crate::make_bundle_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let defaults = load_config_from(&path);
+        assert!(defaults.automatic_update_checks(true));
+        assert!(!defaults.automatic_update_checks(false));
+        assert!(defaults.automatic_update_downloads(true));
+        assert!(!defaults.automatic_update_downloads(false));
+        let bytes = br#"{"automaticUpdateChecks":false,"automaticUpdateDownloads":false,"videoExport":true,"unknown":{"dummySecret":"test-only"}}"#;
+        std::fs::write(&path, bytes).unwrap();
+        let config = load_config_from(&path);
+        assert!(!config.automatic_update_checks(true));
+        assert!(!config.automatic_update_downloads(true));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::write(&path, br#"{"automaticUpdateChecks":true,"automaticUpdateDownloads":"bad","videoExport":true}"#).unwrap();
+        let config = load_config_from(&path);
+        assert!(config.automatic_update_checks(false));
+        assert!(!config.automatic_update_downloads(false));
+        assert_eq!(config.video_export, Some(true));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]

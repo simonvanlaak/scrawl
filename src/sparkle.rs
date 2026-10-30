@@ -126,6 +126,15 @@ fn start_inner() -> Result<()> {
         let updater = updater
             .as_ref()
             .context("Sparkle controller returned no updater")?;
+        // Apply explicit JSON policy before Sparkle schedules its first cycle.
+        // Missing keys retain Sparkle/package defaults (including development builds).
+        let config = crate::handoff::load_config_from(&crate::handoff::default_config_path());
+        if let Some(enabled) = config.automatic_update_checks {
+            let _: () = msg_send![updater, setAutomaticallyChecksForUpdates: if enabled { Bool::YES } else { Bool::NO }];
+        }
+        if let Some(enabled) = config.automatic_update_downloads {
+            let _: () = msg_send![updater, setAutomaticallyDownloadsUpdates: if enabled { Bool::YES } else { Bool::NO }];
+        }
         let mut error: Option<Retained<NSError>> = None;
         let started: Bool = msg_send![updater, startUpdater: &mut error];
         if !started.as_bool() {

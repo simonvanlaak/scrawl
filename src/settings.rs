@@ -181,31 +181,37 @@ pub fn save_shortcut_in(
     kind: ShortcutKind,
     cfg: &ShortcutConfig,
 ) -> anyhow::Result<()> {
-    let mut shortcuts = read_json(path)
-        .get("shortcuts")
-        .cloned()
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
-    let map = shortcuts.as_object_mut().expect("an object");
-    if cfg.is_default_for(kind) {
-        map.remove(kind_key(kind));
-    } else if cfg.is_unset() {
-        anyhow::ensure!(
-            kind.can_unset(),
-            "the {kind:?} shortcut can't be turned off"
-        );
-        map.insert(kind_key(kind).to_owned(), serde_json::Value::Null);
-    } else {
-        map.insert(
-            kind_key(kind).to_owned(),
-            serde_json::to_value(Stored {
-                key_code: cfg.key_code,
-                modifiers: cfg.carbon_modifiers,
-                label: cfg.label.clone(),
-            })?,
-        );
-    }
-    crate::handoff::set_config_value_in(path, "shortcuts", shortcuts)
+    crate::handoff::update_config_in(path, |config| {
+        // Read the submap only after the shared writer has locked and read the
+        // latest config. A pre-lock snapshot loses concurrent sibling edits.
+        let shortcuts = config
+            .as_object_mut()
+            .expect("transaction validated an object")
+            .entry("shortcuts")
+            .or_insert_with(|| serde_json::json!({}));
+        let map = shortcuts
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("shortcuts must be an object"))?;
+        if cfg.is_default_for(kind) {
+            map.remove(kind_key(kind));
+        } else if cfg.is_unset() {
+            anyhow::ensure!(
+                kind.can_unset(),
+                "the {kind:?} shortcut can't be turned off"
+            );
+            map.insert(kind_key(kind).to_owned(), serde_json::Value::Null);
+        } else {
+            map.insert(
+                kind_key(kind).to_owned(),
+                serde_json::to_value(Stored {
+                    key_code: cfg.key_code,
+                    modifiers: cfg.carbon_modifiers,
+                    label: cfg.label.clone(),
+                })?,
+            );
+        }
+        Ok(())
+    })
 }
 
 /// The label of the paste shortcut, for hints (`⌥⇧V`, or `Alt+Shift+V`, unless changed; "the
@@ -2447,6 +2453,50 @@ mod tests {
         .unwrap();
         assert!(read_json(&path)["shortcuts"].get("record").is_none());
         assert_eq!(read_json(&path)["ingestToken"], "secret");
+    }
+
+    #[test]
+    fn shortcut_edit_uses_fresh_transaction_snapshot() {
+        let dir = TempDir::new("fresh-shortcut-snapshot");
+        let path = dir.0.join("config.json");
+        std::fs::write(&path, r#"{"shortcuts":{"future":{"keep":true}},"unknown":{"dummySecret":"test-only"},"experiments":{"clipboardImage":true}}"#).unwrap();
+        // Another writer finishes immediately before this transaction acquires its
+        // lock. A pre-lock shortcut-map snapshot would erase the sibling edit.
+        let mut ran = false;
+        crate::handoff::set_config_write_hook(Some(Box::new(move |point, path| {
+            if point == "before_lock" && !ran {
+                ran = true;
+                let path = path.to_path_buf();
+                std::thread::spawn(move || {
+                    save_shortcut_in(&path, ShortcutKind::Paste, &ShortcutConfig::unset()).unwrap();
+                    crate::handoff::set_experiment_in(&path, "clipboardImage", false).unwrap();
+                }).join().unwrap();
+            }
+        })));
+        let result = save_shortcut_in(&path, ShortcutKind::Record, &ShortcutConfig {
+            key_code: R,
+            carbon_modifiers: CTRL_OPT,
+            label: label(CTRL_OPT, "R"),
+        });
+        crate::handoff::set_config_write_hook(None);
+        result.unwrap();
+        let saved = read_json(&path);
+        assert_eq!(saved["shortcuts"].get("paste"), Some(&serde_json::Value::Null));
+        assert_eq!(saved["shortcuts"]["record"]["keyCode"], R);
+        assert_eq!(saved["shortcuts"]["future"]["keep"], true);
+        assert_eq!(saved["unknown"]["dummySecret"], "test-only");
+        assert_eq!(saved["experiments"]["clipboardImage"], false);
+    }
+
+    #[test]
+    fn shortcut_edit_preserves_invalid_config_and_submaps() {
+        let dir = TempDir::new("invalid-shortcut-config");
+        let path = dir.0.join("config.json");
+        for bytes in ["{invalid", "[]", r#"{"shortcuts":42,"future":"keep"}"#] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(save_shortcut_in(&path, ShortcutKind::Paste, &ShortcutConfig::unset()).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+        }
     }
 
     #[cfg(target_os = "linux")]

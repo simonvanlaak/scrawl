@@ -16,7 +16,17 @@ test('footer overlay preserves production and is idempotent; conflicts fail clos
     return {candidate,manifest,result}
   }
   try{
-    const first=pack(path.resolve(process.env.SITE_BASELINE),'first')
+    const baseline=path.join(tmp,'baseline')
+    fs.cpSync(fs.realpathSync(process.env.SITE_BASELINE),baseline,{recursive:true})
+    const originalHtml=fs.readFileSync(path.join(baseline,'index.html'),'utf8')
+    const alias=path.join(tmp,'baseline-alias')
+    fs.symlinkSync(baseline,alias,'dir')
+    const refused=pack(alias,'refused')
+    assert.notEqual(refused.result.status,0)
+    assert.match(refused.result.stderr,/Baseline must be a real directory, not a symlink/)
+    assert.equal(fs.existsSync(refused.candidate),false)
+    assert.equal(fs.readFileSync(path.join(baseline,'index.html'),'utf8'),originalHtml,'symlink preflight must not mutate its target')
+    const first=pack(baseline,'first')
     assert.equal(first.result.status,0,first.result.stderr)
     const second=pack(first.candidate,'second')
     assert.equal(second.result.status,0,second.result.stderr)
@@ -24,6 +34,7 @@ test('footer overlay preserves production and is idempotent; conflicts fail clos
     assert.equal((html.match(/<apparent-footer>/g)||[]).length,1)
     assert.equal((html.match(/<link rel="stylesheet" href="\/assets\/footer-/g)||[]).length,1)
     assert.equal((html.match(/<script type="module" src="\/assets\/footer-/g)||[]).length,1)
+    assert(html.indexOf('<script type="module" src="/assets/footer-')<html.indexOf('<script type="module" crossorigin src="/assets/index-'),'new behavior registers before the baseline bundle')
     assert.equal(html,fs.readFileSync(path.join(first.candidate,'index.html'),'utf8'))
     const manifest=JSON.parse(fs.readFileSync(second.manifest))
     assert.deepEqual(manifest.before,manifest.after,'unchanged repeat adds or changes nothing')

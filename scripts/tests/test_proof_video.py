@@ -10,6 +10,9 @@ import tempfile
 import array
 import math
 
+# Resolve before subprocesses switch to synthetic fixture directories.
+FONT = str(Path(__file__).resolve().parents[2] / 'assets/fonts/HostGrotesk-Variable.ttf')
+
 spec = importlib.util.spec_from_file_location('proof', Path(__file__).parents[1] / 'proof-video.py')
 assert spec and spec.loader
 proof = importlib.util.module_from_spec(spec)
@@ -56,7 +59,7 @@ class Communicate:
             cues.write_text('[[2,3,"Fixture speech."]]')
             for policy in ('keep', 'drop'):
                 out = root / policy
-                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
+                subprocess.run([sys.executable, str(proof.__file__), str(source), '--cues', str(cues), '--out-dir', str(out), '--source-audio', policy, '--allow-online-tts', '--font', FONT], env={**os.environ, 'PYTHONPATH': str(root)}, check=True, capture_output=True)
                 movie = out / 'share.mp4'
                 def rms(t):
                     samples = array.array('h')
@@ -80,7 +83,7 @@ class Communicate:
             before = source.read_bytes()
             cues = root / 'cues.json'
             cues.write_text(json.dumps([[0, 0.8, 'Start.'], [2, 3, 'Result.']]))
-            command = [sys.executable, str(Path(proof.__file__)), str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--silent', '--source-audio', 'drop', '--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+            command = [sys.executable, str(Path(proof.__file__)), str(source), '--cues', str(cues), '--out-dir', str(root / 'out'), '--silent', '--source-audio', 'drop', '--font', FONT]
             subprocess.run(command, check=True, capture_output=True)
             exported = root / 'out/share.mp4'
             proof.qa(exported, 3, False)

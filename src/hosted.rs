@@ -22,19 +22,20 @@ pub const HOSTED_SHARING: &str = "hostedSharing";
 pub struct PreparedLink {
     pub text: String,
     job: Job,
+    client: Client,
 }
 
 impl PreparedLink {
     pub fn authorized(&self) -> bool {
-        crate::handoff::experiment(HOSTED_SHARING) && Client::default().active(&self.job)
+        crate::handoff::experiment(HOSTED_SHARING) && self.client.share_active(&self.job)
     }
 }
 
 pub fn copy_link_handoff(bundle: &Path, allowed: &dyn Fn() -> bool) -> Result<PreparedLink> {
     let client = Client::default();
-    let (url, job) = client.share_prepared(bundle, allowed)?;
+    let link = client.prepare_link(bundle, allowed)?;
     start_worker();
-    Ok(PreparedLink { job, text: format!("I recorded some feedback in Apparent. Open this link for the recording, transcript and annotated screenshots: {url}. Anyone with this link can view and download this capture.") })
+    Ok(link)
 }
 
 pub fn sharing_connected() -> bool {
@@ -606,6 +607,10 @@ impl Client {
     fn share(&self, bundle: &Path) -> Result<String> {
         self.share_allowed(bundle, &|| true)
     }
+    fn prepare_link(&self, bundle: &Path, foreground: &dyn Fn() -> bool) -> Result<PreparedLink> {
+        let (url, job) = self.share_prepared(bundle, foreground)?;
+        Ok(PreparedLink { client: self.clone(), job, text: format!("I recorded some feedback in Apparent. Open this link for the recording, transcript and annotated screenshots: {url}. Anyone with this link can view and download this capture.") })
+    }
     fn share_allowed(&self, bundle: &Path, foreground: &dyn Fn() -> bool) -> Result<String> {
         self.share_prepared(bundle, foreground).map(|(url, _)| url)
     }
@@ -614,13 +619,13 @@ impl Client {
         ensure!(crate::handoff::experiment(HOSTED_SHARING), "Hosted sharing is disabled");
         let id = self.enqueue(bundle)?;
         let mut job = self.jobs()?.into_iter().find(|j| j.id == id).context("Missing queued capture")?;
-        ensure!(self.active(&job), "Upload consent changed or capture was cancelled");
+        ensure!(self.share_active(&job), "Upload consent changed or capture was cancelled");
         let credential = self.credential("upload", &job.server)?;
         let scratch = Scratch::new(&self.state)?;
         let files = snapshot(&job.bundle, &scratch.0)?;
         {
             let _lock = Lock::acquire(&self.state.join("queue.lock"), false)?;
-            ensure!(self.active_locked(&job), "cancelled");
+            ensure!(self.share_active_locked(&job), "cancelled");
             // A concurrent uploader can have advanced the same job. Merge only the
             // immutable manifest, never overwrite its progress/status/retry state.
             let mut current = self.jobs()?.into_iter().find(|j| j.id == id).context("Missing queued capture")?;
@@ -632,7 +637,7 @@ impl Client {
             self.save_job(&current)?;
             job = current;
         }
-        let allowed = || foreground() && crate::handoff::experiment(HOSTED_SHARING) && self.active(&job);
+        let allowed = || foreground() && crate::handoff::experiment(HOSTED_SHARING) && self.share_active(&job);
         let base = format!("/v1/captures/{id}");
         let reserved = self.json_request(&job.server, Some(&credential.token), "POST", &base,
             Some(json!({"files":files})), Duration::from_secs(30), &allowed)?;
@@ -692,23 +697,43 @@ impl Client {
     }
     // Caller holds queue.lock. Never acquire it recursively from a save path.
     fn active_locked(&self, job: &Job) -> bool {
-        self.enabled()
-            && self.settings().server == job.server
-            && self
-                .credential("upload", &job.server)
-                .is_ok_and(|c| c.generation == job.generation)
-            && read_private(&self.state.join(format!("{}.job", job.id)), JSON_LIMIT)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<Job>(&bytes).ok())
-                .is_some_and(|current| {
-                    current.id == job.id
-                        && current.bundle == job.bundle
-                        && current.server == job.server
-                        && current.generation == job.generation
-                        && current.created == job.created
-                        && current.status == job.status
-                        && current.status != "cancelled"
-                })
+        self.current_incarnation(job).is_some_and(|current| {
+            current.status == job.status && current.status != "cancelled"
+        })
+    }
+    fn share_active(&self, job: &Job) -> bool {
+        let Ok(_lock) = Lock::acquire(&self.state.join("queue.lock"), false) else {
+            return false;
+        };
+        self.share_active_locked(job)
+    }
+    // Upload progress is not a new authorization incarnation. The uploader still
+    // uses active_locked's exact-status check before publishing its own results.
+    fn share_active_locked(&self, job: &Job) -> bool {
+        self.current_incarnation(job).is_some_and(|current| {
+            matches!(current.status.as_str(), "pending" | "failed" | "ready")
+                && now().saturating_sub(current.created) <= RETENTION
+                && (job.files.is_empty() || current.files == job.files)
+                && (!job.shared || current.shared)
+        })
+    }
+    // Caller holds queue.lock; identity and current consent are shared by both
+    // policies, but mutable upload status must not stand in for consent.
+    fn current_incarnation(&self, job: &Job) -> Option<Job> {
+        if !self.enabled()
+            || self.settings().server != job.server
+            || !self.credential("upload", &job.server)
+                .is_ok_and(|c| c.generation == job.generation) {
+            return None;
+        }
+        let current: Job = serde_json::from_slice(&read_private(
+            &self.state.join(format!("{}.job", job.id)), JSON_LIMIT,
+        ).ok()?).ok()?;
+        (current.id == job.id
+            && current.bundle == job.bundle
+            && current.server == job.server
+            && current.generation == job.generation
+            && current.created == job.created).then_some(current)
     }
     fn jobs(&self) -> Result<Vec<Job>> {
         private_dir(&self.state)?;

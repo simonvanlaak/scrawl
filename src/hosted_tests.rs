@@ -750,6 +750,91 @@ fn hosted_sharing_management_follows_encoded_cursors_and_rejects_loops() {
 }
 
 #[test]
+fn hosted_prepared_link_survives_upload_before_foreground_delivery() {
+    let f = Fixture::new();
+    let server = Server::new("");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment(HOSTED_SHARING);
+    // This is the production preparation/authorization seam used by the UI.
+    // Defer foreground delivery until the real uploader has advanced its job.
+    let link = f.client.prepare_link(&f.bundle(), &|| true).unwrap();
+    assert_eq!(link.job.status, "pending");
+    assert!(link.authorized());
+    f.client.process_once().unwrap();
+    assert_eq!(f.client.jobs().unwrap()[0].status, "ready");
+    assert!(server.state.lock().unwrap().ready);
+    assert!(link.authorized(), "upload completion revoked a valid foreground link");
+    assert_eq!(link.text.matches("Anyone with this link").count(), 1);
+    // A valid ready result must still lose authorization when consent is removed.
+    f.client.disable(false).unwrap();
+    assert!(!link.authorized());
+}
+
+#[test]
+fn hosted_prepared_link_rejects_changed_authorization_after_progress() {
+    let f = Fixture::new();
+    let server = Server::new("");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment(HOSTED_SHARING);
+    let link = f.client.prepare_link(&f.bundle(), &|| true).unwrap();
+    let original = f.client.jobs().unwrap()[0].clone();
+    for status in ["pending", "failed", "ready"] {
+        let mut current = original.clone();
+        current.status = status.into();
+        f.client.save_job(&current).unwrap();
+        assert!(link.authorized(), "valid progress status {status}");
+    }
+    // Each mutation alone must fail closed, even with all other gates open.
+    for change in 0..9 {
+        let mut current = original.clone();
+        match change {
+            0 => current.status = "cancelled".into(),
+            1 => current.status = "expired".into(),
+            2 => current.status = "unexpected".into(),
+            3 => current.created += 1,
+            4 => current.generation = "replacement-grant".into(),
+            5 => current.bundle = f.root.join("replacement.apparent"),
+            6 => current.server = "http://localhost:1".into(),
+            7 => current.files[0].size += 1,
+            _ => current.id = "d".repeat(32),
+        }
+        atomic_json(&f.client.state.join(format!("{}.job", original.id)), &current).unwrap();
+        assert!(!link.authorized(), "accepted authorization mutation {change}");
+    }
+    f.client.save_job(&original).unwrap();
+    assert!(link.authorized());
+    let mut credential = f.client.credential("upload", &server.url).unwrap();
+    credential.generation = "replacement-grant".into();
+    atomic_json(&f.client.state.join("upload.credential"), &credential).unwrap();
+    assert!(!link.authorized());
+    fs::remove_file(f.client.state.join(format!("{}.job", original.id))).unwrap();
+    assert!(!link.authorized());
+}
+
+#[test]
+fn hosted_share_request_survives_progress_during_transport() {
+    let f = Fixture::new();
+    let server = Server::new("");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment(HOSTED_SHARING);
+    let client = f.client.clone();
+    let advanced = Arc::new(AtomicBool::new(false));
+    let observed = advanced.clone();
+    set_hook(move |point, _| {
+        if point == "transport_poll" && !observed.swap(true, Ordering::SeqCst) {
+            // Run the production uploader while the foreground request is held.
+            client.process_once().unwrap();
+        }
+    });
+    let result = f.client.prepare_link(&f.bundle(), &|| true);
+    clear_hook();
+    let link = result.unwrap();
+    assert!(advanced.load(Ordering::SeqCst));
+    assert_eq!(f.client.jobs().unwrap()[0].status, "ready");
+    assert!(link.authorized());
+}
+
+#[test]
 fn hosted_sharing_sender_reports_interruption_and_recovers_under_same_url() {
     let f = Fixture::new();
     let server = Server::new("fail-file");

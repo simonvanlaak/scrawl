@@ -11,6 +11,11 @@ function parsedURL(value, base) {
   }
 }
 
+function documentBase(element) {
+  const url = parsedURL(element?.attrs.find((attr) => attr.name === "href").value ?? publicSite, publicSite)
+  return !url || ["data:", "javascript:"].includes(url.protocol) ? new URL(publicSite) : url
+}
+
 function isUpstream(url) {
   if (!url || !["http:", "https:"].includes(url.protocol)) return false
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "")
@@ -28,7 +33,7 @@ function isUpstream(url) {
 // The URL-bearing portion of HTML's shared declarative refresh steps. This
 // does not run timers or scripts; delay-only refreshes reload the current page.
 function refreshDestination(content) {
-  const delay = /^[\t\n\f\r ]*[0-9.]+/.exec(content)
+  const delay = /^[\t\n\f\r ]*(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)/.exec(content)
   if (!delay) return null
   let rest = content.slice(delay[0].length)
   if (!rest || !/^[;,\t\n\f\r ]/.test(rest)) return null
@@ -50,13 +55,17 @@ function refreshDestination(content) {
 // Parse HTML attributes (including character references) before interpreting URLs.
 // Only destinations count: prose, comments, query strings and lookalike hosts do not.
 export function hasUpstreamLinks(html) {
-  const document = parse(html)
+  const document = parse(html, { sourceCodeLocationInfo: true })
   const elements = []
+  const activeElements = []
   let baseElement
   let visibleText = ""
   function visit(node, inert = false) {
     if (["script", "style"].includes(node.tagName)) return
-    if (node.attrs) elements.push(node)
+    if (node.attrs) {
+      elements.push(node)
+      if (!inert) activeElements.push(node)
+    }
     if (!inert && !baseElement && node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) baseElement = node
     if (node.nodeName === "#text") visibleText += node.value
     for (const child of node.childNodes ?? []) visit(child, inert)
@@ -66,13 +75,23 @@ export function hasUpstreamLinks(html) {
     if (node.tagName) visibleText += " "
   }
   visit(document)
-  let base = parsedURL(baseElement?.attrs.find((attr) => attr.name === "href").value ?? publicSite, publicSite)
-  if (!base || ["data:", "javascript:"].includes(base.protocol)) base = new URL(publicSite)
+  const base = documentBase(baseElement)
+  const refreshBases = new Map()
+  let insertedBase
+  // Refresh URLs are resolved when their tags are processed, unlike links
+  // which use the final document base. Source order also survives tree repair.
+  activeElements.sort((a, b) => (a.sourceCodeLocation?.startOffset ?? Infinity) - (b.sourceCodeLocation?.startOffset ?? Infinity))
+  for (const node of activeElements) {
+    if (!insertedBase && node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) insertedBase = node
+    if (node.namespaceURI === htmlNamespace && node.tagName === "meta") refreshBases.set(node, documentBase(insertedBase))
+  }
   for (const node of elements) {
     if (node.namespaceURI === htmlNamespace && node.tagName === "meta" && node.attrs.some((attr) => attr.name === "http-equiv" && attr.value.toLowerCase() === "refresh")) {
       const content = node.attrs.find((attr) => attr.name === "content")?.value ?? ""
       const destination = refreshDestination(content)
-      if (destination !== null && isUpstream(parsedURL(destination, base))) return true
+      // Inert template refreshes are checked conservatively against the final
+      // base, as they have no active parser-processing point yet.
+      if (destination !== null && isUpstream(parsedURL(destination, refreshBases.get(node) ?? base))) return true
     }
     for (const attr of node.attrs) {
       const metaURL = node.tagName === "meta" && attr.name === "content" && node.attrs.some((attribute) =>

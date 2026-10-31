@@ -22,13 +22,13 @@ The hosted React UI implements the selected V4 paper-sheet composition. It uses 
 | Log out | Browser session only; POST then anonymous session readback. Does not revoke independent device grants. |
 | Separate lock control | Describes independent read approval and limits. It is not a claim about an agent credential's effective state. |
 
-Account tabs support arrow keys, Home/End and roving focus; optional detail uses native disclosures. The setup dialog uses native modal focus containment, Escape and focus return. No request writes on page load, tab switch, disclosure or setup. `api.ts` remains unchanged; existing server validation, credential handling, fixed return destinations and CSRF boundaries still apply.
+Account tabs support arrow keys, Home/End and roving focus; optional detail uses native disclosures. The setup dialog uses native modal focus containment, Escape and focus return. No request writes on page load, tab switch, disclosure or setup. V4 approval uses the existing API contract; server validation, credential handling, fixed return destinations and CSRF boundaries still apply. The separate sharing implementation adds list/revoke API methods without changing those approval boundaries.
 
 Upload and read permission disclosures retain screen images, recording, voice, transcript and context; 20-account beta, 500,000,000-byte account cap with oldest-first eviction, seven-day maximum retention, 90,000,000-byte per-file rejection of the whole bundle, and fixed 30-day grants with manual reapproval and no website renewal.
 
 ## Deliberately deferred
 
-The native connected/upload-enabled display, capsule, per-capture upload status, inspection/Paste, automatic browser return, retries, expiry/oversize recovery, management, disconnect and revocation UI are not implemented here. The browser API cannot observe a computer's settings or credential. Local capture/Paste and CLI recovery remain governed by [the client contract](../../docs/hosted-client.md). A web approval is not native integration proof.
+The V4 account-design slice does not implement a native connected/upload-enabled display, capsule, per-capture upload status, inspection/Paste, automatic browser return, retries, expiry/oversize recovery, or connection/grant management, disconnect and revocation UI. This does not exclude the separate single-capture sharing implementation: signed-in beta accounts can open **Manage shared links** at `/hosted/shares` to list and stop sharing individual captures. That action revokes a public capability, not a device grant, and does not delete the private recording. The browser API cannot observe a computer's settings or credential. Local capture/Paste and CLI recovery remain governed by [the client contract](../../docs/hosted-client.md). A web approval is not native integration proof.
 
 ## Verification and delivery
 

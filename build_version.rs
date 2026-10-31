@@ -3,6 +3,11 @@ use std::path::Path;
 use std::process::Command;
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
+    // An unpacked source archive may sit inside an unrelated checkout.
+    // Do not let Git walk up and claim that parent's identity.
+    if !root.join(".git").exists() {
+        return None;
+    }
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -33,7 +38,9 @@ pub fn emit() {
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
     // Watch the real Git paths, including linked worktrees and packed refs.
     for name in ["HEAD", "index", "packed-refs"] {
-        if let Some(path) = git(&root, &["rev-parse", "--git-path", name]) {
+        if let Some(path) = git(&root, &["rev-parse", "--git-path", name])
+            && root.join(&path).exists()
+        {
             println!("cargo:rerun-if-changed={}", root.join(path).display());
         }
     }
@@ -64,6 +71,35 @@ pub fn emit() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_archives_do_not_inherit_a_parent_checkouts_revision() {
+        let directory = std::env::temp_dir().join(format!(
+            "apparent-build-identity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let archive = directory.join("archive");
+        std::fs::create_dir_all(&archive).unwrap();
+        let mut command = Command::new("git");
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(key);
+            }
+        }
+        let output = command
+            .args(["init", "-q"])
+            .arg(&directory)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let result = git(&archive, &["rev-parse", "--show-toplevel"]);
+        std::fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(result, None);
+    }
 
     #[test]
     fn about_identifies_the_compiled_revision_not_just_the_release() {

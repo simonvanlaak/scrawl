@@ -53,13 +53,17 @@ For a browser-only change, an existing browser recorder may be more precise **if
 
 ## Record the proof with Apparent
 
-For polished desktop demos, use the app's interactive recording shortcut to start and finish: it collects the clicks, marks and cursor path that drive automatic zoom. Check the installed app's capabilities and input permissions first. Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
+For polished desktop demos, use `apparent capture start --request-id <id> --wait --timeout 30` through the already-running GUI's normal interaction-aware path: it collects the clicks, marks and cursor path that drive automatic zoom. Generate and privately retain a 32-hex-character request ID before sending. Retain the reply's top-level `capture_id`, including on failure or timeout, and require `status == "recording"` before acting: a real frame has arrived. Occupied sessions are refused, not toggled; pending portal consent is not recording. Check installed help and input permissions first; older builds lack these controls, and the CLI does not launch the app or bypass consent.
+
+Finish agent-authored videos with `apparent capture stop <owned_id> --wait --timeout 60`, rather than hunting for Finish with OCR; require the visible button only when that button is the claim being tested. Success requires `status == "saved"` and that capture's exact `bundle_path`; a non-waited `stopping` reply is only acceptance. After timeout or disconnect, use `apparent capture inspect <id>` or retry the same start request ID or owned-ID Stop, not a shortcut toggle, `latest` or a directory scan. An admitted capture remains intact after a readiness timeout; explicitly cancel only your own ID if discarding it. Rejected request IDs remain rejected, and receipts last only for this GUI process, not an app restart. Follow [the agent video workflow](../../docs/agent-video-workflow.md) for bounded recovery and saved-bundle checks. Shared tests do not prove native Mac capture; verify the exact candidate on each claimed platform before release.
+
+Timed `record --duration` captures do **not** collect that interaction telemetry; do not choose them silently and expect camera motion. Use a timed take only when interaction-aware recording is unavailable or a static camera is intentional, and disclose that limit. For that fallback, check `apparent record --help`, choose the known window and perform the action *while* recording:
 
 ```sh
 apparent record --window 'Window title or app' --duration 15 --out /absolute/private/path/walkthrough.apparent
 ```
 
-`--window` is a title/app substring; check the actual target in the bundle. The timed desktop command waits for the duration; it does not perform UI actions for you. Arrange the interaction separately or use the normal interactive recording shortcut and stop after the result. Start before the meaningful action and finish after the result settles. Use the returned exact bundle path, not `latest` when other captures could finish concurrently. If the CLI is unavailable, inspect the installed app path and permissions; don't pretend a transcript, synthetic `apparent demo` bundle, or a command that never recorded the action is a walkthrough.
+`--window` is a title/app substring; check the actual target in the bundle. The timed desktop command waits for the duration; it does not perform UI actions for you. Arrange the interaction separately; the GUI `capture` controls do not control a timed recorder. Start before the meaningful action and finish after the result settles. Use the returned exact bundle path, not `latest` when other captures could finish concurrently. If the CLI is unavailable, inspect the installed app path and permissions; don't pretend a transcript, synthetic `apparent demo` bundle, or a command that never recorded the action is a walkthrough.
 
 ## Inspect and render the live share copy
 
@@ -78,6 +82,14 @@ Do not invent a frame-rate flag for `apparent record`; set it during export or b
 ## Hand it back
 
 Embed or link the **verified playable file** in a channel the viewer can reach. Name the mode, exact build/environment for live proof (or source and hypothetical status for an explainer), and principal limit. State whether narration is generated or explicitly silent. Include a useful timestamp when it makes inspection faster. A path on an inaccessible machine is not delivery. Do not upload, post to a PR, send to a person, or publish raw or edited media without authorization for that destination; attachment visibility may inherit repository visibility. If production or delivery is blocked, name the exact failed step and best truthful partial evidence without calling the video done. Never claim a playable video exists until you have opened it.
+
+## Agent recording trial lessons
+
+- Read `capture state` for context, not ownership; a socket pathname is not readiness. Start with a retained request ID and require the request's own `recording` receipt before acting. Atomic admission refuses occupied sessions. Never adopt or stop a capture that was already active.
+- Derive gestures from settled window bounds and verify the visible mark before continuing. A successful input command proves only that input was accepted.
+- Use owned-ID `stop --wait` and its exact saved `bundle_path`, not a global state check. The command checks identity at the action; retrying it cannot stop a newer capture. If Finish already ended the take, inspect that ID or repeat its waited Stop to recover the same result. Unknown, cancelled, failed, wrong-ID and timeout replies are not saved success.
+- Tie QA grids and cue-boundary frames to the final movie's hash; regenerate them after every edit. Inspect the actual deliverable before diagnosing a defect from an old grid.
+- Keep a private attempt ledger with build/runner identity, elapsed times, retries and evidence paths. Separate harness failures from product defects. When comparing workflow-only retests, keep app and runner bytes fixed; disclose a different stop route and measure readable holds separately. Do not call different routes a Finish-button benchmark or infer total-time improvements from unequal setup.
 
 ## Failure traps
 

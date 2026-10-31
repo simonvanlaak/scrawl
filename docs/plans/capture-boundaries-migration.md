@@ -108,12 +108,12 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 | F0 | Ancestry, isolated branch, hook unchanged, owned plan, committed/pushed/read-back PR | Plan checkpoint published as draft #199; final evidence commit readback belongs to handoff |
 | E1 | One recorder/finalizer used by GUI and Agent; no engine caller effects | Unrun |
 | E2 | Real multiprocess contention, restart receipts, crash recovery, retention leases | Unrun |
-| E3 | One policy-free config transaction; nested/secret preservation and consent races | In-crate policy-free storage seam integrated; donor storage/subprocess and inherited consent tests pass on combined Linux candidate. Config donor independently approved; combined review and macOS proof pending. Not a separate package |
-| E4 | Synthetic old bundles, cleaned media, device timelines, export/reprocess/read/zoom parity | Shared in-crate bundle production seam integrated with root aliases preserved; 10 focused pipeline tests and synthetic demo pass. Donor artifact equivalence retained; complete archive/export/native matrix unrun |
+| E3 | One policy-free config transaction; nested/secret preservation and consent races | In-crate policy-free storage seam integrated; donor storage/subprocess and inherited consent tests pass on combined Linux candidate. Config donor `43bececa` and combined extraction `68b64d86` independently source-approved without blockers; macOS proof pending. Not a separate package |
+| E4 | Synthetic old bundles, cleaned media, device timelines, export/reprocess/read/zoom parity | Shared in-crate bundle production seam integrated with root aliases preserved; 10 focused pipeline tests and synthetic demo pass. Combined extraction `68b64d86` independently source-approved: exact 12 donor blobs and pipeline functions preserved. Donor artifact equivalence retained; complete archive/export/native matrix unrun |
 | A1 | Fresh standalone Agent installation, no Desktop GUI runtime dependency; real lifecycle | Unrun |
 | D1 | Host discriminator native matrix and measured latency on both supported OSes | Unrun; no host chosen |
 | D2 | Complete Desktop UX, keyboard/accessibility, error/cancel/reconnect/focus/overlay behavior | Unrun |
-| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Browser extraction/composition passed synthetic gates; service unchanged and full 52 pass. Final independent auth/privacy review pending; live OAuth/native transfer unrun |
+| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Browser extraction/composition passed synthetic gates; service unchanged and full 52 pass. Independent auth/privacy source review approved `cd5aa9ec` without blockers, with exact source/artifact preservation; live OAuth/native transfer unrun |
 | P1 | Public build/package/browser visual parity, URL/download compatibility, privacy-clean output | Independent marketing/Connect production builds and composed public tests passed; 65 screenshot pairs compared (64 exact, one expiry timestamp). No public directory move or deployment |
 | X1 | Linux x86_64/aarch64 build/package + CPU/decoder/encoder checks; native X11 and Wayland (Hyprland/GNOME/KDE) capability/limitations accurate | Unrun platform matrix |
 | X2 | macOS supported architectures/minimum OS; Swift helper/Metal, signed identity/TCC persistence, virtual-display native flows and export | Unrun; Linux build cannot prove this |
@@ -160,8 +160,10 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   Full evidence and exact scope limits are in `connect/web/VERIFICATION.md`.
 - Both published checkpoints ran unmodified pre-push build/full Rust suites
   (664 passed, 3 ignored). Auth/API code, Cargo/locks, native sources and helper
-  files are unchanged. Independent frozen-SHA auth/privacy review is the parent
-  coordinator's remaining gate. Live OAuth, native transfer and external
+  files are unchanged. Independent auth/privacy source review approved frozen
+  `cd5aa9ec315b10d3ec02e65b39c750d9d6b916e9` without blockers, including exact
+  source/artifact preservation. This bounded review is not native/macOS proof
+  or merge acceptance. Live OAuth, native transfer and external
   deployment remain unrun, not fabricated prerequisites for byte equivalence.
 
 ### Config and bundle pipeline integration evidence (2026-10-31)
@@ -205,15 +207,50 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   Existing config donor evidence (full 671/3, standalone storage harness 8) and
   pipeline donor artifact comparisons retain their original identities and are
   not claimed as freshly rerun independent/native acceptance here.
-- Config donor's independent Luna review was APPROVED without blockers. Its
+- Config donor `43bececabc8d31551a72df7ca8cdb7de0d7f7189` received an independent
+  APPROVED source review without blockers. Its
   nonblocking follow-up is to bound the child `.status()` wait in
   `config_path_override_is_process_local`; reviewed bytes are unchanged here.
-  No nested reviewer was spawned. Coordinator still owns independent review of
-  this combined candidate and the frozen Connect changes, macOS/native proof,
-  standalone Engine/Agent, cross-process admission/receipts/leases and web
-  Desktop host selection/implementation. These in-crate seams do not complete
+  No test edit is included in this docs integration. Independent combined Capture
+  extraction source review approved `68b64d86e317ee1eb85f194e4ecf28a1bf5ad30b`
+  without blockers: all 12 donor blobs and pipeline function bodies are preserved,
+  and the Linux **671 passed, 3 ignored** evidence above retains its original
+  source identities. These bounded source reviews are not native/macOS proof
+  or merge acceptance. No nested reviewer was spawned. Coordinator still owns
+  macOS/native proof, standalone Engine/Agent wiring, cross-process
+  admission/receipts/leases and web Desktop host selection/implementation.
+  These in-crate seams do not complete
   the refactor. Draft #199 stays draft; no merge, deployment, installation,
   live config change, real-screen capture or outbound delivery was performed.
+
+### Docs-only integration and outstanding Engine repair (2026-10-31)
+
+- Docs integration starts from clean `68b64d86e317ee1eb85f194e4ecf28a1bf5ad30b`,
+  tree `c9cd3941c0f019a6546e80b40235976a8a27b4e2`. Repair
+  `fef48b0bebc5f6baa35821c6e3633c2c57d5fef6`, verified on remote
+  `t3/repair-hosted-doc-recipes`, is adopted with `cherry-pick -x` as `284f98b6`.
+  Only `site/docs/clanker-deploy.md`, `site/docs/hosted-design.md` and this ledger
+  change. The recipes match `site/scripts/build-public.mjs`, the package composer
+  and `docs/hosted-web.md#verification`: production builds both products before
+  composition; synthetic browser checks use matching loopback build/test origins
+  and `CONNECT_BUILD_DIR=dist-test`. No build, browser run or deployment is implied
+  by checking these commands against their owners.
+- All Rust, Connect/browser, script, hook, manifest/lock, helper, build and CI bytes
+  stay identical to `68b64d86`; the two adopted docs match the donor exactly.
+  Compile-time `include_str!`/`include_bytes!` and build-script input inspection
+  found none of these three docs embedded. Existing source, artifact, browser and
+  Linux test evidence is reused at its recorded SHA, not relabelled as new proof.
+  Only the unmodified publication hooks rerun their required checks. Exact scope
+  checks, command exits and hook logs are retained outside git under
+  `/srv/clanker-hermes/cache/scratch/capture-docs-integration-20261031/`;
+  final head/tree and remote/draft readback belong to the handoff.
+- Standalone Engine draft #202 at `46922056d6b9381a359a3408329cd1d6ea4c6b1a`
+  has a bounded source-review verdict of **REQUEST_CHANGES** for unsafe trust of
+  the final bundle directory and incompatible legacy IDs. Repair is actively
+  running in a separate worktree; this records no repaired or approved candidate.
+  That package is not production-wired. Standalone Agent/Engine wiring and web
+  Desktop remain unfinished. #199 remains draft; this is docs integration only,
+  not refactor completion, native acceptance or permission to merge.
 
 ### Coordinator handoff / next dispatch
 

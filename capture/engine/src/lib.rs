@@ -9,6 +9,8 @@ mod locking;
 mod receipt;
 mod secure;
 mod session;
+pub mod model;
+pub mod recording;
 pub use finalizer::FinalizerSuccess;
 pub use identity::{new_id, new_owner_token};
 pub use lease::{BundleLease, LeaseKind};

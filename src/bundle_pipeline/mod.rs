@@ -318,6 +318,7 @@ pub fn finalize_capture_bundle(
     let wav_path = bundle_dir.join("audio.wav");
     let has_wav = wav_path.exists();
     let wav_required = recorded_audio.is_some() || has_wav;
+    publication::preflight_sources(bundle_dir, video_path.as_deref())?;
     recover::write(
         bundle_dir,
         &recover::Unfinished {
@@ -450,6 +451,7 @@ pub fn rebuild_screen_bundle_with(
         .map(|name| out.join(name))
         .filter(|p| p.is_file())
         .context("The bundle has no video")?;
+    publication::preflight_sources(out, Some(&video))?;
     let wav = out.join("audio.wav");
     let recorded = if wav.is_file() {
         Some(audio::recorded_audio_from_wav(std::fs::read(&wav)?)?)
@@ -534,6 +536,7 @@ pub fn build_bundle_from_parts(
         .timings
         .started_at
         .unwrap_or_else(std::time::Instant::now);
+    publication::preflight_sources(bundle_dir, video_path.as_deref())?;
     let mut marks = marks_of(&strokes);
     for (i, &t) in extras.flags.iter().enumerate() {
         marks.push(Mark {

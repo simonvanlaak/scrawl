@@ -193,6 +193,24 @@ pub(crate) fn read_text(path: &Path, name: &str) -> Result<String> {
     )?)?)
 }
 
+/// Check declared input paths before a decoder/transcriber can consume them.
+/// Cooperative writers stay under the outer lease; this is not a perpetual path capability.
+pub(crate) fn preflight_sources(path: &Path, video: Option<&Path>) -> Result<()> {
+    let root = Directory::open(path, false)?;
+    if let Some(video) = video {
+        ensure!(video.parent() == Some(path), "movie is outside its bundle");
+        let leaf = video
+            .file_name()
+            .and_then(|n| n.to_str())
+            .context("invalid movie name")?;
+        root.file(leaf)?;
+    }
+    if root.names()?.iter().any(|name| name == "audio.wav") {
+        root.file("audio.wav")?;
+    }
+    Ok(())
+}
+
 /// Write already encoded images without pathname traversal or symlink writes.
 pub(crate) fn write_artifacts(
     path: &Path,

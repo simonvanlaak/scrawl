@@ -133,3 +133,56 @@ fn publication_screen_wrapper_checks_journal_and_keeps_required_audio() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn publication_rejects_external_and_symlinked_movies_before_decoder_callback() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let outside = std::env::temp_dir().join(crate::make_bundle_id());
+    std::fs::create_dir_all(&outside).unwrap();
+    let source = outside.join("recording.mp4");
+    std::fs::write(
+        &source,
+        include_bytes!("../../tests/fixtures/publication/tiny.mp4"),
+    )
+    .unwrap();
+    for linked in [false, true] {
+        let root = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir_all(&root).unwrap();
+        let video = if linked {
+            let path = root.join("recording.mp4");
+            std::os::unix::fs::symlink(&source, &path).unwrap();
+            path
+        } else {
+            source.clone()
+        };
+        let called = Arc::new(AtomicBool::new(false));
+        let observed = called.clone();
+        let result = build_bundle_from_parts(
+            &root,
+            target(),
+            1000,
+            vec![RgbaFrame::new(0, 32, 32, vec![128; 32 * 32 * 4])],
+            vec![],
+            vec![],
+            TranscriptData::default(),
+            Some(video),
+            None,
+            SourceExtras {
+                full_frames: Some(Box::new(move |_| {
+                    observed.store(true, Ordering::SeqCst);
+                    anyhow::bail!("decoder must not be reached")
+                })),
+                autocrop: Some(None),
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
+        assert!(!called.load(Ordering::SeqCst));
+        assert!(!root.join("apparent.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    std::fs::remove_dir_all(outside).unwrap();
+}

@@ -3,7 +3,8 @@
 //! A long-lived `apparent-helper transcribe-stream` gets the microphone's 16 kHz samples, quantized
 //! exactly as `audio.wav` will store them, about every 160 ms, and keeps SpeechAnalyzer's
 //! finalized results. At finish the samples it hasn't had are sent from the finished WAV and only
-//! that tail is left to transcribe, so the words and times are the WAV's own. Anything wrong (the
+//! that tail is left to feed. Apple chooses natural finality, possibly at EOF; word times use
+//! the WAV's source clock, not a guarantee of batch lexical/alignment identity. Anything wrong (the
 //! helper fails, the model isn't installed, it lost samples or took too long) returns an error and
 //! the caller transcribes the WAV as before.
 
@@ -459,7 +460,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn finite_chunks_keep_absolute_source_times() {
+    fn finalized_results_keep_absolute_source_times() {
         let script = format!(
             r#"{READY}; cat >/dev/null; echo '{{"segment":{{"t0":63,"t1":150,"text":"First."}},"words":[{{"t0":63,"t1":150,"text":"First."}}]}}'; echo '{{"segment":{{"t0":913,"t1":1000,"text":"Tail."}},"words":[{{"t0":913,"t1":1000,"text":"Tail."}}]}}'; echo '{{"done":true,"samples":16000}}'"#
         );

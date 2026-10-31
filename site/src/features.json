@@ -22,6 +22,32 @@
   ],
   "features": [
     {
+      "id": "site-feature-grid",
+      "group": "install",
+      "name": "Animated homepage feature explanations",
+      "says": "Four illustrative animations after the product video explain whiteboard feedback, the multimedia timeline, clipboard handoff, and an agent showing its changes in a captioned walkthrough. Animations pause offscreen and respect reduced motion.",
+      "status": "main",
+      "added": "2026-10-30",
+      "platforms": [
+        "mac",
+        "linux"
+      ],
+      "docs": [
+        "site/docs/feature-grid.md"
+      ]
+    },
+    {
+      "id": "site-social-preview",
+      "group": "install",
+      "name": "Website link preview",
+      "says": "Shared homepage links declare a minimal wide Apparent wordmark image for Open Graph and Twitter large-image cards, without requiring JavaScript.",
+      "status": "branch:t3/share-picker-visual-preview",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Candidate only. Deployment and a fresh receiver unfurl are required; existing previews may remain cached.",
+      "docs": ["site/docs/social-preview.md"]
+    },
+    {
       "id": "native-launch",
       "group": "install",
       "name": "Open the installed app by URL",
@@ -59,6 +85,7 @@
       "name": "Interactive homepage belief",
       "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
       "status": "main",
+      "added": "2026-10-30",
       "platforms": ["mac", "linux"],
       "docs": ["site/docs/belief-release.md"]
     },
@@ -247,6 +274,7 @@
       "name": "Local capture inspection and explicit stop/cancel",
       "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
       "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "added": "2026-10-28",
       "platforms": ["mac", "linux"],
       "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
       "docs": ["docs/capture.md", "docs/linux.md"]
@@ -343,6 +371,18 @@
       "added": "2026-10-27",
       "platforms": ["linux"],
       "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
+      "id": "warm-recognizer",
+      "group": "record",
+      "name": "Keep the local recognizer warm",
+      "says": "Lazily reuses one local Parakeet model/session across recordings, releasing it after 30 minutes idle once capture and recognition have ended.",
+      "status": "main",
+      "added": "2026-10-30",
+      "platforms": ["linux"],
+      "config": [{ "key": "warmRecognizer", "value": "true", "does": "Set false to disable cross-capture recognizer reuse at the next recording start" }],
+      "note": "On by default; set warmRecognizer to false to disable at the next recording start. Linux local Parakeet pause worker only; Mac uses Apple Speech, not this engine. Retaining the recognizer costs additional idle RAM. No change to manual Paste.",
+      "docs": ["docs/keyframes-and-text.md", "docs/linux.md"]
     },
     {
       "id": "straight-line",
@@ -932,8 +972,9 @@
       "id": "export-cli",
       "group": "export",
       "name": "apparent export",
-      "says": "One .mp4 with ink, pins, clicks and aligned audio. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out and explicit crops are respected.",
+      "says": "One .mp4 with ink, pins, clicks and aligned recorded audio. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
@@ -942,7 +983,7 @@
       "id": "export-cli-linux",
       "group": "export",
       "name": "apparent export on Linux",
-      "says": "The CLI burns ink, pins and click ripples into an MP4 with aligned WAV audio, using FFmpeg and ffprobe. Opens on the whole capture for 0.5 s before smooth activity zoom; --no-zoom opts out and explicit crops are respected.",
+      "says": "The CLI burns ink, pins and click ripples into an MP4 with aligned WAV audio, using FFmpeg and ffprobe. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s before smooth activity zoom; --no-zoom opts out.",
       "status": "main",
       "added": "2026-10-29",
       "platforms": ["linux"],
@@ -950,15 +991,27 @@
       "docs": ["docs/export-and-retention.md", "docs/linux.md"]
     },
     {
+      "id": "export-narration",
+      "group": "export",
+      "name": "Local timed export narration",
+      "says": "Explicit --narration script generates Kokoro bm_fable speech locally for the export only; --no-audio deliberately exports silence. Sources stay unchanged.",
+      "status": "experiment:exportNarration",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Requires separate verified worker/model provisioning. Native platform proof remains required before release.",
+
+      "docs": ["docs/export-and-retention.md#explicit-export-audio", "docs/keyframes-and-text.md"]
+    },
+    {
       "id": "export-menu",
       "group": "export",
       "name": "Export from the menu",
-      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent with progress beside the menu bar icon.",
+      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent on Mac or a native Save dialog destination on Linux, with visible progress and failure feedback.",
       "status": "experiment:videoExport",
-      "platforms": ["mac"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-18",
       "config": [{ "key": "videoExport", "value": "true", "does": "Show Export Last Capture as Video… (Settings › Recording › Experimental)" }],
-      "docs": ["README.md#export-as-video"]
+      "docs": ["README.md#export-as-video", "docs/export-and-retention.md#linux-tray-export", "docs/linux.md"]
     },
 
     {
@@ -1000,8 +1053,18 @@
       "says": "The Mac app updates itself with Sparkle; Check for Updates… is in the menu and Settings › About.",
       "status": "stable@0.3.4",
       "platforms": ["mac"],
-      "note": "Temporary ad-hoc-signed Mac previews use a separate Sparkle key and feed. Linux AppImages have their own updater.",
+      "note": "Mac previews use a separate Sparkle key/feed. Developer ID/notarization preparation is opt-in and awaits real-credential verification; see mac-developer-id. Linux AppImages have their own updater.",
       "docs": ["docs/release.md"]
+    },
+    {
+      "id": "mac-developer-id",
+      "group": "install",
+      "name": "Developer ID signing and notarization setup",
+      "says": "The Mac preview release workflow can accept a Developer ID certificate and notarization credentials without changing its update channel.",
+      "status": "main",
+      "platforms": ["mac"],
+      "note": "Off by default via the repository Actions variable MAC_APPLE_SIGNING_ENABLED. Preparation only: native signing, Apple acceptance and the first signed Sparkle update still require real-credential verification. This is a release switch, not an app config setting.",
+      "docs": ["docs/mac-signing.md", "docs/release.md"]
     },
     {
       "id": "linux-appimage-updates",
@@ -1043,9 +1106,20 @@
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]
+    },
+    {
+      "id": "onboarding-first-capture",
+      "group": "install",
+      "name": "Choose and try your Record shortcut",
+      "says": "Onboarding requires an explicit shortcut choice and a successful shortcut-started recording before it can finish. Closing leaves setup unfinished for the next launch.",
+      "status": "experiment:onboardingFirstCapture",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Desktop-owned Linux shortcuts must be explicitly accepted rather than edited. Native Mac and Linux interaction proof is required before promotion.",
+      "docs": ["docs/onboarding-and-settings.md"]
     },
     {
       "id": "permission-card",

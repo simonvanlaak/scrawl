@@ -12,12 +12,16 @@ use crate::model::RgbaFrame;
 /// Export uses FFmpeg, not the GStreamer keyframe decoder. A capture with
 /// candidate-frame fallback can still have an intact, exportable movie.
 pub(super) fn probe(movie: &Path) -> Result<crate::helper::Probe> {
+    Ok(probe_with_audio(movie)?.0)
+}
+
+fn probe_with_audio(movie: &Path) -> Result<(crate::helper::Probe, Option<usize>)> {
     let output = Command::new("ffprobe")
         .args([
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,width,height,avg_frame_rate,duration",
+            "format=duration:stream=codec_type,width,height,avg_frame_rate,duration,start_time",
             "-of",
             "json",
         ])
@@ -52,16 +56,37 @@ pub(super) fn probe(movie: &Path) -> Result<crate::helper::Probe> {
     let rate = video["avg_frame_rate"].as_str().unwrap_or("0/1");
     let (num, den) = rate.split_once('/').unwrap_or((rate, "1"));
     let fps = num.parse::<f64>().unwrap_or(0.0) / den.parse::<f64>().unwrap_or(1.0);
-    Ok(crate::helper::Probe {
-        duration_ms: (duration * 1000.0).round() as u64,
-        width: video["width"].as_u64().unwrap_or(0) as u32,
-        height: video["height"].as_u64().unwrap_or(0) as u32,
-        audio_tracks: streams
-            .iter()
-            .filter(|s| s["codec_type"] == "audio")
-            .count() as u32,
-        fps: if fps.is_finite() { fps } else { 0.0 },
-    })
+    let usable_audio: Vec<usize> = streams
+        .iter()
+        .enumerate()
+        .filter_map(|(index, s)| {
+            let start = s["start_time"]
+                .as_str()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let length = s["duration"]
+                .as_str()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            (s["codec_type"] == "audio"
+                && start.is_finite()
+                && length.is_finite()
+                && length > 0.0
+                && start < duration
+                && start + length > 0.0)
+                .then_some(index)
+        })
+        .collect();
+    Ok((
+        crate::helper::Probe {
+            duration_ms: (duration * 1000.0).round() as u64,
+            width: video["width"].as_u64().unwrap_or(0) as u32,
+            height: video["height"].as_u64().unwrap_or(0) as u32,
+            audio_tracks: usable_audio.len() as u32,
+            fps: if fps.is_finite() { fps } else { 0.0 },
+        },
+        usable_audio.first().copied(),
+    ))
 }
 
 fn stop(child: &mut Child) {
@@ -85,7 +110,7 @@ fn drain_stderr(child: &mut Child) -> std::thread::JoinHandle<String> {
 }
 
 pub(super) fn run(plan: &Plan<'_>, progress: &mut dyn FnMut(f32)) -> Result<Done> {
-    let probe = probe(plan.video)?;
+    let (probe, embedded_audio) = probe_with_audio(plan.video)?;
     let source_bytes = (probe.width as usize)
         .checked_mul(probe.height as usize)
         .and_then(|n| n.checked_mul(4))
@@ -127,6 +152,7 @@ pub(super) fn run(plan: &Plan<'_>, progress: &mut dyn FnMut(f32)) -> Result<Done
         probe.height,
         frame_count,
         source_bytes,
+        embedded_audio,
         &mut decoder,
         progress,
     );
@@ -143,6 +169,7 @@ fn encode(
     sh: u32,
     count: usize,
     source_bytes: usize,
+    embedded_audio: Option<usize>,
     decoder: &mut Child,
     progress: &mut dyn FnMut(f32),
 ) -> Result<Done> {
@@ -164,9 +191,17 @@ fn encode(
     }
     command.args(["-map", "0:v:0"]);
     if plan.audio.is_some() {
+        let map = if plan.audio == Some(plan.video) {
+            format!(
+                "1:{}",
+                embedded_audio.context("Embedded audio no longer overlaps the video")?
+            )
+        } else {
+            "1:a:0".into()
+        };
         command.args([
             "-map",
-            "1:a:0",
+            &map,
             "-c:a",
             "aac",
             "-b:a",

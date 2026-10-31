@@ -53,10 +53,10 @@ frames` pulls a range, `apparent copy` puts a capture on the clipboard, and `app
 makes a shareable `.mp4`. `apparent skill` prints the skill without installing anything.
 
 The repository also ships [`make-it-apparent`](skills/make-it-apparent/SKILL.md), a separate
-agent skill for showing a finished change in a short, checked Apparent video. It covers the
-visible before/action/after, privacy before recording, playback review and honest limits of the
-demo. The capture-reading skill above is still for understanding feedback someone sends you;
-the walkthrough skill is for demonstrating what you built. The default install command above
+agent skill for a short, checked change demo, unresolved-problem demonstration or technical
+explainer. It covers causal explanation, captions, privacy, playback review and honest evidence
+limits. The capture-reading skill above is still for understanding feedback someone sends you;
+the video skill makes the current topic understandable, even before implementation is finished. The default install command above
 does not guarantee that this named workflow is installed. Install it explicitly in the agent's
 environment before asking for a demo:
 
@@ -64,9 +64,11 @@ environment before asking for a demo:
 bunx skills add tryapparent/apparent --skill make-it-apparent
 ```
 
-The walkthrough needs a working Apparent capture on a machine the agent can access. Export a
-separate polished video on macOS or Linux (`ffmpeg` and `ffprobe` are required on Linux), and
-review it before sharing. Installing either skill does not install the app.
+Live Apparent proof needs a working capture on an accessible machine; a conceptual explainer
+can use created visuals without a desktop capture. Explicit requests for actual app footage still
+require that footage. Export a separate polished video and review it before sharing. Apparent
+export supports macOS and Linux (`ffmpeg` and `ffprobe` are required on Linux).
+Installing either skill does not install the app or a media renderer.
 
 ## Usage
 
@@ -368,8 +370,12 @@ apparent export latest --crop 0.1,0.2,0.6,0.5       # x,y,w,h as fractions, or p
   uses its own audio track. `--no-ink` and `--no-clicks` leave the annotations out, `--fps` sets the
   rate (default 60 for a 60 fps recording).
 - **Menu**: with **Video export** on in Settings › Recording (`"videoExport": true` in
-  `~/.config/apparent/config.json`, default off), the menu shows **Export Last Capture as Video…**. It saves to `~/Movies/Apparent/<name>.mp4`, shows progress
-  beside the menu bar icon, and reveals the file in Finder. The command works without the flag.
+  `~/.config/apparent/config.json`, default off), the menu shows **Export Last Capture as Video…**.
+  Mac saves to `~/Movies/Apparent/<name>.mp4`, shows progress beside the menu bar icon,
+  and reveals the file in Finder. Linux opens the desktop Save dialog for a local `.mp4`
+  destination and shows progress, cancellation and failures in the tray menu; it needs a
+  FileChooser portal backend. See [Linux tray export](docs/export-and-retention.md#linux-tray-export).
+  The command works without the flag.
 
 ## Keeping captures small
 

@@ -53,6 +53,7 @@ class PreviewReleaseTest(unittest.TestCase):
                 tool.chmod(0o755)
             env = dict(os.environ, PATH=f'{root / "bin"}:{os.environ["PATH"]}',
                        APPARENT_PREVIEW_VERSION="0.123.2", APPARENT_PREVIEW_BUILD_NUMBER="123.2",
+                       APPARENT_PREVIEW_NOTARIZE="false",
                        APPARENT_PREVIEW_PUBLIC_KEY=base64.b64encode(bytes([1]) * 32).decode())
             result = subprocess.run(["bash", str(root / "scripts/build-mac-preview.sh")],
                                     env=env, capture_output=True, text=True)
@@ -128,7 +129,7 @@ class PreviewReleaseTest(unittest.TestCase):
         self.assertIn("preview-mac-feed/appcast.xml", script)
         self.assertIn("APPARENT_PREVIEW_PUBLIC_KEY", script)
         self.assertNotIn("apparent.kitlangton.com/appcast.xml", script)
-        self.assertNotIn("notarytool", script)
+        self.assertIn('APPARENT_PREVIEW_NOTARIZE:-false', script)
         self.assertNotIn("site/public", script)
         self.assertIn("codesign --verify", script)
         self.assertIn("hdiutil verify", script)
@@ -205,7 +206,7 @@ class PreviewReleaseTest(unittest.TestCase):
                 sys.exit(2)
             '''))
             stub.chmod(0o755)
-            for scenario, allowed in (("matching", True), ("missing", True),
+            for scenario, allowed in (("matching", True), ("matching_signed", True), ("missing", True),
                                       ("existing_release", False), ("wrong", False),
                                       ("annotated", False), ("api_failure", False)):
                 created = root / "created"
@@ -214,13 +215,15 @@ class PreviewReleaseTest(unittest.TestCase):
                            SCENARIO=scenario, CREATED=str(created), RUNNER_TEMP=tmp,
                            GITHUB_REPOSITORY="tryapparent/apparent", GITHUB_SHA="abc123",
                            GITHUB_RUN_NUMBER="3", GITHUB_RUN_ATTEMPT="1")
+                env['APPARENT_PREVIEW_NOTARIZE'] = 'true' if scenario == 'matching_signed' else 'false'
                 result = subprocess.run(["bash", "-c", script], cwd=root, env=env,
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, allowed, (scenario, result.stderr))
                 self.assertEqual(created.exists(), allowed, scenario)
                 if allowed:
                     args = created.read_text()
-                    self.assertIn("--verify-tag" if scenario == "matching" else "--target abc123", args)
+                    self.assertIn("--verify-tag" if scenario.startswith("matching") else "--target abc123", args)
+                    self.assertIn("notarized by Apple" if scenario == "matching_signed" else "not notarized", args)
 
 
 if __name__ == "__main__":

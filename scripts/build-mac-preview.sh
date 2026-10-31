@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build an isolated, ad-hoc-signed Mac preview. Never call the production release script here.
+# Build an isolated Mac preview. Apple signing is explicit and fails closed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,6 +19,25 @@ except ValueError:
 PY
 
 cd "$ROOT"
+NOTARIZE="${APPARENT_PREVIEW_NOTARIZE:-false}"
+SIGN=(codesign --force --sign -)
+case "$NOTARIZE" in
+  false) ;;
+  true)
+    : "${APPARENT_APPLE_SIGNING_IDENTITY:?set the Developer ID Application identity}"
+    : "${APPARENT_APPLE_TEAM_ID:?set the Apple team ID}"
+    : "${APPARENT_APPLE_SIGNING_DIR:?run scripts/prepare-mac-signing.sh first}"
+    : "${APPARENT_NOTARY_KEY_ID:?set the notarization API key ID}"
+    : "${APPARENT_NOTARY_ISSUER:?set the notarization API issuer}"
+    [[ "$APPARENT_APPLE_SIGNING_IDENTITY" == "Developer ID Application: "*" ($APPARENT_APPLE_TEAM_ID)" ]] || {
+      echo 'Expected a Developer ID Application certificate for the configured team' >&2; exit 1;
+    }
+    test -f "$APPARENT_APPLE_SIGNING_DIR/signing.keychain-db"
+    test -s "$APPARENT_APPLE_SIGNING_DIR/notary.p8"
+    SIGN=(codesign --force --options runtime --timestamp --keychain "$APPARENT_APPLE_SIGNING_DIR/signing.keychain-db" --sign "$APPARENT_APPLE_SIGNING_IDENTITY")
+    ;;
+  *) echo 'APPARENT_PREVIEW_NOTARIZE must be true or false' >&2; exit 1 ;;
+esac
 SPARKLE_DIR="$(scripts/setup-sparkle.sh)"
 APPARENT_PREVIEW_BUILD=1 APPARENT_HELPER_BUNDLE_ID=dev.simonvanlaak.apparent.preview.helper \
   cargo build --release --locked -j 3
@@ -79,21 +98,50 @@ PLIST
 
 plutil -lint "$app/Contents/Info.plist"
 sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
-codesign --force --sign - "$sparkle/XPCServices/Installer.xpc"
-codesign --force --sign - --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
-codesign --force --sign - "$sparkle/Autoupdate"
-codesign --force --sign - "$sparkle/Updater.app"
-codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
-codesign --force --sign - --identifier dev.simonvanlaak.apparent.preview.realtime-writer "$app/Contents/Frameworks/libapparent_realtime_writer.dylib"
-codesign --force --sign - --identifier dev.simonvanlaak.apparent.preview.helper "$app/Contents/MacOS/apparent-helper"
-codesign --force --sign - --identifier dev.simonvanlaak.apparent.preview "$app"
+"${SIGN[@]}" "$sparkle/XPCServices/Installer.xpc"
+"${SIGN[@]}" --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+"${SIGN[@]}" "$sparkle/Autoupdate"
+"${SIGN[@]}" "$sparkle/Updater.app"
+"${SIGN[@]}" "$app/Contents/Frameworks/Sparkle.framework"
+"${SIGN[@]}" --identifier dev.simonvanlaak.apparent.preview.realtime-writer "$app/Contents/Frameworks/libapparent_realtime_writer.dylib"
+if [[ "$NOTARIZE" == true ]]; then
+  "${SIGN[@]}" --entitlements "$ROOT/scripts/Apparent.entitlements" --identifier dev.simonvanlaak.apparent.preview.helper "$app/Contents/MacOS/apparent-helper"
+  "${SIGN[@]}" --entitlements "$ROOT/scripts/Apparent.entitlements" --identifier dev.simonvanlaak.apparent.preview "$app"
+else
+  "${SIGN[@]}" --identifier dev.simonvanlaak.apparent.preview.helper "$app/Contents/MacOS/apparent-helper"
+  "${SIGN[@]}" --identifier dev.simonvanlaak.apparent.preview "$app"
+fi
 codesign --verify --deep --strict --verbose=2 "$app"
+
+if [[ "$NOTARIZE" == true ]]; then
+  # Verify the actual signature, not just the requested identity string.
+  signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
+  grep -Fxq "TeamIdentifier=$APPARENT_APPLE_TEAM_ID" <<< "$signature"
+  grep -Fxq "Authority=$APPARENT_APPLE_SIGNING_IDENTITY" <<< "$signature"
+  # Notarize/staple the app before copying it into either distribution archive.
+  notary_zip="$dist/preview-notary.zip"
+  trap 'rm -f "$notary_zip"' EXIT
+  ditto -c -k --sequesterRsrc --keepParent "$app" "$notary_zip"
+  xcrun notarytool submit "$notary_zip" --key "$APPARENT_APPLE_SIGNING_DIR/notary.p8" \
+    --key-id "$APPARENT_NOTARY_KEY_ID" --issuer "$APPARENT_NOTARY_ISSUER" --wait --timeout 30m
+  xcrun stapler staple "$app"
+  xcrun stapler validate "$app"
+  spctl --assess --type execute --verbose=2 "$app"
+fi
 
 cp -R "$app" "$staging/Apparent Preview.app"
 ln -s /Applications "$staging/Applications"
 rm -f "$dist/$name" "$dist/$name.sha256"
 hdiutil create -quiet -fs HFS+ -format UDZO -volname "Apparent Preview" -srcfolder "$staging" "$dist/$name"
 hdiutil verify "$dist/$name"
+if [[ "$NOTARIZE" == true ]]; then
+  "${SIGN[@]}" "$dist/$name"
+  xcrun notarytool submit "$dist/$name" --key "$APPARENT_APPLE_SIGNING_DIR/notary.p8" \
+    --key-id "$APPARENT_NOTARY_KEY_ID" --issuer "$APPARENT_NOTARY_ISSUER" --wait --timeout 30m
+  xcrun stapler staple "$dist/$name"
+  xcrun stapler validate "$dist/$name"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$dist/$name"
+fi
 (cd "$dist" && shasum -a 256 "$name" > "$name.sha256")
 ditto -c -k --sequesterRsrc --keepParent "$app" "$dist/$zip"
 printf 'Built %s and %s\n' "$dist/$name" "$dist/$zip"

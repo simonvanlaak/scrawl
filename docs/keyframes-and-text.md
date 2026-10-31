@@ -56,6 +56,15 @@ On by default. After a local capture, the Completed capsule keeps its Copy/Send 
 
 Off by default. During a microphone recording, a separate best-effort recognizer checks completed six-second chunks of captured 16 kHz audio, including continuous noise without silence. Only after two active chunks have completed successfully without recognized words does the recording capsule show the inline amber “No words yet” warning. Words clear it; after words arrive it does not claim “yet” again. A missing model or recognition error is not an empty result and cannot trigger that warning. The energy threshold qualifies audio for a check; it is not proof of speech or microphone health. The probe does not supply the final transcript; after Stop the saved audio and final transcription determine the Completed warning above. On Mac the probe runs the helper with a short deadline; on Linux and Windows it uses a separate Parakeet session. The live experiment does not change final transcription or delivered bundle content.
 
+## Experiment `exportNarration` (`src/export/narration.rs`)
+
+Off by default. Explicit `apparent export B --narration cues.json` replaces recorded
+audio in the exported movie with locally generated Kokoro `bm_fable` speech. It never
+changes the bundle or its transcript. Enable `experiments.exportNarration` in the
+inspectable config; provisioning is separate and export does not download models.
+See [export audio](export-and-retention.md#explicit-export-audio) for the versioned
+timed script, integrity pins, limits, provenance and failure/recovery contract.
+
 ## Experiment `liveTranscribe` (`src/live_transcribe.rs`, `helper/LiveTranscribe.swift`)
 
 Off by default (see Experiments in `AGENTS.md`). With it on and Apple Speech the transcriber, `AudioRecorder::start` also starts `apparent-helper transcribe-stream` (one SpeechAnalyzer, finalized results only; it never downloads a model, so one that isn't installed fails at once) and a thread that feeds it the recorder's 16 kHz buffer as `audio::pcm16` every 160 ms. `RecordedAudio.live` carries it to `transcribe::transcribe`, which sends the samples it hasn't had from the finished WAV, closes its input and waits up to 6 s for the tail; the helper must report exactly the WAV's sample count. Word times are therefore the WAV's own, and match one SpeechAnalyzer pass over `audio.wav` word for word and millisecond for millisecond (the batch path splits recordings over 22 s at silences and transcribes the pieces in parallel, so long recordings can differ from it at the cuts). Any failure is logged (`Live transcription failed, …`) and the WAV is transcribed as before; Hex, iPhone and imported recordings never stream. `apparent reprocess B --out O --bench 1 --live-speed 1` replays a bundle's audio into it in real time and logs `Live transcription: N words, … tail N ms` and the finish timings.
@@ -79,6 +88,45 @@ on a Linux machine with Parakeet installed; `--live-speed` replays the saved WAV
 at real speed before timing finalization. Compare with a normal reprocess of the
 same bundle: chunk boundaries can change recognition even when finish is faster.
 
+## Warm recognizer (`src/warm_recognizer.rs`)
+
+On by default for Linux local Parakeet pause transcription. Set the top-level
+`"warmRecognizer": false` in `~/.config/apparent/config.json` to disable it;
+remove that key or set it to `true` to restore reuse. The old
+`experiments.warmRecognizer` flag is no longer read.
+The next recording uses one cached model/session, loaded lazily on its first
+recognition, not at app launch or capture start. It can be reused by subsequent
+recordings. One owner thread serializes recognition and owns native destruction;
+no new unsafe thread-safety declarations are needed. Each native batch run
+replaces its result, and each capture starts with fresh transcript accumulation.
+
+The fixed 30-minute idle timeout starts only when the last capture's pause worker
+has actually ended, after recognition and tail processing. Starting another
+recording cancels expiry for that recording's lifetime. Cancel does not release
+the lease while a detached worker is still recognizing. Idle expiry releases
+both session and model; it never runs during capture or processing.
+
+The first recognition pins the selected model for that capture, including its
+selected filename for transcript metadata. Selection changes apply to the next
+capture's first recognition. A changed file identity invalidates the old cached
+model between captures; if an old lease needs to reload a replaced file, it
+fails into the existing whole-WAV fallback instead of mixing models. Recognition
+errors discard the session. Setting `warmRecognizer` to `false`, or selecting Hex/command,
+clears the cache on the next recording start (after any already-active worker
+ends). Config edits do not interrupt a capture already in progress. Hex, command,
+whole-WAV fallback, Mac speech, saved bundle formats and manual Paste are unchanged.
+
+Local logs report load time, reuse, recognition time and idle expiry without
+transcript, audio or model paths. To measure cold versus warm, replay at least two
+recordings **in the same process** with `--live-speed`; separate `apparent reprocess`
+processes cannot share an in-memory cache. For a saved Screen bundle, use
+`apparent reprocess B --out O --bench 2 --live-speed 1`
+and compare with the same command using an isolated `APPARENT_CONFIG` file with
+`"warmRecognizer": false`. Use the same model and WAV. Retaining the native
+recognizer uses additional idle RAM (about 1 GiB in a two-capture Linux VM test;
+actual use depends on the model and machine). Deterministic lifecycle tests are
+not proof of real recognizer speed, transcript equivalence or GUI capture behavior.
+
 ## Finish timing trace (`src/main.rs`)
 
 Every successfully built bundle has `finish-trace.json` beside `apparent.json`, with `stopMs`, `audioMs`, `candidatesMs`, `transcribeMs`, `selectMs`, `decodeMs`, `autocropMs`, `sheetMs`, `writeMs`, `totalMs`, and `preparedVisuals`. Missing stages are null. The trace holds durations and a boolean only, not transcript or screen content; it is not copied into `summary.md` or clipboard. Transcription and visual preparation can overlap, so stage durations do not add up to `totalMs`. Failed builds do not get a trace; use the local `apparent.log` for errors. The existing `finish timings:` log line includes the bundle ID. Bundle retention also removes its trace when it removes the bundle.
@@ -91,6 +139,14 @@ The old automatic OpenCode attachment policy is inactive. The full capture, keyf
 ## Passive auto-crop safety (`src/autocrop.rs`)
 
 A crop inferred only from cursor dwell or screen changes must retain the frontmost regular window recorded at that keyframe's time, not just intersect a blank corner. Otherwise Apparent keeps the whole frame, after grouping and content-edge trimming. The existing focus crop inside a large window remains available when that crop was actually attributed to the frontmost window and still intersects it. Whole-capture scope keeps one shared full-frame fallback if any keyframe needs it. Deliberate input (ink, clicks, drags, laser or scroll) can still select another window. Window snapshots are never applied before their timestamps, and an app name appears in a crop label only when one of its recorded windows intersects the delivered crop. This is a correction to existing auto-crop behavior, not a new experiment; it does not change capture mode, window metadata collection or full-frame preservation.
+
+## Experiment `onboardingFirstCapture`
+
+Off by default. The welcome tour requires the user to choose a Record shortcut,
+then complete a local recording started with it. Dismissal leaves the tour
+unfinished. Enable it before opening onboarding; see
+[onboarding and settings](onboarding-and-settings.md#first-capture-experiment).
+It changes neither capture contents nor outbound delivery.
 
 ## Experiment `nativeLaunch`
 

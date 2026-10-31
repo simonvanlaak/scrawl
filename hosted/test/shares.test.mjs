@@ -72,6 +72,16 @@ test('public reads spend the durable allowance, reject unshared IDs and fail clo
  }finally{await f.close();}
 });
 
+test('deleted ready captures report deletion after their obsolete upload deadline',async()=>{
+ const f=await setup();try{
+  const a=await f.identity('deleted'),p=await reserve(f,a);await ready(f,a,p);
+  const s=await (await f.call(p+'/share',{token:a.token,method:'POST'})).json(),path=new URL(s.url).pathname;
+  await f.db.prepare('UPDATE captures SET pending_until=? WHERE id=?').bind(Date.now()-1,id(171)).run();
+  assert.equal((await f.call(p,{token:a.token,method:'DELETE'})).status,200);
+  const response=await f.call(path);assert.equal(response.status,410);assert.match(await response.text(),/<h1>Deleted<\/h1>/);
+  const list=await (await f.call('/v1/shares',{cookie:a.cookie})).json();assert.equal(list.shares[0].status,'deleted');
+ }finally{await f.close();}
+});
 test('pending progress reflects confirmed files, failed state is not ready, default-off grant gate',async()=>{
  const f=await setup();try{
   const a=await f.identity('progress'),p=await reserve(f,a),s=await (await f.call(p+'/share',{token:a.token,method:'POST'})).json(),path=new URL(s.url).pathname;

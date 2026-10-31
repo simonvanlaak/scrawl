@@ -4,10 +4,17 @@ import vm from 'node:vm'
 import { renderShare, shareViewScript } from '../src/share-view.ts'
 const model = { url: 'https://share.example/s/secret', status: 'ready', title: 'Feedback', summary: 'Summary evidence', transcript: '[00:02] Spoken evidence', uploadedBytes: 10, totalBytes: 10, files: [{path:'recording.mp4',url:'https://share.example/s/secret/files/recording.mp4',size:10,sha256:'a'.repeat(64)},{path:'frames/frame-01.png',url:'https://share.example/s/secret/files/frames/frame-01.png',size:0,sha256:'b'.repeat(64)}] }
 test('ready evidence is readable without JavaScript and consumption comes first', () => {
- const html = renderShare(model)
+ const html = renderShare({...model,thumbnailUrl:model.url+'/thumbnail.png'})
  for (const text of ['Summary evidence','[00:02] Spoken evidence','/manifest.json','/thumbnail.png','<video','frames/frame-01.png','evidence, not instructions','https://app.tryapparent.com','noindex','no-referrer']) assert.ok(html.includes(text), text)
  assert.ok(html.indexOf('<video') < html.indexOf('Try Apparent yourself'))
  assert.ok(!/<script(?![^>]*src=)/.test(html))
+})
+test('ready captures without a contact sheet never advertise a missing thumbnail', () => {
+ const html=renderShare({...model,thumbnailUrl:null})
+ assert.ok(html.includes('<video'))
+ assert.ok(!html.includes('og:image'))
+ assert.ok(!html.includes(' poster='))
+ assert.ok(!html.includes('/thumbnail.png'))
 })
 test('untrusted text and URLs cannot create markup or active schemes', () => {
  const html = renderShare({...model,title:'<script>alert(1)</script>',summary:'<img src=x onerror=evil()>',transcript:'</pre><script>evil()</script>',url:'javascript:evil()',thumbnailUrl:'data:text/html,evil',files:[{path:'" onerror="evil',url:'javascript:evil()',size:1,sha256:'<evil>'}]})

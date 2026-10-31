@@ -16,7 +16,7 @@ export function renderShare(model: ShareModel) {
   const video = files.find(file => /recording\.(mp4|mov)$/.test(file.path))
   const images = files.filter(file => /^frames\/frame-\d+\.png$/.test(file.path))
   const manifest = base ? `${base}/manifest.json` : ''
-  const thumbnail = base ? `${base}/thumbnail.png` : ''
+  const thumbnail = base && safeUrl(model.thumbnailUrl || '') === `${base}/thumbnail.png` ? `${base}/thumbnail.png` : ''
   const evidence = ready ? `${video ? `<video controls preload="metadata" playsinline src="${escape(video.url)}"${thumbnail ? ` poster="${escape(thumbnail)}"` : ''}>Download the video below.</video>` : ''}
     <section><h2>Summary</h2><pre>${escape(model.summary || 'No summary was supplied.')}</pre></section>
     <section><h2>Transcript</h2><pre>${escape(model.transcript || 'No transcript was supplied.')}</pre></section>

@@ -7,7 +7,7 @@ import {validPath} from './captures.ts';
 // independently of cron; an old capability never points at a new incarnation.
 function state(row: ShareRow): ShareState {
  if(row.revoked_at!==null)return 'revoked';
- if(row.expires_at<=Date.now()||(row.status!=='ready'&&row.pending_until<=Date.now()))return 'expired';
+ if(row.expires_at<=Date.now()||(row.status==='pending'&&row.pending_until<=Date.now()))return 'expired';
  if(row.status==='deleted')return 'deleted';
  if(row.status==='ready')return 'ready';
  return row.upload_state==='uploading'?'pending':row.upload_state;

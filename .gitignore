@@ -7,3 +7,4 @@
 /artifacts
 /*.apparent
 __pycache__/
+/hosted/wrangler.cd.json

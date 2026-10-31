@@ -18,6 +18,8 @@ mod export;
 #[cfg(test)]
 mod feature_map;
 mod handoff;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod hosted;
 #[cfg_attr(target_os = "windows", path = "win/helper.rs")]
 #[cfg_attr(target_os = "linux", path = "linux/helper.rs")]
 mod helper;
@@ -240,6 +242,16 @@ enum TuneCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Opt-in hosted account and upload queue management.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Cloud { #[command(subcommand)] command: hosted::CloudCommand },
+    /// Retrieve and validate a complete hosted capture using a separate read credential.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Fetch {
+        id: String,
+        #[arg(long)] out: PathBuf,
+        #[arg(long, default_value_t = 0)] wait: u64,
+    },
     /// Open Apparent without recording. Only apparent://open is accepted.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     Launch { url: Option<String> },
@@ -1682,6 +1694,7 @@ fn run_owned_app(record: bool, iphone: bool) -> Result<()> {
         "another Apparent GUI is running; update and restart it first"
     );
     owner.listen()?;
+    hosted::start_worker();
     #[cfg(target_os = "linux")]
     if let Err(error) = linux::update::record_running() {
         eprintln!("Apparent could not record its running version in config: {error:#}");
@@ -1716,6 +1729,10 @@ fn main() -> Result<()> {
         },
     };
     match command {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Cloud { command } => hosted::command(command),
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Command::Fetch { id, out, wait } => hosted::fetch(&id, &out, wait),
         #[cfg(target_os = "linux")]
         Command::LaunchHandler { command } => match command {
             LaunchHandlerCommand::Install => linux::launch_handler::install(),

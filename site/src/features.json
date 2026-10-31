@@ -48,6 +48,23 @@
       "docs": ["site/docs/social-preview.md"]
     },
     {
+      "id": "hosted-sync",
+      "group": "delivery",
+      "name": "Hosted complete-bundle handoff",
+      "says": "Explicit upload login queues new GUI captures without waiting for the network. Clipboard text includes a non-secret ID and remote fetch instruction while pending. A separate read login retrieves and validates the complete bundle; failures preserve the local original.",
+      "status": "experiment:hostedSync",
+      "added": "2026-10-30",
+      "platforms": ["mac", "linux"],
+      "note": "Default off; CLI sign-in only. Candidate requires native capture/paste proof on each OS and deployed account approval. V1 rejects files above 90,000,000 bytes rather than omitting media. No automatic historical uploads. Explicit cloud upload creates a fresh ID; cloud retry keeps existing IDs. Device grants require reauthorization after 30 days.",
+      "config": [
+        { "key": "cloud.enabled", "value": "boolean; false by default", "does": "Enable the automatic upload queue only with experiment and consent" },
+        { "key": "cloud.uploadConsent", "value": "boolean; false by default", "does": "Record explicit permission to share capture contents" },
+        { "key": "cloud.server", "value": "HTTPS API origin; loopback HTTP for development", "does": "Select the hosted account API, not a token or preference store" }
+      ],
+      "docs": ["docs/hosted-client.md", "docs/hosted-api.md"]
+
+    },
+    {
       "id": "native-launch",
       "group": "install",
       "name": "Open the installed app by URL",

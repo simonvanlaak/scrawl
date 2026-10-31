@@ -3326,7 +3326,12 @@ impl ApparentCoordinator {
                         generation,
                         #[cfg(any(target_os = "macos", target_os = "linux"))]
                         finishing_id.as_deref(),
+                        feedback_capture,
                         finalized,
+                        |dir| {
+                            #[cfg(any(target_os = "macos", target_os = "linux"))]
+                            crate::hosted::completed(dir);
+                        },
                         |coord, finalized| {
                             coord.completed_dir = None;
                             let (dir, bundle, _) = match finalized {
@@ -3431,7 +3436,9 @@ impl ApparentCoordinator {
         &mut self,
         generation: u64,
         #[cfg(any(target_os = "macos", target_os = "linux"))] finishing_id: Option<&str>,
+        feedback_capture: bool,
         finalized: anyhow::Result<(PathBuf, ApparentBundle, String)>,
+        on_completed: impl FnOnce(&std::path::Path),
         on_current: impl FnOnce(&mut Self, anyhow::Result<(PathBuf, ApparentBundle, String)>),
     ) {
         // The worker still owns its exact ID's receipt after dismissal. Only its
@@ -3441,6 +3448,13 @@ impl ApparentCoordinator {
             self.agent_captures.finish(id, finalized.as_ref()
                 .map(|(dir, _, _)| dir.as_path())
                 .map_err(|error| format!("{error:#}")));
+        }
+        // A saved ordinary capture completes independently of its pill. Hosted
+        // admission rechecks current consent; feedback and failed takes stay local.
+        if !feedback_capture {
+            if let Ok((dir, _, _)) = &finalized {
+                on_completed(dir);
+            }
         }
         if !self.accepts_capture_result(generation) {
             return;
@@ -6592,7 +6606,7 @@ mod tests {
     #[test]
     fn deferred_finalizer_success_survives_dismissal_and_new_capture() {
         for processing_b in [false, true] {
-            deferred_finalizer_receipt_survives_dismissal_and_new_capture(true, processing_b);
+            deferred_finalizer_receipt_survives_dismissal_and_new_capture(true, processing_b, false);
         }
     }
 
@@ -6600,12 +6614,22 @@ mod tests {
     #[test]
     fn deferred_finalizer_failure_survives_dismissal_and_new_capture() {
         for processing_b in [false, true] {
-            deferred_finalizer_receipt_survives_dismissal_and_new_capture(false, processing_b);
+            deferred_finalizer_receipt_survives_dismissal_and_new_capture(false, processing_b, false);
         }
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    fn deferred_finalizer_receipt_survives_dismissal_and_new_capture(succeeded: bool, processing_b: bool) {
+    #[test]
+    fn deferred_feedback_finalizer_stays_local_after_dismissal() {
+        for succeeded in [false, true] {
+            for processing_b in [false, true] {
+                deferred_finalizer_receipt_survives_dismissal_and_new_capture(succeeded, processing_b, true);
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn deferred_finalizer_receipt_survives_dismissal_and_new_capture(succeeded: bool, processing_b: bool, feedback: bool) {
         use crate::onboarding::{Effect, Flow, Grants, Input, Permission, Session, Status, Step};
         let (sender, _receiver) = flume::unbounded();
         let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
@@ -6665,9 +6689,13 @@ mod tests {
         coordinator.review_bundle = Some((PathBuf::from("/synthetic/b-review.apparent"), bundle));
         let review_b = coordinator.review_bundle.clone();
 
-        coordinator.receive_capture_result(generation_a, Some(&finishing_id), deferred, |_, _| {
+        let mut completed = Vec::new();
+        coordinator.receive_capture_result(generation_a, Some(&finishing_id), feedback, deferred, |dir| {
+            completed.push(dir.to_path_buf());
+        }, |_, _| {
             panic!("stale A must not enter UI/clipboard/onboarding effects");
         });
+        assert_eq!(completed, if succeeded && !feedback { vec![exact_path.clone()] } else { vec![] });
         let receipt_a = coordinator.agent_captures.inspect("a");
         if succeeded {
             assert_eq!(receipt_a, serde_json::json!({
@@ -6686,6 +6714,42 @@ mod tests {
         assert_eq!(coordinator.completed_note.as_deref(), Some("B's note"));
         assert_eq!(coordinator.review_bundle, review_b);
         assert_eq!(coordinator.onboarding.as_mut().unwrap().action("continue"), Effect::None);
+    }
+
+    #[test]
+    fn current_finalizer_completes_once_before_ui_for_agent_and_manual_captures() {
+        for owned in [false, true] {
+            for feedback in [false, true] {
+                let (sender, _receiver) = flume::unbounded();
+                let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+                coordinator.set_island_phase(IslandPhase::Processing);
+                let generation = coordinator.capture_generation;
+                if owned {
+                    assert!(coordinator.agent_captures.admit("a", false, false));
+                    coordinator.agent_captures.set("a", "processing", None, None);
+                }
+                let bundle = serde_json::from_value(serde_json::json!({
+                    "version": 1, "id": "a", "createdAtMs": 0, "durationMs": 1000,
+                    "target": {"mode": "display", "displayId": 0,
+                        "frame": {"x": 0.0, "y": 0.0, "width": 640.0, "height": 480.0, "scale": 1.0}},
+                    "transcript": {"source": "test", "text": "", "segments": []},
+                    "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png"
+                })).unwrap();
+                let path = PathBuf::from("/synthetic/current-exact.apparent");
+                let effects = std::cell::RefCell::new(Vec::new());
+                coordinator.receive_capture_result(generation, owned.then_some("a"), feedback,
+                    Ok((path.clone(), bundle, String::new())),
+                    |dir| { assert_eq!(dir, path); effects.borrow_mut().push("completed"); },
+                    |coord, result| {
+                        assert_eq!(result.unwrap().0, path);
+                        if owned {
+                            assert_eq!(coord.agent_captures.inspect("a")["status"], "saved");
+                        }
+                        effects.borrow_mut().push("ui");
+                    });
+                assert_eq!(*effects.borrow(), if feedback { vec!["ui"] } else { vec!["completed", "ui"] });
+            }
+        }
     }
 
     #[test]

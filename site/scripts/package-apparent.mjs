@@ -19,7 +19,7 @@ if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangt
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 for (const name of [
-  "index.html", "assets", "pond", "team", "feature-demos", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
+  "index.html", "hosted", "assets", "pond", "team", "feature-demos", "apparent-wordmark.svg", "icon.svg", "HostGrotesk-Variable.ttf",
   "social-preview-v1.png",
   "Apparent-ghost-demo-v4-lilac.mp4", "Apparent-ghost-demo-v4-lilac-poster.jpg",
 ]) {

@@ -1,8 +1,9 @@
-# Connect browser product — migration staging
+# Connect browser product
 
 Independent React/Vite browser + loading-only SSR package. It owns account and
 waitlist screens, Google sign-in entry, scope-specific device consent and readback.
-The existing combined website is unchanged and remains operational.
+`site/` owns marketing only. Its public packager composes this independent artifact
+at the existing URLs; no service or live deployment moves with this extraction.
 
 ## Build and recovery
 
@@ -57,14 +58,14 @@ Never substitute `dist-test` for `dist`; it embeds a loopback API origin.
 
 ## Removal gate and rollback
 
-The duplicate is intentional **migration staging**, not two permanent owners.
-Integration must wire builds/artifact composition, route aliases, deployment and
-CI; exercise the exact composed artifact against the same browser contracts;
-verify live OAuth/callback/CORS/cookie behavior in separately authorized staging;
-then remove `site/src/hosted` and its route/SSR/prerender wiring. Preserve approved
-visuals and explicit consent. Update the feature map/docs in that integration
-change, not this exclusive-ownership slice. Roll back by restoring legacy route
-composition; no API, cookie, schema or native credential migration is required.
+The extraction began as migration staging, not two permanent owners.
+Integration wired builds, allowlisted composition and CI, then exercised the
+composed artifact against the same browser/SSR contracts and compared synthetic
+screenshots before removing `site/src/hosted`. There is one production browser
+implementation. Live OAuth remains unrun; byte-equivalent folder integration
+does not require new live authorization. Deployment acceptance remains separate.
+Roll back by reverting the integration and restoring legacy route composition;
+no API, cookie, schema or native credential migration is required.
 
 ## Verification scope
 

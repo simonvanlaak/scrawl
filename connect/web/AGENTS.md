@@ -1,12 +1,12 @@
 # Connect web ownership
 
 This package owns browser account, auth entry, device consent and their presentation.
-Only edit `connect/web/**` for the extraction slice. Do not change the running app,
-legacy site, API service, deployment composition or native capture code.
+Runtime ownership is `connect/web/**`. Do not change the running app, API service
+or native capture code as a side effect of browser work.
 
-- This is named **migration staging**: legacy `site/src/hosted` is still live.
-  Keep copies behavior-identical until integration tests the composed artifact,
-  switches routing, and removes legacy implementation in one reversible change.
+- This is the sole browser implementation. Marketing browser/SSR must not import
+  it. `site/scripts/build-public.mjs` builds both products independently, and
+  `package-apparent.mjs` composes only allowed routes and referenced assets.
 - Browser/backend contract: `../../docs/hosted-api.md`; selected visuals:
   `../../site/docs/hosted-design.md`. No redesign or shared marketing CSS.
 - Run `bun install --frozen-lockfile`, then `npm test`. `bun run build` also works.

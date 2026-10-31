@@ -36,8 +36,7 @@ The native connected/upload-enabled display, capsule, per-capture upload status,
 From `site/`:
 
 ```sh
-APPARENT_PUBLIC_SITE=1 npm run build
-node scripts/package-apparent.mjs
+VITE_HOSTED_API_ORIGIN=https://hosted.tryapparent.com node scripts/build-public.mjs
 SITE_EVIDENCE="$TMPDIR/hosted-v4-evidence" npm run test:hosted
 ```
 

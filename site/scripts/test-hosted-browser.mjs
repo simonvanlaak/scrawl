@@ -1,4 +1,5 @@
-// Controlled synthetic API + exact production artifact. No real Google or hosted service.
+// Controlled synthetic API + exact packaged website. The API origin is build-specific.
+// No real Google or Connect service; loopback builds are not production artifacts.
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile, mkdir } from 'node:fs/promises'

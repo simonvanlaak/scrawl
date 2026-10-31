@@ -66,9 +66,27 @@ export const logout = (csrf: string) => request("/auth/logout", csrf)
 
 export type Share = { id: string; captureId: string; title: string; status: string; createdAt: string; expiresAt: string; url?: string }
 export async function shares(): Promise<Share[]> {
-  const data = record(await request("/v1/shares"))
-  if (!Array.isArray(data.shares)) throw new Error("Shared links could not be read.")
-  return data.shares.map(value => {
+  // Return only a complete list. In particular, absence on page one is not
+  // evidence that a later-page link was revoked.
+  const rows: Share[] = [], cursors = new Set<string>(), ids = new Set<string>()
+  let before: string | null = null
+  do {
+    const data = record(await request(`/v1/shares${before ? `?before=${encodeURIComponent(before)}` : ""}`))
+    if (!Array.isArray(data.shares) || data.shares.length > 100 || !(data.nextCursor === null || (typeof data.nextCursor === "string" && /^\d+:[a-f0-9]{32}$/.test(data.nextCursor) && Number.isSafeInteger(Number(data.nextCursor.split(":")[0]))))) throw new Error("Shared links returned invalid pagination data. Reload to check the complete list.")
+    for (const value of data.shares) {
+      const row = share(value)
+      if (ids.has(row.id)) throw new Error("Shared links changed while loading. Reload to check the complete list.")
+      ids.add(row.id); rows.push(row)
+    }
+    before = data.nextCursor as string | null
+    if (before !== null) {
+      if (cursors.has(before)) throw new Error("Shared links returned a repeated page. Reload to check the complete list.")
+      cursors.add(before)
+    }
+  } while (before !== null)
+  return rows
+}
+function share(value: unknown): Share {
     const row = record(value)
     if (!["id", "captureId", "title", "status", "createdAt", "expiresAt"].every(key => typeof row[key] === "string") || !row.id || !["pending", "ready", "paused", "failed", "expired", "revoked", "deleted"].includes(row.status as string) || !Number.isFinite(Date.parse(row.createdAt as string)) || !Number.isFinite(Date.parse(row.expiresAt as string))) throw new Error("Shared links returned invalid data.")
     const result: Share = { id: row.id as string, captureId: row.captureId as string, title: row.title as string, status: row.status as string, createdAt: row.createdAt as string, expiresAt: row.expiresAt as string }
@@ -78,6 +96,5 @@ export async function shares(): Promise<Share[]> {
       result.url = url.href
     }
     return result
-  })
 }
 export const stopSharing = (csrf: string, id: string) => request(`/v1/shares/${encodeURIComponent(id)}`, csrf, undefined, "DELETE")

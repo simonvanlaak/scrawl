@@ -15,7 +15,8 @@ for (const route of ['hosted', 'hosted/device', 'hosted/shares']) {
 }
 assert(!(await readFile(`${root}/index.html`, 'utf8')).includes('href="/hosted'))
 assert(!(await readFile(`${root}/sitemap.xml`, 'utf8')).includes('/hosted'))
-let scenario = {}, writes = [], approved = false, signedOut = false, interest = false, revoked = false, recipientStatus = 'ready'
+const sharesCursor = '1793437200000:' + 'b'.repeat(32)
+let scenario = {}, writes = [], shareReads = [], approved = false, signedOut = false, interest = false, revoked = false, recipientStatus = 'ready'
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (url.pathname === '/share-view.js') { res.setHeader('Content-Type','text/javascript'); return res.end(shareViewScript) }
@@ -41,7 +42,13 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/v1/shares/share-1' && !scenario.unconfirmed) revoked = true
       return res.end('{"ok":true}')
     }
-    if (url.pathname === '/v1/shares') return res.end(JSON.stringify({shares: scenario.empty ? [] : [{id:'share-1',captureId:'a'.repeat(32),title:'<script>Captured title</script>',status:revoked?'revoked':'ready',createdAt:'2026-10-31T10:00:00Z',expiresAt:'2026-11-07T10:00:00Z',...(!revoked ? {url:'https://share.example/s/synthetic'} : {})}]}))
+    if (url.pathname === '/v1/shares') {
+      shareReads.push(url.pathname + url.search)
+      if (scenario.readbackUnavailable && writes.length && url.searchParams.has('before')) return res.writeHead(503).end('{}')
+      if (scenario.paginated && !url.searchParams.has('before')) return res.end(JSON.stringify({shares:Array.from({length:100},(_,i)=>({id:`older-${i}`,captureId:'b'.repeat(32),title:`Other recording ${i+1}`,status:'revoked',createdAt:'2026-10-31T10:00:00Z',expiresAt:new Date(Date.now()+604800000).toISOString()})),nextCursor:sharesCursor}))
+      if (scenario.paginated) assert.equal(url.searchParams.get('before'),sharesCursor)
+      return res.end(JSON.stringify({shares: scenario.empty ? [] : [{id:'share-1',captureId:'a'.repeat(32),title:'<script>Captured title</script>',status:revoked?'revoked':'ready',createdAt:'2026-10-31T10:00:00Z',expiresAt:new Date(Date.now()+604800000).toISOString(),...(!revoked ? {url:'https://share.example/s/synthetic'} : {})}],nextCursor:null}))
+    }
     if (url.pathname === '/v1/device') return res.end(JSON.stringify({ scope: scenario.scope || 'read', status: approved ? 'approved' : scenario.status || 'pending', ...(scenario.withExpiry ? { expiresAt: new Date(Date.now() + 600000).toISOString() } : {}) }))
     if (scenario.anonymous || signedOut) return res.end('{"authenticated":false,"csrfToken":null,"account":null,"slots":{"used":0,"limit":20,"remaining":20}}')
     return res.end(JSON.stringify({ authenticated: true, csrfToken: 'synthetic-csrf', account: { email: 'verified@example.com', beta: scenario.waitlist ? 'waitlist' : 'active', quotaBytes: 500000000, usedBytes: 0, waitlist: { interestedAtFiveDollars: interest } }, slots: { used: scenario.full ? 20 : 0, limit: scenario.invalid ? 50 : 20, remaining: scenario.full ? 0 : 20 }, accessToken: 'must-not-render' }))
@@ -107,8 +114,8 @@ try {
     }
     results.push(test.name); await page.close()
   }
-  for (const test of [{name:'shares',width:390},{name:'shares-empty',empty:true},{name:'shares-denied',forbidden:true},{name:'shares-unconfirmed',unconfirmed:true}]) {
-    scenario=test; writes=[];signedOut=false;revoked=false
+  for (const test of [{name:'shares',width:390},{name:'shares-empty',empty:true},{name:'shares-denied',forbidden:true},{name:'shares-unconfirmed',unconfirmed:true},{name:'shares-page-two',paginated:true,width:390},{name:'shares-page-two-unconfirmed',paginated:true,unconfirmed:true},{name:'shares-page-two-readback-unavailable',paginated:true,readbackUnavailable:true}]) {
+    scenario=test; writes=[];shareReads=[];signedOut=false;revoked=false
     const page=await browser.newPage({viewport:{width:test.width||1100,height:900}})
     await page.context().addCookies([{name:'fixture',value:'1',url:`http://127.0.0.1:${server.address().port}`}])
     await page.goto(`http://127.0.0.1:${server.address().port}/hosted/shares`)
@@ -116,19 +123,22 @@ try {
     await page.waitForFunction(()=>document.querySelector('.hosted-panel')?.getAttribute('aria-busy')==='false')
     assert.match(await page.locator('main').innerText(),/Anyone with this link/)
     assert.equal(writes.length,0)
+    if(test.paginated) {assert.equal(await page.locator('.hosted-shares > li').count(),101);assert.ok(shareReads.includes('/v1/shares?before='+encodeURIComponent(sharesCursor)))}
     if(test.empty) assert.match(await page.locator('main').innerText(),/No shared links/)
     else {
       assert.equal(await page.getByRole('link',{name:'Open shared recording'}).getAttribute('href'),'https://share.example/s/synthetic')
       await page.getByRole('button',{name:'Stop sharing'}).evaluate(e=>{e.click();e.click()})
       await page.waitForFunction(()=>document.querySelector('.hosted-panel')?.getAttribute('aria-busy')==='false')
       assert.equal(writes.length,1);assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].path,'/v1/shares/share-1');assert.equal(writes[0].csrf,'synthetic-csrf')
-      if(test.forbidden||test.unconfirmed) assert.equal(await page.getByRole('alert').count(),1)
+      if(test.forbidden||test.unconfirmed||test.readbackUnavailable) assert.equal(await page.getByRole('alert').count(),1)
       else {assert.equal(await page.getByRole('link',{name:'Open shared recording'}).count(),0);assert.match(await page.locator('main').innerText(),/revoked/)}
+      if(test.paginated) assert.equal(shareReads.filter(path=>path==='/v1/shares?before='+encodeURIComponent(sharesCursor)).length,2,'readback must traverse page two again, not infer revocation from absence on page one')
     }
     assert.equal(await page.locator('script').filter({hasText:'Captured title'}).count(),0)
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
     assert.ok(!(await page.content()).includes('synthetic-csrf'))
-    await page.screenshot({path:`${evidence}/${test.name}.png`,fullPage:true});await page.close();results.push(test.name)
+    if(test.paginated && !test.unconfirmed && !test.readbackUnavailable) await page.locator('.hosted-shares > li').last().scrollIntoViewIfNeeded()
+    await page.screenshot({path:`${evidence}/${test.name}.png`,fullPage:!test.paginated});await page.close();results.push(test.name)
   }
   for(const status of ['ready','pending','paused','failed','expired','revoked','deleted']) {
     recipientStatus=status

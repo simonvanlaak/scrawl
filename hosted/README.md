@@ -18,6 +18,10 @@ The five runtime modules in `src/*.ts` use strict TypeScript and official Worker
 
 ## Deployment checklist (parent authorization required)
 
+The gated main-branch delivery workflow and its separate activation prerequisites
+are documented in [`../docs/continuous-delivery.md`](../docs/continuous-delivery.md).
+It never applies migrations or initializes the budget ledger.
+
 - Discover the actual Cloudflare account/routes and existing resources first; do not deploy this template blindly.
 - **Local SQL budgets pass; remote Free verification is still blocked.** See the measured operation counts below. The template omits the Paid-only `limits.cpu_ms` override. Local native-checksum tests and statement counts do not prove Free's 10ms CPU limit. Do not activate Paid or deploy without the parent's separate decision.
 - Configure an authorized D1 database and private **Standard** R2 bucket. Disable public `r2.dev`/custom-domain access and direct client credentials. No Infrequent Access transitions or metered integrations. Keep bucket lifecycle deletion rules off unless they preserve the service's live seven-day retention contract. Verify Workers/D1 Free and a fail-closed API route separately; no Paid upgrade is authorized here.

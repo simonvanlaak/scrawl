@@ -209,3 +209,35 @@ fn publication_detects_postvalidation_manifest_replacement_before_cleanup() {
     assert!(result.is_err());
     assert!(fixture.0.join(IN_PROGRESS).exists());
 }
+
+#[test]
+fn publication_inputs_feed_existing_engine_validator_without_claiming_saved() {
+    // Engine deliberately rejects group-writable ancestors even below a private
+    // parent. The shared build scratch directory has such an ancestor; use a
+    // synthetic, automatically removed fixture beneath the owned home instead.
+    let fixture = Fixture(dirs::home_dir().unwrap().join(format!(
+        ".publication-test-{}.apparent",
+        crate::make_bundle_id()
+    )));
+    let (_, bundle, summary) = fixture.build();
+    let _lease = coordinate(&fixture.0).unwrap();
+    let inputs = checked(&fixture.0, &bundle, &summary).unwrap();
+    apparent_capture_engine::FinalizerSuccess::validate(
+        "0123456789abcdef0123456789abcdef",
+        &inputs.bundle_id,
+        &inputs.path,
+        &inputs.manifest,
+    )
+    .unwrap();
+}
+
+#[test]
+fn publication_rejects_bundle_directory_replacement_under_existing_writer_lease() {
+    let fixture = Fixture::new();
+    let (_, bundle, summary) = fixture.build();
+    let _lease = coordinate(&fixture.0).unwrap();
+    let moved = Fixture::new();
+    std::fs::rename(&fixture.0, &moved.0).unwrap();
+    std::fs::create_dir(&fixture.0).unwrap();
+    assert!(checked(&fixture.0, &bundle, &summary).is_err());
+}

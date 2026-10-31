@@ -1,5 +1,6 @@
 //! The final persistence boundary. No Engine terminal authority lives here.
 //! Hold `coordinate` across optional post-build mutations, then call `checked`.
+mod cleanup;
 mod fs;
 mod movie;
 mod validate;
@@ -9,8 +10,8 @@ use anyhow::{Context, Result, ensure};
 pub(crate) use fs::Directory;
 use std::{
     cell::RefCell,
-    collections::HashSet,
-    fs::File,
+    collections::{HashMap, HashSet},
+    fs::{File, Metadata},
     marker::PhantomData,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
@@ -20,7 +21,7 @@ use std::{
 pub const IN_PROGRESS: &str = ".publication-pending";
 const LOCK: &str = ".publication.lock";
 type Built = (PathBuf, ApparentBundle, String);
-thread_local! { static HELD: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new()); }
+thread_local! { static HELD: RefCell<HashMap<PathBuf, Metadata>> = RefCell::new(HashMap::new()); }
 thread_local! { static PUBLISHING: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new()); }
 
 /// Writer coordination, not capture admission. Reentrant only on the owning thread.
@@ -28,15 +29,17 @@ thread_local! { static PUBLISHING: RefCell<HashSet<PathBuf>> = RefCell::new(Hash
 pub struct Coordination {
     path: PathBuf,
     lock: Option<File>,
+    root: Metadata,
     _not_send: PhantomData<Rc<()>>,
 }
 
 pub fn coordinate(path: &Path) -> Result<Coordination> {
     let path = fs::absolute(path)?;
-    if HELD.with(|held| held.borrow().contains(&path)) {
+    if let Some(root) = HELD.with(|held| held.borrow().get(&path).cloned()) {
         return Ok(Coordination {
             path,
             lock: None,
+            root,
             _not_send: PhantomData,
         });
     }
@@ -46,10 +49,20 @@ pub fn coordinate(path: &Path) -> Result<Coordination> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
         return Err(std::io::Error::last_os_error().into());
     }
-    HELD.with(|held| held.borrow_mut().insert(path.clone()));
+    let metadata = root.0.metadata()?;
+    ensure!(
+        fs::same_directory(&metadata, &Directory::open(&path, false)?.0.metadata()?),
+        "bundle replaced while acquiring writer coordination"
+    );
+    ensure!(
+        fs::same(&lock.metadata()?, &root.file(LOCK)?.metadata()?),
+        "publication lock replaced"
+    );
+    HELD.with(|held| held.borrow_mut().insert(path.clone(), metadata.clone()));
     Ok(Coordination {
         path,
         lock: Some(lock),
+        root: metadata,
         _not_send: PhantomData,
     })
 }
@@ -91,6 +104,10 @@ pub fn publish_after(path: &Path, build: impl FnOnce() -> Result<Built>) -> Resu
     }
     let publishing = Publishing(absolute);
     let root = Directory::open(path, false)?;
+    ensure!(
+        fs::same_directory(&guard.root, &root.0.metadata()?),
+        "bundle replaced before build"
+    );
     root.write(IN_PROGRESS, b"publication has not completed\n")?;
     let result = build().and_then(|built| {
         ensure!(
@@ -111,7 +128,10 @@ pub fn publish_after(path: &Path, build: impl FnOnce() -> Result<Built>) -> Resu
     }
     drop(publishing);
     drop(guard);
-    if result.is_ok() {
+    if result
+        .as_ref()
+        .is_ok_and(|(_, bundle, _)| bundle.transcript.missing.as_ref().is_some_and(|m| m.retry))
+    {
         crate::speech_model::resume_pending(path);
     }
     result
@@ -120,7 +140,11 @@ pub fn publish_after(path: &Path, build: impl FnOnce() -> Result<Built>) -> Resu
 /// Validate exact final bytes, flush every artifact and nested directory, then
 /// remove recovery/in-progress markers and flush root and its parent. Fail closed.
 pub fn checked(path: &Path, expected: &ApparentBundle, summary: &str) -> Result<PublicationInputs> {
-    let _guard = coordinate(path)?;
+    let guard = coordinate(path)?;
+    ensure!(
+        fs::same_directory(&guard.root, &Directory::open(path, false)?.0.metadata()?),
+        "bundle replaced before validation"
+    );
     checked_with(path, expected, summary, || Ok(()))
 }
 
@@ -140,25 +164,15 @@ fn checked_with(
         fs::same_directory(&before, &Directory::open(path, false)?.0.metadata()?),
         "bundle directory changed during publication"
     );
-    // No marker disappears until all required artifacts have passed validation/fsync.
-    for marker in [
-        crate::recover::UNFINISHED,
-        crate::recover::RECOVERING,
-        crate::recover::UNSAFE_VIDEO,
-        IN_PROGRESS,
-    ] {
-        root.remove(marker)
-            .with_context(|| format!("could not finish publication: {marker}"))?;
-    }
-    root.0.sync_all()?;
     let absolute = fs::absolute(path)?;
-    Directory::open(absolute.parent().context("bundle has no parent")?, false)?
-        .0
-        .sync_all()?;
-    ensure!(
-        fs::same_directory(&before, &Directory::open(path, false)?.0.metadata()?),
-        "bundle directory changed after durability barrier"
-    );
+    let parent = Directory::open(absolute.parent().context("bundle has no parent")?, false)?;
+    cleanup::finish(&root, &parent, || {
+        ensure!(
+            fs::same_directory(&before, &Directory::open(path, false)?.0.metadata()?),
+            "bundle directory changed after durability barrier"
+        );
+        Ok(())
+    })?;
     Ok(PublicationInputs {
         path: absolute,
         bundle_id: expected.id.clone(),
@@ -169,6 +183,14 @@ fn checked_with(
 /// Checked persistence used by the screen journal and the pending-transcript marker.
 pub(crate) fn write(path: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     Directory::open(path, true)?.write(name, bytes)
+}
+
+pub(crate) fn read_text(path: &Path, name: &str) -> Result<String> {
+    let root = Directory::open(path, false)?;
+    Ok(String::from_utf8(fs::bytes(
+        &root.file(name)?,
+        validate::TEXT_CAP,
+    )?)?)
 }
 
 /// Write already encoded images without pathname traversal or symlink writes.

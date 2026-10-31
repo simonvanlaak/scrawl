@@ -1,9 +1,10 @@
-import {ApiError,fail} from './common.js';
-import {authRoutes} from './auth.js';
-import {captureRoutes,cleanup} from './captures.js';
+import type {Env} from './types.ts';
+import {ApiError,fail} from './common.ts';
+import {authRoutes} from './auth.ts';
+import {captureRoutes,cleanup} from './captures.ts';
 
 export default {
- async fetch(request,env) {
+ async fetch(request: Request,env: Env) {
   let response;
   try {
    const url=new URL(request.url);
@@ -18,5 +19,5 @@ export default {
   if(request.headers.get('Origin')===env.SITE_ORIGIN){headers.set('Access-Control-Allow-Origin',env.SITE_ORIGIN);headers.set('Access-Control-Allow-Credentials','true');}
   return new Response(response.body,{status:response.status,headers});
  },
- async scheduled(_controller,env) {await cleanup(env);}
+ async scheduled(_controller: ScheduledController,env: Env) {await cleanup(env);}
 };

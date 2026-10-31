@@ -168,13 +168,6 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
-        #[cfg(target_os = "linux")]
-        if let Some(warning) = crate::linux::media::encoder_warning() {
-            apparent_log(&warning);
-            crate::linux::shell::notify("Apparent setup: H.264 encoder missing", &warning);
-            self.cancel_recording(cx);
-            return;
-        }
         whiteboard::reset_for_capture(&self.whiteboard);
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
@@ -186,7 +179,6 @@ impl ApparentCoordinator {
             self.agent_captures.begin(&id);
             self.agent_capture_id = Some(id);
         }
-        self.begin_playback();
         if let Ok(mut status) = CAPTURE_STATUS.lock() {
             *status = None;
         }
@@ -214,6 +206,22 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
+        let ownership = match crate::capture_runtime::Capture::admit(&bundle_dir) {
+            Ok(ownership) => ownership,
+            Err(error) => {
+                apparent_log(format!("Capture admission refused: {error:#}"));
+                self.cancel_recording(cx);
+                return;
+            }
+        };
+        #[cfg(target_os = "linux")]
+        if let Some(warning) = crate::linux::media::encoder_warning() {
+            apparent_log(&warning);
+            crate::linux::shell::notify("Apparent setup: H.264 encoder missing", &warning);
+            self.cancel_recording(cx);
+            return;
+        }
+        self.begin_playback();
         if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
             apparent_log(format!("Capture could not protect raw video: {error:#}"));
             self.cancel_recording(cx);
@@ -319,6 +327,7 @@ impl ApparentCoordinator {
                 audio: audio_recorder,
                 windows: window_log,
             },
+            ownership: Some(ownership),
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -362,6 +371,7 @@ impl ApparentCoordinator {
             target,
             bundle_dir: PathBuf::new(),
             source: CaptureSource::Lab,
+            ownership: None,
             _metal_overlay: None,
         });
         self.present_recording_island(cx);
@@ -387,7 +397,6 @@ impl ApparentCoordinator {
             return;
         }
         whiteboard::reset_for_capture(&self.whiteboard);
-        self.begin_playback();
         self.remember_mode(SelectionMode::Iphone);
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
@@ -405,7 +414,20 @@ impl ApparentCoordinator {
         self.animated_window_rect = None;
         let bundle_dir = crate::handoff::default_captures_dir()
             .join(format!("{}.apparent", crate::make_bundle_id()));
-        let _ = std::fs::create_dir_all(&bundle_dir);
+        let ownership = match crate::capture_runtime::Capture::admit(&bundle_dir) {
+            Ok(ownership) => ownership,
+            Err(error) => {
+                apparent_log(format!("iPhone admission refused: {error:#}"));
+                self.cancel_recording(cx);
+                return;
+            }
+        };
+        if let Err(error) = std::fs::create_dir_all(&bundle_dir) {
+            apparent_log(format!("iPhone output could not be created: {error:#}"));
+            self.cancel_recording(cx);
+            return;
+        }
+        self.begin_playback();
         let movie_path = bundle_dir.join("recording.mov");
         let existing_preview = self.iphone_preview.take();
         if let Some(dev) = existing_preview.as_ref().and_then(PhoneSession::device) {
@@ -481,6 +503,7 @@ impl ApparentCoordinator {
             target,
             bundle_dir,
             source: CaptureSource::Phone(session),
+            ownership: Some(ownership),
             _metal_overlay: metal_overlay,
         });
         self.present_recording_island(cx);
@@ -552,6 +575,12 @@ impl ApparentCoordinator {
         let (events, strokes) = self.telemetry.finish_session();
         let bundle_dir = rec.bundle_dir;
         let target = rec.target;
+        let frame_seen = match &rec.source {
+            CaptureSource::Screen { session, .. } => session.has_frames(),
+            CaptureSource::Phone(session) => session.has_recording(),
+            CaptureSource::Lab => false,
+        };
+        let mut ownership = rec.ownership;
         let source = rec.source;
         // Drop the Metal overlay immediately on the main thread so the screen frame clears,
         // and morph the Dynamic Island into the compact spinning "Processing…" state while
@@ -597,7 +626,12 @@ impl ApparentCoordinator {
                             windows,
                         } => (session, audio, windows),
                         CaptureSource::Phone(session) => {
-                            let finalized = session.stop().and_then(|recording| {
+                            let stopped = session.stop();
+                            let finalized = (|| {
+                                let mut ownership = ownership.take().ok_or_else(|| anyhow::anyhow!("missing capture ownership"))?;
+                                if frame_seen { ownership.observed_frame()?; }
+                                ownership.processing()?;
+                                ownership.publish(|| stopped.and_then(|recording| {
                                 crate::phone::finalize_live_capture(
                                     &bundle_dir,
                                     recording,
@@ -610,7 +644,8 @@ impl ApparentCoordinator {
                                     &dir, bundle, summary, &final_whiteboard,
                                 );
                                 (dir, bundle, summary)
-                            });
+                            }))
+                            })();
                             if let Err(error) = &finalized {
                                 apparent_log(format!("iPhone capture failed: {error:#}"));
                             }
@@ -640,7 +675,11 @@ impl ApparentCoordinator {
                     activity.stop_started = Some(stop_started);
                     activity.stop_ms = Some(stop_started.elapsed().as_millis() as u64);
                     let duration_ms = recording.duration_ms;
-                    let finalized = crate::finalize_capture_bundle(
+                    let finalized = (|| {
+                        let mut ownership = ownership.take().ok_or_else(|| anyhow::anyhow!("missing capture ownership"))?;
+                        if frame_seen { ownership.observed_frame()?; }
+                        ownership.processing()?;
+                        ownership.publish(|| crate::finalize_capture_bundle(
                         &bundle_dir,
                         target,
                         recording,
@@ -656,7 +695,8 @@ impl ApparentCoordinator {
                             &dir, bundle, summary, &final_whiteboard,
                         );
                         (dir, bundle, summary)
-                    });
+                    }))
+                    })();
                     (finalized, duration_ms)
                 })
                 .await;

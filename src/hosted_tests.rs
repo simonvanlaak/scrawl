@@ -389,6 +389,7 @@ impl Fixture {
             atomic_json(
                 &self.client.state.join(format!("{scope}.credential")),
                 &Credential {
+                    site: Some(server.into()),
                     server: server.into(),
                     scope: scope.into(),
                     token: format!("synthetic-{scope}-secret"),
@@ -421,6 +422,8 @@ impl Drop for Fixture {
 
 #[derive(Default)]
 struct State {
+    list_routes: Vec<String>,
+    progress: Vec<String>,
     shares: usize,
     revoked: bool,
     files: Vec<Asset>,
@@ -546,8 +549,15 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         );
         let parts: Vec<_> = route.split('/').collect();
         let id = parts.get(3).copied().unwrap_or("");
-        if route == "/v1/shares" {
-            json!({"shares":if s.shares == 0 || s.revoked {vec![]} else {vec![json!({"id":"c".repeat(32),"captureId":s.capture_id,"url":format!("{origin}/s/{}", "b".repeat(64)),"status":"uploading","createdAt":123,"expiresAt":12345,"title":"Synthetic capture"})]}}).to_string().into_bytes()
+        if route.starts_with("/v1/shares?") || route == "/v1/shares" {
+            s.list_routes.push(route.into());
+            if s.mode == "paged-shares" || s.mode == "looped-shares" {
+                let second = route.contains('?');
+                let shares: Vec<_> = (if second {100..103} else {0..100}).map(|i| json!({"id":format!("{i:032x}"),"captureId":"a".repeat(32),"url":format!("{origin}/s/{}", "b".repeat(64)),"status":"ready"})).collect();
+                json!({"shares":shares,"nextCursor":if !second || s.mode == "looped-shares" {Some("1234:opaque /?&+")} else {None}}).to_string().into_bytes()
+            } else {
+                json!({"shares":if s.shares == 0 || s.revoked {vec![]} else {vec![json!({"id":"c".repeat(32),"captureId":s.capture_id,"url":format!("{origin}/s/{}", "b".repeat(64)),"status":"uploading","createdAt":123,"expiresAt":12345,"title":"Synthetic capture"})]},"nextCursor":null}).to_string().into_bytes()
+            }
         } else if route == format!("/v1/shares/{}", "c".repeat(32)) && method == "DELETE" {
             s.revoked = true;
             json!({"ok":true}).to_string().into_bytes()
@@ -569,6 +579,11 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
             json!({"id":id,"status":if s.ready {"ready"} else {"pending"}})
                 .to_string()
                 .into_bytes()
+        } else if parts.get(4) == Some(&"share") && parts.get(5) == Some(&"progress") {
+            assert_eq!(method, "POST");
+            let progress: Value = serde_json::from_slice(body).unwrap();
+            s.progress.push(progress["state"].as_str().unwrap().into());
+            json!({"ok":true}).to_string().into_bytes()
         } else if parts.get(4) == Some(&"share") {
             assert_eq!(id, s.capture_id);
             s.shares += 1;
@@ -576,6 +591,11 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         } else if parts.get(4) == Some(&"files") {
             let path = parts[5..].join("/");
             if method == "PUT" {
+                if s.mode == "fail-file" {
+                    status = 503;
+                    let _ = write!(stream, "HTTP/1.1 {status} Result\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+                    return;
+                }
                 if path == "audio.wav" {
                     if let Some(gate) = s.media_gate.clone() {
                         drop(s);
@@ -611,6 +631,48 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         result.len()
     );
     let _ = stream.write_all(&result);
+}
+
+#[test]
+fn hosted_sharing_management_follows_encoded_cursors_and_rejects_loops() {
+    let f = Fixture::new();
+    let server = Server::new("paged-shares");
+    f.authorize(&server.url);
+    let shares = f.client.shares().unwrap();
+    assert_eq!(shares["shares"].as_array().unwrap().len(), 103);
+    assert!(shares["nextCursor"].is_null());
+    assert_eq!(server.state.lock().unwrap().list_routes, ["/v1/shares", "/v1/shares?before=1234%3Aopaque%20%2F%3F%26%2B"]);
+    server.state.lock().unwrap().mode = "looped-shares".into();
+    assert!(f.client.shares().is_err(), "a looping response must not hang or return a partial list");
+}
+
+#[test]
+fn hosted_sharing_sender_reports_interruption_and_recovers_under_same_url() {
+    let f = Fixture::new();
+    let server = Server::new("fail-file");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment(HOSTED_SHARING);
+    let bundle = f.bundle();
+    let url = f.client.share(&bundle).unwrap();
+    f.client.process_once().unwrap();
+    assert_eq!(server.state.lock().unwrap().progress.last().map(String::as_str), Some("paused"));
+    server.state.lock().unwrap().mode.clear();
+    f.client.retry().unwrap();
+    f.client.process_once().unwrap();
+    assert_eq!(f.client.share(&bundle).unwrap(), url);
+    assert!(server.state.lock().unwrap().ready);
+    server.state.lock().unwrap().mode = "fail-file".into();
+    let another = f.root.join("second.apparent");
+    fs::rename(&bundle, &another).unwrap();
+    f.client.share(&another).unwrap();
+    for _ in 0..MAX_ATTEMPTS {
+        let mut jobs = f.client.jobs().unwrap();
+        let job = jobs.iter_mut().find(|job| job.status == "pending").unwrap();
+        job.next_attempt = 0;
+        f.client.save_job(job).unwrap();
+        f.client.process_once().unwrap();
+    }
+    assert_eq!(server.state.lock().unwrap().progress.last().map(String::as_str), Some("failed"));
 }
 
 #[test]

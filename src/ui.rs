@@ -496,6 +496,9 @@ fn island_content_width(
                 + LEAD_TRAIL
                 + divider
                 + chip_width(window, "Paste", FontWeight::SEMIBOLD)
+                + if crate::handoff::experiment(crate::hosted::HOSTED_SHARING) {
+                    CHIP_GAP + chip_width(window, "Copy link", FontWeight::MEDIUM)
+                } else { 0.0 }
                 + chip_width(window, "Inspect", FontWeight::MEDIUM)
                 + CHIP_H
                 + 3.0 * CHIP_GAP
@@ -907,6 +910,12 @@ pub struct ApparentCoordinator {
     completed_dir: Option<PathBuf>,
     /// The Completed island's lead text.
     completed_note: Option<String>,
+    share_online: bool,
+    share_probe_at: Option<Instant>,
+    share_pending: Option<(PathBuf, u64, std::sync::Arc<std::sync::atomic::AtomicBool>)>,
+    share_waiting_account: bool,
+    share_login: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    share_copied: Option<PathBuf>,
     /// When this Mac last finished a capture, so ⌥⇧V prefers it over older inbox items.
     last_local_capture_ms: u64,
     inbox: crate::inbox::Inbox,
@@ -1005,6 +1014,12 @@ impl ApparentCoordinator {
             iphone: None,
             completed_dir: None,
             completed_note: None,
+            share_online: false,
+            share_probe_at: None,
+            share_pending: None,
+            share_waiting_account: false,
+            share_login: None,
+            share_copied: None,
             last_local_capture_ms: 0,
             inbox: crate::inbox::Inbox::load_default(),
             last_mode: SelectionMode::load_last_used(),
@@ -1237,7 +1252,37 @@ impl ApparentCoordinator {
             onboarding.shortcut_changed(&shortcut);
         }
         match effect {
-            Effect::Close => self.settings = None,
+            Effect::Close => {
+                self.settings = None;
+                if let Some(active) = self.share_login.take() {
+                    active.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+                if let Some((_, _, active)) = self.share_pending.take() {
+                    active.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+                self.share_waiting_account = false;
+            }
+            Effect::ConnectHosted if self.share_waiting_account => self.reserve_completed_link(true, cx),
+            Effect::ConnectHosted => {
+                if self.share_login.is_none() && crate::handoff::experiment(crate::hosted::HOSTED_SHARING) {
+                    let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                    self.share_login = Some(active.clone());
+                    cx.spawn(async move |entity, cx| {
+                        let result = cx.background_executor().spawn(async move {
+                            crate::hosted::connect_sharing(&|| active.load(std::sync::atomic::Ordering::SeqCst))
+                        }).await;
+                        let _ = entity.update(cx, |coord, _| {
+                            coord.share_login = None;
+                            if result.is_ok() { crate::hosted::start_worker(); }
+                        });
+                    }).detach();
+                }
+            }
+            Effect::ManageSharedLinks => {
+                if let Some(url) = crate::hosted::shared_links_url() {
+                    let _ = crate::handoff::open_path(std::path::Path::new(&url));
+                }
+            }
             Effect::Tour => self.open_onboarding(crate::onboarding::Flow::tour(
                 crate::onboarding::Step::Welcome,
                 self.grants.clone(),
@@ -2029,6 +2074,12 @@ impl ApparentCoordinator {
     fn set_island_phase(&mut self, phase: IslandPhase) {
         use crate::onboarding::Input;
         if matches!(phase, IslandPhase::Recording | IslandPhase::Hidden | IslandPhase::Dismissing) {
+            if let Some((_, _, active)) = self.share_pending.take() {
+                active.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+            self.share_waiting_account = false;
+            self.share_copied = None;
+            self.share_probe_at = None;
             // A new recording or dismissal revokes detached workers' UI ownership.
             // Their finalized bundles remain on disk; stale results must not copy to
             // the clipboard, replace the current review, or finish a newer practice.
@@ -2305,6 +2356,7 @@ impl ApparentCoordinator {
             IslandPhase::Completed { inbox_count, .. } => {
                 let issue = self.completed_audio_issue();
                 Pres::Completed {
+                    share: crate::handoff::experiment(crate::hosted::HOSTED_SHARING).then_some(self.share_online && self.share_pending.is_none()),
                     warning: issue.is_some(),
                     label: completed_status_label(
                         inbox_count,
@@ -2353,6 +2405,7 @@ impl ApparentCoordinator {
             }
             PillAction::Finish => self.finish_recording(cx),
             PillAction::Paste(target) => self.paste_completed_bundle(target, cx),
+            PillAction::CopyLink => self.copy_completed_link(cx),
             PillAction::Inspect => self.inspect_completed_bundle(cx),
             PillAction::DismissCompleted => self.dismiss_completed_bundle(cx),
             PillAction::Route(_) => {}
@@ -2404,6 +2457,87 @@ impl ApparentCoordinator {
         cx.notify();
     }
 
+    fn tick_hosted_sharing(&mut self, cx: &mut Context<Self>) {
+        if !crate::handoff::experiment(crate::hosted::HOSTED_SHARING)
+            || !matches!(self.island_phase, IslandPhase::Completed { .. })
+            || self.share_probe_at.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+            return;
+        }
+        self.share_probe_at = Some(Instant::now());
+        let generation = self.capture_generation;
+        let copied = self.share_copied.clone();
+        cx.spawn(async move |entity, cx| {
+            let (online, progress) = cx.background_executor().spawn(async move {
+                (crate::hosted::sharing_online(), copied.as_deref().map(crate::hosted::sharing_progress))
+            }).await;
+            let _ = entity.update(cx, |coord, cx| {
+                if coord.capture_generation != generation || !matches!(coord.island_phase, IslandPhase::Completed { .. }) { return; }
+                coord.share_online = online;
+                if coord.share_pending.is_none() {
+                    if let Some(progress) = progress {
+                        coord.completed_note = Some(progress);
+                    } else if !online {
+                        coord.completed_note = Some(if crate::hosted::sharing_server().is_none() {
+                            "Configure Hosted account in Settings"
+                        } else { "Connect to the internet to share" }.into());
+                    } else if coord.completed_note.as_deref() == Some("Connect to the internet to share") {
+                        coord.completed_note = None;
+                    }
+                }
+                coord.sync_native_pill();
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    pub fn copy_completed_link(&mut self, cx: &mut Context<Self>) {
+        if !crate::handoff::experiment(crate::hosted::HOSTED_SHARING)
+            || !matches!(self.island_phase, IslandPhase::Completed { .. })
+            || !self.share_online || self.share_pending.is_some() { return; }
+        let Some(bundle) = self.completed_dir.clone() else { return };
+        self.share_pending = Some((bundle, self.capture_generation, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        if !crate::hosted::sharing_connected() {
+            self.share_waiting_account = true;
+            self.completed_note = Some("Connect Hosted account to share".into());
+            self.open_settings(Some(crate::settings::Pane::General));
+        } else {
+            self.reserve_completed_link(false, cx);
+        }
+        self.sync_native_pill();
+        cx.notify();
+    }
+
+    fn reserve_completed_link(&mut self, connect: bool, cx: &mut Context<Self>) {
+        let Some((bundle, generation, active)) = self.share_pending.clone() else { return };
+        self.share_waiting_account = false;
+        self.completed_note = Some(if connect { "Approve hosted upload in your browser…" } else { "Reserving link…" }.into());
+        cx.spawn(async move |entity, cx| {
+            let worker_bundle = bundle.clone();
+            let worker_active = active.clone();
+            let result = cx.background_executor().spawn(async move {
+                let allowed = || worker_active.load(std::sync::atomic::Ordering::SeqCst);
+                if connect { crate::hosted::connect_sharing(&allowed)?; }
+                crate::hosted::copy_link_handoff(&worker_bundle, &allowed)
+            }).await;
+            let _ = entity.update(cx, |coord, cx| {
+                if !active.load(std::sync::atomic::Ordering::SeqCst)
+                    || coord.capture_generation != generation
+                    || coord.completed_dir.as_ref() != Some(&bundle)
+                    || !matches!(coord.island_phase, IslandPhase::Completed { .. }) { return; }
+                coord.share_pending = None;
+                coord.completed_note = Some(match result {
+                    Ok(link) if link.authorized() => match crate::handoff::copy_string_to_clipboard(&link.text) {
+                        Ok(()) => { coord.share_copied = Some(bundle.clone()); crate::hosted::sharing_progress(&bundle) }
+                        Err(_) => "Copy failed · click Copy link to retry".into(),
+                    },
+                    Ok(_) | Err(_) => "Sharing stopped · click Copy link to retry".into(),
+                });
+                coord.sync_native_pill();
+                cx.notify();
+            });
+        }).detach();
+    }
+
     pub fn paste_completed_bundle(
         &mut self,
         click_target: Option<[f32; 2]>,
@@ -2439,6 +2573,7 @@ impl ApparentCoordinator {
     /// The UI loop's tick: advances the springs unless a new capsule window awaits its second
     /// frame (`island_await_frame`).
     pub fn island_tick(&mut self, cx: &mut Context<Self>) {
+        self.tick_hosted_sharing(cx);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if matches!(self.island_phase, IslandPhase::Recording) {
             platform::tick_pill_drag();
@@ -2477,6 +2612,7 @@ impl ApparentCoordinator {
         let dt = (real * motion::time_scale()).min(0.025);
         if let IslandPhase::Completed { finished_at, .. } = self.island_phase
             && finished_at.elapsed() >= Duration::from_millis(25_000)
+            && self.share_pending.is_none()
             && !matches!(
                 self.completed_note.as_deref(),
                 Some("Saved · paste manually" | "Saved · open bundle (copy failed)")
@@ -3864,6 +4000,15 @@ impl Render for HudPillWindow {
                         });
                     }),
             )
+            .when(crate::handoff::experiment(crate::hosted::HOSTED_SHARING), |row| {
+                let enabled = self.coordinator.read(cx).share_online && self.coordinator.read(cx).share_pending.is_none();
+                let coordinator = self.coordinator.clone();
+                row.child(pill_chip("hud-copy-link", "Copy link", pill_theme)
+                    .opacity(if enabled { 1.0 } else { 0.4 })
+                    .on_click(move |_, _, cx| {
+                        if enabled { coordinator.update(cx, |coord, cx| coord.copy_completed_link(cx)); }
+                    }))
+            })
             .child(
                 pill_chip("hud-inspect", "Inspect", pill_theme).on_click(move |_, _, cx| {
                     c_inspect.update(cx, |coord, cx| coord.inspect_completed_bundle(cx));

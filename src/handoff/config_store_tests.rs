@@ -109,11 +109,11 @@ fn subprocess_writer() {
             };
             assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
         }
-        assert!(set_config_value_in(&path, "large", "x".repeat(4096).into()).is_err());
+        assert!(set_config_value_in(&path, "transcribeCommand", "x".repeat(4096).into()).is_err());
         return;
     }
     if mode == "refusal" {
-        assert!(set_config_value_in(&path, "refused", true.into()).is_err());
+        assert!(set_config_value_in(&path, "autoSend", true.into()).is_err());
         return;
     }
     let ready = root.join(format!("ready-{id}"));

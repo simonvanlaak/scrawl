@@ -102,31 +102,28 @@ enum LiveTranscriber {
         completion.yield(.resultsDrained)
       } catch { completion.finish(throwing: error) }
     }
-    var feeder: Task<Void, Never>?
-    defer { continuation.finish(); completion.finish(); results.cancel(); feeder?.cancel() }
-    do {
-      try await analyzer.prepareToAnalyze(in: format)
-      try Task.checkCancellation()
-      // start returns after attaching input, NOT after input consumption.
-      try await analyzer.start(inputSequence: inputs)
-      feeder = Task.detached {
-        do {
-          try convertPCM(chunk.bytes, source: pcm, output: format) { buffer in
-            guard case .enqueued = continuation.yield(AnalyzerInput(buffer: buffer)) else {
-              throw HelperError("chunk audio input closed")
-            }
+    // Preparation/feed/terminal work and result consumption are independent owners.
+    // Observe either failure immediately, including while native preparation waits.
+    let analysis = Task {
+      do {
+        try await analyzer.prepareToAnalyze(in: format)
+        try Task.checkCancellation()
+        // start returns after attaching input, NOT after input consumption.
+        try await analyzer.start(inputSequence: inputs)
+        try convertPCM(chunk.bytes, source: pcm, output: format) { buffer in
+          guard case .enqueued = continuation.yield(AnalyzerInput(buffer: buffer)) else {
+            throw HelperError("chunk audio input closed")
           }
-          continuation.finish()
-          completion.yield(.inputFinished)
-        } catch { continuation.finish(throwing: error); completion.finish(throwing: error) }
-      }
-      let terminal = Task {
-        do {
-          try await analyzer.finalizeAndFinishThroughEndOfInput()
-          completion.yield(.terminalFinished)
-        } catch { completion.finish(throwing: error) }
-      }
-      defer { terminal.cancel() }
+        }
+        continuation.finish()
+        completion.yield(.inputFinished)
+        try Task.checkCancellation()
+        try await analyzer.finalizeAndFinishThroughEndOfInput()
+        completion.yield(.terminalFinished)
+      } catch { continuation.finish(throwing: error); completion.finish(throwing: error) }
+    }
+    defer { continuation.finish(); completion.finish(); results.cancel(); analysis.cancel() }
+    do {
       try await finishChunk(events)
     } catch {
       // Never join an uncooperative native task; helper exit/Rust hard cleanup bounds it.

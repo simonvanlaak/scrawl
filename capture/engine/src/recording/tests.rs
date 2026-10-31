@@ -187,38 +187,63 @@ fn drop_since_is_inclusive_and_always_preserves_first_insertion() {
     assert!(times(buffer).is_empty());
 }
 
-// Preparation-only compatibility receipt: compare complete leaf blocks, not line numbers,
-// identifier counts or a second transcription of the algorithm. These checkout-relative
-// includes work on both supported OSes. Remove this donor check with paired adoption.
 #[test]
-fn staged_leaf_definitions_are_byte_identical_to_root_donors() {
-    fn block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
-        let (_, tail) = source.split_once(start).expect("leaf start");
-        tail.split_once(end).expect("leaf end").0
+fn candidate_buffer_stays_bounded_and_keeps_the_whole_timeline() {
+    // A 1 MB budget of 4 KB frames: a 256-frame cap.
+    let mut buffer = CandidateBuffer::new(1 << 20);
+    let frame = |t| RgbaFrame::new(t, 32, 32, vec![0; 32 * 32 * 4]);
+    let mut t = 0;
+    let mut peak = 0;
+    // Three hours at the sampler's pace, with a click frame every 10 s.
+    while t < 3 * 3_600_000 {
+        buffer.push(frame(t), t % 10_000 == 0);
+        peak = peak.max(buffer.len());
+        t += buffer.interval().as_millis() as u64;
     }
-    let donor_model = include_str!("../../../../src/model.rs");
-    let staged_model = include_str!("../model.rs");
-    let target_start = "#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n#[serde(rename_all = \"camelCase\")]\npub struct TargetInfo";
-    assert_eq!(
-        block(
-            donor_model,
-            target_start,
-            "#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]"
-        ),
-        block(staged_model, target_start, "/// Raw RGBA8 frame buffer"),
+    assert!(peak <= 256, "peak {peak}");
+    assert!(buffer.interval() >= FRAME_SAMPLE_INTERVAL * 64);
+    let frames = buffer.into_frames();
+    assert_eq!(frames[0].t_ms, 0, "the start is kept");
+    assert!(frames.windows(2).all(|w| w[0].t_ms < w[1].t_ms));
+    // Spread over the whole capture, not bunched at the end.
+    let first_half = frames.iter().filter(|f| f.t_ms < 3 * 1_800_000).count();
+    assert!(
+        first_half * 3 > frames.len(),
+        "{first_half} of {}",
+        frames.len()
     );
-    let rgba_start = "/// Raw RGBA8 frame buffer";
-    assert_eq!(
-        block(donor_model, rgba_start, "\n#[cfg(test)]"),
-        staged_model.split_once(rgba_start).unwrap().1,
-    );
-    let donor_recorder = include_str!("../../../../src/capture/recorder.rs");
-    let staged_recorder = include_str!("mod.rs");
-    let constants_start = "pub const FRAME_SAMPLE_INTERVAL";
-    assert_eq!(
-        block(donor_recorder, constants_start, "/// The capture size for"),
-        block(staged_recorder, constants_start, "#[cfg(test)]\nmod tests;"),
-    );
+}
+
+#[test]
+fn candidate_buffer_keeps_urgent_frames_when_thinning() {
+    let mut buffer = CandidateBuffer::new(40 * 4096);
+    let frame = |t| RgbaFrame::new(t, 32, 32, vec![0; 32 * 32 * 4]);
+    for t in 0..60 {
+        buffer.push(frame(t * 220), t == 33);
+    }
+    assert!(buffer.len() < 60);
+    assert_eq!(buffer.interval(), FRAME_SAMPLE_INTERVAL * 2);
+    assert!(buffer.into_frames().iter().any(|f| f.t_ms == 33 * 220));
+}
+
+#[test]
+fn frames_that_may_show_a_system_prompt_are_dropped_but_never_the_first() {
+    let mut buffer = CandidateBuffer::new(1 << 20);
+    for t in [0, 220, 440, 660, 880] {
+        buffer.push(RgbaFrame::new(t, 4, 4, vec![0; 64]), false);
+    }
+    buffer.drop_since(440);
+    let times: Vec<u64> = buffer.into_frames().iter().map(|f| f.t_ms).collect();
+    assert_eq!(times, [0, 220, 440]);
+    let mut buffer = CandidateBuffer::new(1 << 20);
+    buffer.push(RgbaFrame::new(500, 4, 4, vec![0; 64]), false);
+    buffer.drop_since(0);
+    assert_eq!(buffer.len(), 1);
+}
+
+#[test]
+fn candidate_constants_preserve_sampling_and_quality_contract() {
+    assert_eq!(FRAME_SAMPLE_INTERVAL, Duration::from_millis(220));
     assert_eq!(
         (
             CANDIDATE_EDGE,

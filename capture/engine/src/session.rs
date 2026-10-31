@@ -26,7 +26,7 @@ impl Session {
     fn load(&self) -> io::Result<Record> {
         self.owner.check(&self.runtime.store)?;
         self.recording.check(&self.runtime.store)?;
-        self.bundle.lock.check(&self.runtime.store)?;
+        self.bundle.check()?;
         let record = Record::read(&self.runtime.store, &self.record.receipt.request_id)?
             .ok_or_else(crate::secure::invalid)?;
         if !identity::equal_secret(&record.token, &self.record.token)
@@ -158,7 +158,7 @@ impl Runtime {
     pub fn admit(&self, id: &str, token: &str, bundle_id: &str) -> io::Result<Admission> {
         identity::validate(id, 32)?;
         identity::validate(token, 64)?;
-        identity::validate(bundle_id, 32)?;
+        identity::validate_bundle(bundle_id)?;
         let _tx = self.transaction()?;
         if let Some(record) = Record::read(&self.store, id)? {
             if !identity::equal_secret(token, &record.token)

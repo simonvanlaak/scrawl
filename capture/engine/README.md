@@ -13,10 +13,15 @@ real; macOS compilation and process behavior remain unverified.
   Every product must use the SAME persistent directory. Do not place it inside
   a bundle, a disposable runtime/temp tree, or a renamed deployment directory.
   Do not delete/rotate it during upgrade, restart or routine cleanup.
-- Generate and retain `new_id()` request and bundle identities and the separate
+- Generate and retain the `new_id()` request identity and separate
   `new_owner_token()` **before the first attempt**. Retrying changes neither.
-  IDs are 128-bit random lowercase hex; mutation authority is a separate random
-  256-bit token. Neither IDs nor process IDs authorize Stop/Cancel.
+  Request IDs remain 128-bit random lowercase hex; mutation authority remains a
+  separate random 256-bit token. Neither bundle IDs nor PIDs authorize controls.
+  Reuse the bundle's persisted identity: `apparent-<milliseconds>-<hex-pid>`
+  (including its counter suffix), caller-selected output stems, and legacy
+  random hex IDs are supported. A bundle identity is 1–255 UTF-8 bytes, excluding
+  control characters, `/`, `\`, `.` and `..`. Unicode is not normalized or case
+  folded. Retain the exact manifest ID through reads, recovery and path renames.
 - `Runtime::admit(request, token, bundle)` returns `Acquired(Session)` only after
   durable admission and kernel-held global recording, per-request owner and
   shared bundle locks. Begin ALL media side effects after this return, never
@@ -39,6 +44,26 @@ real; macOS compilation and process behavior remain unverified.
   and pins directory identity. `Session::finish(Ok(proof))` rechecks that proof
   and session binding before Saved. It is NOT a general bundle/media validator;
   its JSON fixture in tests is deliberately synthetic, not production media.
+- Output trust is stricter than no-follow: the absolute output path must have
+  no symlinks and every ancestor must belong to root or the effective user and
+  disallow group/other writes. Only root-owned sticky ancestors (such as `/tmp`)
+  are exempt from the write-mode rule; their owned children remain protected.
+  The final directory must belong to the effective user and disallow group/other
+  writes, without exception. The proof pins that directory and checks both its
+  descriptor and freshly traversed path at construction and again before Saved.
+  The manifest must be an owned, single-link, non-group/other-writable regular
+  file. ACLs, privileged attackers and malicious same-user mutation are outside
+  this mode-bit/cooperative boundary; callers must provision output roots without
+  ACL grants to other writers. Validation never repairs unsafe modes or owners.
+- Manifests have a separate **64 MiB** byte budget, not the runtime receipt's
+  64 KiB budget. `src/capture.rs::write_bundle_artifacts` serializes the entire
+  `ApparentBundle` with pretty JSON, including unbounded event/stroke-point,
+  transcript and context histories (`src/model.rs`); 64 KiB is not realistic.
+  The Engine rejects supplied bytes above 64 MiB before parsing/copying, reads
+  at most 64 MiB + 1 from the pinned manifest and requires exact bytes. This is
+  a bounded integration budget, not a promise every possible capture fits. A
+  production caller must surface over-budget finalization as failure or revise
+  the budget/representation with measured evidence before wiring; never truncate.
 - A dropped/killed owner never manufactures success. `inspect` (or an authorized
   retry) recovers an abandoned active receipt to Failed, or Cancelled if intent
   was already persisted. Recovery is based on the kernel owner lock, not a PID.
@@ -67,6 +92,15 @@ there is intentionally no automatic stale-lock deletion API. Private `0600`
 record files contain authority; public receipts and errors do not expose it.
 This is cooperative same-user coordination, NOT a sandbox against malicious
 code already able to rewrite both runtime state and its identity anchors.
+
+Legacy 32-lowerhex bundle IDs retain their original `bundle-<id>.lock` anchors.
+Other bundle IDs use `bundle-v1/<hex-chunks>/identity.lock` under the runtime
+root: exact UTF-8 bytes encoded as lowercase hex, in 120-character chunks.
+This is reversible and injective, including prefix IDs and Unicode equivalents;
+no digest collision, path interpolation or per-operation random mapping exists.
+Namespace directories are permanent owned `0700` directories, opened relative
+to pinned descriptors with no-follow, fsynced and rechecked with their parents.
+Never rename/delete these directories independently of the runtime lock anchors.
 
 ## Integration work intentionally left to the parent
 
@@ -97,3 +131,8 @@ unchanged: this is a staged package, not a final workspace/lock policy decision.
 There are no Agent, GPUI, recorder or product dependencies. Repository hooks and
 the 2,000-physical-line-per-file cap still apply. Native macOS compilation,
 filesystem/crash tests and both products' real integration are outstanding gates.
+
+Tests that construct finalizer proofs need a synthetic `TMPDIR` with trusted
+ancestors under the output contract above. A group-writable cache ancestor is
+correctly rejected even when the individual fixture is private; do not chmod a
+real cache or capture root just to make a test pass.

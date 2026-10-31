@@ -915,6 +915,7 @@ fn main() -> Result<()> {
             });
             let until = std::time::Instant::now() + Duration::from_secs(duration.max(1));
             while std::time::Instant::now() < until {
+                if session.failed_to_start() { break; }
                 if session.has_frames() { ownership.observed_frame()?; }
                 std::thread::sleep(Duration::from_millis(50));
             }

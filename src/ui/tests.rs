@@ -68,6 +68,23 @@ fn real_background_finalizer_keeps_engine_owner_after_coordinator_is_gone() {
     assert_eq!(fixture.runtime().inspect(&request).unwrap().unwrap().status, Status::Saved);
 }
 
+#[test]
+fn owned_start_failure_releases_admission_without_running_finalizer() {
+    let fixture = crate::capture_runtime::tests::Fixture::new();
+    let (capture, request) = fixture.start();
+    let built = std::cell::Cell::new(false);
+    let result = recording::finalize_owned_capture(Some(capture), false, &whiteboard::Board::default(), || {
+        built.set(true);
+        crate::generate_demo_bundle(Some(fixture.output()))
+    });
+    assert!(result.is_err());
+    assert!(!built.get());
+    assert!(!fixture.output().exists());
+    assert_eq!(fixture.runtime().inspect(&request).unwrap().unwrap().status, apparent_capture_engine::Status::Failed);
+    let (_next, next_request) = fixture.start();
+    assert_ne!(request, next_request);
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 pub(super) fn deferred_finalizer_success_survives_dismissal_and_new_capture() {

@@ -843,19 +843,18 @@ fn main() -> Result<()> {
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
-            let mut ownership = capture_runtime::Capture::admit(&bundle_dir)?;
+            let (mut ownership, playback) = capture_runtime::Capture::start(&bundle_dir, playback::Guard::start)?;
             std::fs::create_dir_all(&bundle_dir)?;
             let dev_id = window.or_else(|| {
                 helper::devices()
                     .ok()
                     .and_then(|mut d| d.drain(..).next().map(|p| p.id))
             });
-            let playback = playback::Guard::start();
-            let session = phone::PhoneSession::start(
+            let session = capture_runtime::Phone::new(phone::PhoneSession::start(
                 &bundle_dir.join("recording.mov"),
                 dev_id.as_deref(),
                 None,
-            )?;
+            )?);
             let started = std::time::Instant::now();
             while !session.has_recording()
                 && !session.has_ended()
@@ -864,6 +863,7 @@ fn main() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(50));
             }
             let record_started = std::time::Instant::now();
+            if session.has_recording() { ownership.observed_frame()?; }
             let target_dur = Duration::from_secs(duration.max(1));
             while !session.has_ended() && record_started.elapsed() < target_dur {
                 std::thread::sleep(Duration::from_millis(50));
@@ -893,14 +893,13 @@ fn main() -> Result<()> {
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
-            let mut ownership = capture_runtime::Capture::admit(&bundle_dir)?;
+            let (mut ownership, playback) = capture_runtime::Capture::start(&bundle_dir, playback::Guard::start)?;
             #[cfg(target_os = "linux")]
             if let Some(warning) = linux::media::encoder_warning() {
                 anyhow::bail!("{warning}");
             }
             recover::begin_screen_capture(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
-            let playback = playback::Guard::start();
             let audio = AudioRecorder::start().ok();
             let session = ScreenCaptureSession::start(
                 target.clone(),
@@ -914,7 +913,11 @@ fn main() -> Result<()> {
                     std::sync::Arc::default(),
                 )
             });
-            std::thread::sleep(Duration::from_secs(duration.max(1)));
+            let until = std::time::Instant::now() + Duration::from_secs(duration.max(1));
+            while std::time::Instant::now() < until {
+                if session.has_frames() { ownership.observed_frame()?; }
+                std::thread::sleep(Duration::from_millis(50));
+            }
             if session.has_frames() { ownership.observed_frame()?; }
             drop(playback);
             let recording = session.stop();

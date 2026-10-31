@@ -1,6 +1,18 @@
 use super::*;
 
 impl ApparentCoordinator {
+    pub(super) fn sync_capture_ownership(&mut self) -> anyhow::Result<()> {
+        let Some(rec) = self.active_recording.as_mut() else { return Ok(()) };
+        let seen = match &rec.source {
+            CaptureSource::Screen { session, .. } => session.has_frames(),
+            CaptureSource::Phone(session) => session.has_recording(),
+            CaptureSource::Lab => false,
+        };
+        if seen && let Some(ownership) = rec.ownership.as_mut() {
+            ownership.observed_frame()?;
+        }
+        Ok(())
+    }
     /// The menu bar's picker, opening on the mode the last recording used.
     pub fn begin_target_selection(&mut self, cx: &mut Context<Self>) {
         if self.ready_to_record() {
@@ -206,8 +218,8 @@ impl ApparentCoordinator {
             .map(PathBuf::from)
             .unwrap_or_else(crate::handoff::default_captures_dir);
         let bundle_dir = root.join(format!("{id}.apparent"));
-        let ownership = match crate::capture_runtime::Capture::admit(&bundle_dir) {
-            Ok(ownership) => ownership,
+        let ownership = match crate::capture_runtime::Capture::start(&bundle_dir, || self.begin_playback()) {
+            Ok((ownership, ())) => ownership,
             Err(error) => {
                 apparent_log(format!("Capture admission refused: {error:#}"));
                 self.cancel_recording(cx);
@@ -221,7 +233,6 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
-        self.begin_playback();
         if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
             apparent_log(format!("Capture could not protect raw video: {error:#}"));
             self.cancel_recording(cx);
@@ -414,8 +425,8 @@ impl ApparentCoordinator {
         self.animated_window_rect = None;
         let bundle_dir = crate::handoff::default_captures_dir()
             .join(format!("{}.apparent", crate::make_bundle_id()));
-        let ownership = match crate::capture_runtime::Capture::admit(&bundle_dir) {
-            Ok(ownership) => ownership,
+        let ownership = match crate::capture_runtime::Capture::start(&bundle_dir, || self.begin_playback()) {
+            Ok((ownership, ())) => ownership,
             Err(error) => {
                 apparent_log(format!("iPhone admission refused: {error:#}"));
                 self.cancel_recording(cx);
@@ -427,7 +438,6 @@ impl ApparentCoordinator {
             self.cancel_recording(cx);
             return;
         }
-        self.begin_playback();
         let movie_path = bundle_dir.join("recording.mov");
         let existing_preview = self.iphone_preview.take();
         if let Some(dev) = existing_preview.as_ref().and_then(PhoneSession::device) {
@@ -473,6 +483,7 @@ impl ApparentCoordinator {
                 Ok(session) => session,
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
+                    self.playback.take();
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
                     {
                         if let Some(id) = self.agent_capture_id.take() {
@@ -502,7 +513,7 @@ impl ApparentCoordinator {
             started: Instant::now(),
             target,
             bundle_dir,
-            source: CaptureSource::Phone(session),
+            source: CaptureSource::Phone(crate::capture_runtime::Phone::new(session)),
             ownership: Some(ownership),
             _metal_overlay: metal_overlay,
         });

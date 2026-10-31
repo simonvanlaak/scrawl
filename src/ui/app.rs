@@ -321,6 +321,12 @@ pub fn run_app(
                         });
                     }
 
+                    loop_coord.update(cx, |coord, cx| {
+                        if let Err(error) = coord.sync_capture_ownership() {
+                            apparent_log(format!("Capture ownership failed: {error:#}"));
+                            coord.cancel_recording(cx);
+                        }
+                    });
                     motion::poll_tune();
                     if loop_coord.read(cx).shortcut.is_pending() {
                         loop_coord.update(cx, |coord, cx| coord.tick_shortcut(cx));

@@ -1,6 +1,8 @@
 //! Capture caller ownership. The Engine is the only durable receipt authority.
 //! Keep this value with media teardown AND the background finalizer, not the UI.
 mod paths;
+mod phone;
+pub use phone::Phone;
 #[cfg(test)]
 mod tests;
 
@@ -22,17 +24,43 @@ pub struct Capture {
 }
 
 pub fn runtime() -> Result<Runtime> {
-    let path = dirs::data_local_dir()
-        .context("no local data directory")?
-        .join("apparent/capture-runtime-v1");
-    paths::provision(&path, true)?;
-    Ok(Runtime::open(&path)?)
+    #[cfg(test)]
+    return tests::default_runtime();
+    #[cfg(not(test))]
+    {
+        let path = dirs::data_local_dir()
+            .context("no local data directory")?
+            .join("apparent/capture-runtime-v1");
+        paths::provision(&path, true)?;
+        Ok(Runtime::open(&path)?)
+    }
+}
+
+pub fn maintenance(path: &Path) -> Result<Option<apparent_capture_engine::BundleLease>> {
+    maintenance_in(&runtime()?, path)
+}
+
+pub(crate) fn maintenance_in(
+    runtime: &Runtime,
+    path: &Path,
+) -> Result<Option<apparent_capture_engine::BundleLease>> {
+    let id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .context("invalid bundle identity")?;
+    Ok(runtime.lease(id, apparent_capture_engine::LeaseKind::Maintenance)?)
 }
 
 impl Capture {
     /// Output identity is reserved before playback, microphone or movie startup.
-    pub fn admit(path: &Path) -> Result<Self> {
-        Self::admit_in(runtime()?, path)
+    pub fn start<T>(path: &Path, media: impl FnOnce() -> T) -> Result<(Self, T)> {
+        Self::start_in(runtime()?, path, media)
+    }
+
+    fn start_in<T>(runtime: Runtime, path: &Path, media: impl FnOnce() -> T) -> Result<(Self, T)> {
+        let ownership = Self::admit_in(runtime, path)?;
+        let media = media();
+        Ok((ownership, media))
     }
 
     fn admit_in(runtime: Runtime, path: &Path) -> Result<Self> {

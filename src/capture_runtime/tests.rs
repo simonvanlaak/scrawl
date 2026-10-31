@@ -6,6 +6,10 @@ use std::{
 };
 
 struct Fixture(PathBuf);
+pub(super) fn default_runtime() -> Result<Runtime> {
+    static FIXTURE: std::sync::OnceLock<Fixture> = std::sync::OnceLock::new();
+    Ok(FIXTURE.get_or_init(Fixture::new).runtime())
+}
 impl Fixture {
     fn new() -> Self {
         // Engine rejects writable ancestors even beneath a private directory. Do not
@@ -84,11 +88,10 @@ fn subprocess() {
     let runtime = Runtime::open(&path.join("runtime")).unwrap();
     if std::env::var("APPARENT_CALLER_MODE").unwrap() == "contender" {
         // Same production admission decision used before each caller's media start.
-        let admitted = Capture::admit_in(runtime, &path.join("contender.apparent"));
-        if admitted.is_ok() {
+        let admitted = Capture::start_in(runtime, &path.join("contender.apparent"), || {
             fs::write(path.join("audio.wav"), b"media side effect").unwrap();
             fs::write(path.join("recording.mov"), b"media side effect").unwrap();
-        }
+        });
         assert!(admitted.is_err(), "busy caller entered media boundary");
     } else {
         let mut capture = Capture::admit_in(runtime, &path.join("synthetic.apparent")).unwrap();
@@ -118,12 +121,34 @@ fn processing_owner_survives_ui_and_excludes_other_process_and_maintenance() {
             .unwrap()
             .is_none()
     );
+    fs::create_dir_all(fixture.output()).unwrap();
+    let actions = [crate::retention::Action::TrashBundle(fixture.output())];
+    let clean = || {
+        crate::retention::apply_with_maintenance(
+            &actions,
+            &crate::retention::Policy::default(),
+            &|path| {
+                fs::remove_dir_all(path)?;
+                Ok(())
+            },
+            false,
+            |path| maintenance_in(&fixture.runtime(), path),
+        )
+    };
+    let report = clean();
+    assert_eq!(report.bundles_trashed, 0);
+    assert!(
+        fixture.output().is_dir(),
+        "actual retention bypassed processing owner"
+    );
     let mut contender = child(&fixture, "contender");
     contender.wait();
     assert!(!fixture.0.join("audio.wav").exists());
     assert!(!fixture.0.join("recording.mov").exists());
     fs::write(fixture.0.join("release"), b"release").unwrap();
     owner.wait();
+    assert_eq!(clean().bundles_trashed, 1);
+    assert!(!fixture.output().exists());
     assert_eq!(
         fixture.runtime().inspect(&request).unwrap().unwrap().status,
         Status::Cancelled

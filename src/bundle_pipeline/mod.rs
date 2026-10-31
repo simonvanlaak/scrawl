@@ -846,5 +846,8 @@ pub fn build_bundle_from_parts(
     Ok((bundle_dir.to_path_buf(), bundle, summary))
 }
 
+mod demo;
+pub use demo::generate_demo_bundle;
+
 #[cfg(test)]
 mod tests;

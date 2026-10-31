@@ -1,6 +1,6 @@
 # Independent Desktop host spike
 
-**Checkpoint, not production integration.** Recommended next host: an Electron
+**Acceptance spike, not production integration.** Recommended next host: an Electron
 sidecar for ordinary Desktop windows. Keep the existing GPUI/native overlay,
 picker, capsule, global shortcuts, capture/permission machinery and retention as
 the default. This package imports none of them and cannot control the live app.
@@ -44,11 +44,16 @@ only the sidecar. User profile is mandatory and separate from Apparent.
 All changes are new files in this directory. Root dependencies, lock, sources,
 CI, site, live config, native overlays and other workers' freezes are unchanged.
 The parent owns native GUI/VM/macOS proof. No native GUI, screen capture or live
-application interaction is authorized or claimed by this spike. Detailed host
-comparison and Phase C line-100 acceptance gates follow in the next scoped slice.
+application interaction is authorized or claimed by this spike. See
+[ACCEPTANCE.md](ACCEPTANCE.md) for the repository-based comparison, pinned primary
+API evidence and exact open Phase C line-100 gates.
 
-## Verdict: PARTIAL
+## Verdict: diagnostic PASS; native acceptance OPEN
 
-The runnable diagnostic protocol is implemented. Browser interaction, installed
-Electron binary readiness, primary API comparison and publication evidence are
-pending at this checkpoint. No Desktop host has passed native acceptance.
+The runnable diagnostic protocol, four Node/HTTP tests, real browser controls and
+installed Electron binary readiness passed on Linux. Browser mode exercised
+command → event → rendered state, stale refusal and snapshot reconnect at desktop
+and narrow sizes. Electron was executed in Node mode only: its native window,
+preload IPC and GUI teardown are unrun. No startup latency was measured, browser
+or native. No Desktop host has passed native acceptance. See
+[VERIFICATION.md](VERIFICATION.md) for exact tested scope and limits.

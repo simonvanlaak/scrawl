@@ -1813,7 +1813,7 @@ mod tests {
         }
         let failed = session.failed_to_start();
         assert!(!session.has_frames());
-        assert!(session.sampler.startup_failed.load(Ordering::Acquire));
+        assert!(session.startup_failed.load(Ordering::Acquire));
         // Explicit caller cleanup, not an Inspect side effect.
         let recording = session.stop();
         assert!(recording.frames.is_empty());

@@ -1166,6 +1166,17 @@ impl ApparentCoordinator {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn agent_request(&mut self, request: crate::agent_capture::Request, cx: &mut Context<Self>) {
+        self.agent_request_with(request, |coord, action| match action {
+            crate::agent_capture::Action::Start => coord.record_screen_now(cx),
+            crate::agent_capture::Action::Stop => coord.finish_recording(cx),
+            crate::agent_capture::Action::Cancel => coord.cancel_recording(cx),
+            crate::agent_capture::Action::Inspect => unreachable!(),
+        });
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn agent_request_with(&mut self, request: crate::agent_capture::Request,
+        mut act: impl FnMut(&mut Self, crate::agent_capture::Action)) {
         use crate::agent_capture::{Action, Outcome};
         // Report an ended sampler, but never discard another session as a side
         // effect of State, Inspect or a competing Start. Cancellation stays explicit.
@@ -1187,7 +1198,7 @@ impl ApparentCoordinator {
                 || self.recording_shortcut_key;
             if self.agent_captures.admit(id, occupied, request.expired()) {
                 self.agent_capture_id = Some(id.clone());
-                self.record_screen_now(cx);
+                act(self, Action::Start);
                 if self.active_recording.is_none() {
                     self.agent_capture_id = None;
                     self.agent_captures.set(id, "failed", None, Some("start_failed"));
@@ -1212,9 +1223,9 @@ impl ApparentCoordinator {
             (Some((Action::Stop, _)), Some(Outcome::Stopping)) => {
                 #[cfg(target_os = "linux")]
                 { self.agent_finishing = true; }
-                self.finish_recording(cx)
+                act(self, Action::Stop)
             }
-            (Some((Action::Cancel, _)), Some(Outcome::Cancelled)) => self.cancel_recording(cx),
+            (Some((Action::Cancel, _)), Some(Outcome::Cancelled)) => act(self, Action::Cancel),
             _ => {}
         }
         let response = match outcome {
@@ -1604,9 +1615,9 @@ impl ApparentCoordinator {
             self.finish_recording(cx);
             return;
         }
-        if self.active_recording.as_ref().is_some_and(|recording| matches!(&recording.source,
-            CaptureSource::Screen { session, .. } if session.startup_failed())) {
-            self.cancel_recording(cx);
+        if self.cleanup_failed_start() {
+            cx.defer(whiteboard::close);
+            self.dismiss_island(cx);
             let message = "No displays could start recording. Check screen sharing and try again.";
             apparent_log(message);
             if let Ok(mut status) = CAPTURE_STATUS.lock() { *status = Some(message.to_owned()); }
@@ -1623,6 +1634,20 @@ impl ApparentCoordinator {
             self.shortcut.tick(held)
         };
         self.apply_shortcut(action, cx);
+    }
+
+    /// The ordinary GUI tick owns automatic startup teardown, not an agent poll.
+    fn cleanup_failed_start(&mut self) -> bool {
+        if !self.active_recording.as_ref().is_some_and(|recording| matches!(&recording.source,
+            CaptureSource::Screen { session, .. } if session.startup_failed())) { return false; }
+        // Take the exact owner before shared cancellation teardown. Explicit
+        // cancellation still uses discard_recording's cancelled terminal cause.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(id) = self.agent_capture_id.take() {
+            self.agent_captures.set(&id, "failed", None, Some("start_failed"));
+        }
+        self.cancel_capture_attempt();
+        true
     }
 
     fn apply_shortcut(&mut self, action: crate::shortcut::Action, cx: &mut Context<Self>) {
@@ -6711,6 +6736,74 @@ mod tests {
     use super::*;
 
     // The same discovery/admission path as a menu start, replacing only native setup.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn coordinator_request(coordinator: &mut ApparentCoordinator, action: crate::agent_capture::Action, id: &str,
+        act: impl FnMut(&mut ApparentCoordinator, crate::agent_capture::Action)) -> serde_json::Value {
+        let (reply, result) = std::sync::mpsc::sync_channel(1);
+        coordinator.agent_request_with(crate::agent_capture::Request {
+            action: Some((action, id.into())), reply, deadline_ms: u64::MAX,
+        }, act);
+        serde_json::from_str(&result.recv().unwrap()).unwrap()
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn automatic_start_failure_receipt_survives_both_inspection_orders() {
+        use crate::agent_capture::Action;
+        for inspect_first in [false, true] {
+            let (sender, _receiver) = flume::unbounded();
+            let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+            let dir = std::env::temp_dir().join(format!("failed-start-{}", crate::make_bundle_id()));
+            std::fs::create_dir(&dir).unwrap();
+            let receipt = coordinator_request(&mut coordinator, Action::Start, "a", |coord, action| {
+                assert_eq!(action, Action::Start);
+                coord.active_recording = Some(ActiveRecording {
+                    started: Instant::now(), target: lab::target(), bundle_dir: dir.clone(),
+                    source: CaptureSource::Screen { session: ScreenCaptureSession::with_test_start_failure(), audio: None, windows: None },
+                    _metal_overlay: None,
+                });
+                coord.set_island_phase(IslandPhase::Recording);
+            });
+            assert_eq!(receipt["status"], "starting");
+            let generation = coordinator.capture_generation;
+            if inspect_first {
+                let receipt = coordinator_request(&mut coordinator, Action::Inspect, "a", |_, _| panic!("Inspect dispatched"));
+                assert_eq!(receipt["error"], "start_failed");
+                // Busy admission may observe failure, but must not tear A down.
+                let busy = coordinator_request(&mut coordinator, Action::Start, "busy", |_, _| panic!("busy Start dispatched"));
+                assert_eq!(busy["error"], "occupied");
+                assert!(coordinator.active_recording.is_some());
+                assert_eq!(coordinator.capture_generation, generation);
+            }
+            assert!(coordinator.cleanup_failed_start());
+            let receipt = coordinator_request(&mut coordinator, Action::Inspect, "a", |_, _| panic!("Inspect dispatched"));
+            assert_eq!(receipt["status"], "failed", "inspection order {inspect_first}");
+            assert_eq!(receipt["error"], "start_failed");
+            assert!(coordinator.active_recording.is_none());
+            assert!(coordinator.agent_capture_id.is_none());
+            assert!(!dir.exists());
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn explicit_cancel_keeps_cancelled_receipt() {
+        use crate::agent_capture::Action;
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        let dir = std::env::temp_dir().join(format!("explicit-cancel-{}", crate::make_bundle_id()));
+        std::fs::create_dir(&dir).unwrap();
+        admit_test_menu_capture(&mut coordinator, &dir);
+        coordinator.agent_captures.begin("menu-capture");
+        let receipt = coordinator_request(&mut coordinator, Action::Cancel, "menu-capture", |coord, action| {
+            assert_eq!(action, Action::Cancel);
+            coord.cancel_capture_attempt();
+        });
+        assert_eq!(receipt["status"], "cancelled");
+        assert!(receipt["error"].is_null());
+        assert!(!dir.exists());
+    }
+
     fn admit_test_menu_capture(coordinator: &mut ApparentCoordinator, dir: &std::path::Path) {
         coordinator.record_screen_with(|| Ok(lab::target()), |coordinator, target| {
             let target = target.expect("menu discovery succeeds");

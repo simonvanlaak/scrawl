@@ -799,6 +799,15 @@ impl ScreenCaptureSession {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_start_failure() -> Self {
+        let mut session = Self::with_test_history(RgbaFrame::new(0, 1, 1, vec![0; 4]));
+        session.frames = Arc::new(Mutex::new(CandidateBuffer::new(CANDIDATE_BUDGET_BYTES)));
+        session.real_frame_seen.store(false, Ordering::Release);
+        session.startup_failed.store(true, Ordering::Release);
+        session
+    }
+
     pub fn start(
         target: TargetInfo,
         video_output_path: Option<PathBuf>,

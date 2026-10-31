@@ -750,11 +750,12 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                         let (_, streams): (u32, Streams) = response.body().deserialize()?;
                         let token = streams.restore_token().map(str::to_owned);
                         anyhow::ensure!(!streams.streams().is_empty(), "Nothing was shared");
-                        let fd = PortalFd::new(proxy.open_pipe_wire_remote(&session).await?, diagnostic.clone(),
-                            serde_json::json!({"role": "remote"}));
+                        // Each Recorder/pipewiresrc owns a protocol core. Different FD
+                        // integers that dup one socket do NOT share a GStreamer core.
+                        // Open a fresh authorized connection for every selected node.
                         // A distinct portal call creates the observer connection. Never
                         // duplicate the recording socket into a second protocol reader.
-                        if diagnostic.0.is_some() {
+                        let graph = if diagnostic.0.is_some() {
                             let nodes: Vec<_> = streams.streams().iter().map(|s| s.pipe_wire_node_id()).collect();
                             let graph = match proxy.open_pipe_wire_remote(&session).await {
                                 Ok(observer) => {
@@ -774,17 +775,29 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                                 }
                                 Err(_) => serde_json::json!({"status": "UNKNOWN", "observer_released": true}),
                             };
-                            fd.event("graph_snapshot", serde_json::json!({"graph": graph}));
-                        }
-                        let authorized = streams.streams().iter().enumerate().map(|(index, stream)| {
+                            Some(graph)
+                        } else { None };
+                        let mut authorized = Vec::new();
+                        for (index, stream) in streams.streams().iter().enumerate() {
                             let rect = match (stream.position(), stream.size()) {
                                 (Some((x, y)), Some((w, h))) => Some([f64::from(x), f64::from(y), f64::from(w), f64::from(h)]),
                                 _ => None,
                             };
                             let node = stream.pipe_wire_node_id();
                             let monitor = stream.source_type() == Some(SourceType::Monitor);
-                            anyhow::Ok((node, fd.try_clone(node, index, stream.mapping_id(), monitor)?, rect, stream.mapping_id().map(str::to_owned), monitor))
-                        }).collect::<Result<Vec<_>>>()?;
+                            let fd = PortalFd::new(proxy.open_pipe_wire_remote(&session).await?, diagnostic.clone(),
+                                serde_json::json!({"role": "remote", "consumer_index": index, "node": node}));
+                            if let Some(graph) = &graph {
+                                // The observer sees all authorized nodes. Bind only this
+                                // consumer's node to this recording socket in the graph join.
+                                let mut graph = graph.clone();
+                                if let Some(selected) = graph["selected"].as_array_mut() {
+                                    selected.retain(|selected| selected["node"] == node);
+                                }
+                                fd.event("graph_snapshot", serde_json::json!({"graph": graph}));
+                            }
+                            authorized.push((node, fd.try_clone(node, index, stream.mapping_id(), monitor)?, rect, stream.mapping_id().map(str::to_owned), monitor));
+                        }
                         anyhow::Ok((authorized, token))
                     };
                     let cancelled = async {

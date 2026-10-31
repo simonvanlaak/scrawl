@@ -229,7 +229,7 @@ pub fn decoder_warning() -> Option<String> {
     ))
 }
 
-fn source_launch(source: &Source) -> String {
+pub(super) fn source_launch(source: &Source) -> String {
     match source {
         #[cfg(test)]
         Source::Test => "videotestsrc is-live=true pattern=smpte".to_owned(),

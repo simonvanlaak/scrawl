@@ -13,6 +13,7 @@ struct DiagnosticPortal {
     closed: flume::Sender<()>,
     peers: flume::Sender<std::os::unix::net::UnixStream>,
     next: AtomicU32,
+    multiple_nodes: bool,
 }
 
 async fn diagnostic_response(connection: &zbus::Connection, header: zbus::message::Header<'_>,
@@ -51,8 +52,12 @@ impl DiagnosticPortal {
         #[zbus(connection)] connection: &zbus::Connection,
         #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<OwnedObjectPath> {
         let node = self.next.fetch_add(1, Ordering::Relaxed);
-        let streams = vec![(node, HashMap::from([("source_type", Value::from(1u32)),
+        let mut streams = vec![(node, HashMap::from([("source_type", Value::from(1u32)),
             ("mapping_id", Value::from(if node == 71 { "SYNTHETIC-A" } else { "SYNTHETIC-B" }))]))];
+        if self.multiple_nodes {
+            streams.push((72, HashMap::from([("source_type", Value::from(1u32)),
+                ("mapping_id", Value::from("SYNTHETIC-B"))])));
+        }
         diagnostic_response(connection, header, &options, HashMap::from([
             ("streams", Value::from(streams)), ("restore_token", Value::from("PRIVATE-CANARY-NEVER-LOG"))])).await
     }
@@ -106,7 +111,7 @@ fn diagnostic_authorization_private_bus_fixture() {
         let (closed, closes) = flume::bounded(4);
         let (peers, remote_peers) = flume::bounded(4);
         let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
-            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71) }).unwrap().build().await.unwrap();
+            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: false }).unwrap().build().await.unwrap();
         let (release, released) = flume::bounded(1);
         let (ready, is_ready) = flume::bounded(1);
         let worker = std::thread::spawn(move || {
@@ -150,7 +155,7 @@ fn diagnostic_authorization_private_bus_fixture() {
             use std::io::Read;
             let mut protocol = Vec::new();
             peer.read_to_end(&mut protocol).expect("actual last descriptor release must produce EOF");
-            if index % 2 == 0 {
+            if index % 2 == 1 {
                 assert!(protocol.is_empty(), "the recording connection must never acquire a competing reader");
             } else {
                 assert!(!protocol.is_empty(), "only the fresh observer connection speaks PipeWire");
@@ -158,6 +163,68 @@ fn diagnostic_authorization_private_bus_fixture() {
         }
         for _ in 0..2 { assert!(closes.recv_timeout(Duration::from_secs(2)).is_ok()); }
         observe("completed");
+    });
+}
+
+#[test]
+fn multiple_node_consumers_run_on_private_bus() {
+    let data = std::env::temp_dir().join(format!("apparent-multiple-{}", crate::make_bundle_id()));
+    std::fs::create_dir(&data).unwrap();
+    let output = std::process::Command::new("dbus-run-session").arg("--").arg(std::env::current_exe().unwrap())
+        .args(["--exact", "linux::portal::protocol_tests::multiple_node_consumers_private_bus_fixture", "--ignored", "--nocapture"])
+        .env("APPARENT_TEST_OWNED_REQUEST_BUS", "1").env("APPARENT_PORTAL_DIAGNOSTICS", "1")
+        .env("XDG_DATA_HOME", &data).output().unwrap();
+    std::fs::remove_dir_all(data).unwrap();
+    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+#[ignore = "only in the subprocess's isolated bus"]
+fn multiple_node_consumers_private_bus_fixture() {
+    assert_eq!(std::env::var("APPARENT_TEST_OWNED_REQUEST_BUS").as_deref(), Ok("1"));
+    futures_lite::future::block_on(async {
+        let (closed, closes) = flume::bounded(4);
+        let (peers, remote_peers) = flume::bounded(8);
+        let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
+            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: true }).unwrap().build().await.unwrap();
+        let worker = std::thread::spawn(|| portal_screencasts_until(false, true, "synthetic-test-only", &AtomicBool::new(false),
+            std::time::Instant::now() + Duration::from_secs(3)).unwrap().0);
+        let mut streams = worker.join().unwrap();
+        assert_eq!(streams.len(), 2);
+        let cookie = |stream: &Stream| {
+            let mut cookie = 0u64;
+            let mut len = std::mem::size_of_val(&cookie) as libc::socklen_t;
+            assert_eq!(unsafe { libc::getsockopt(stream.fd(), libc::SOL_SOCKET, libc::SO_COOKIE,
+                &mut cookie as *mut _ as *mut _, &mut len) }, 0);
+            cookie
+        };
+        assert_ne!(cookie(&streams[0]), cookie(&streams[1]), "independent Recorder consumers require fresh protocol connections, not dup FDs");
+        assert!(Arc::ptr_eq(streams[0].stop.as_ref().unwrap(), streams[1].stop.as_ref().unwrap()));
+        for (index, stream) in streams.iter().enumerate() {
+            assert_eq!(stream.node, 71 + index as u32);
+            assert_eq!(stream.mapping_id.as_deref(), Some(if index == 0 { "SYNTHETIC-A" } else { "SYNTHETIC-B" }));
+        }
+        // This is Recorder's actual pipewiresrc launch wiring, not a duplicate formatter.
+        let sources: Vec<_> = streams.drain(..).map(|session| Source::PipeWire { session, crop: None }).collect();
+        for source in &sources {
+            let Source::PipeWire { session, .. } = source else { unreachable!() };
+            let launch = super::super::media::source_launch(source);
+            assert!(launch.starts_with(&format!("pipewiresrc fd={} path={} ", session.fd(), session.node)));
+        }
+        let mut sources = sources;
+        drop(sources.remove(0));
+        assert!(closes.recv_timeout(Duration::from_millis(50)).is_err(), "one dropped consumer must not close the shared Session");
+        drop(sources);
+        closes.recv_timeout(Duration::from_secs(2)).unwrap();
+        let peers: Vec<_> = remote_peers.try_iter().collect();
+        assert_eq!(peers.len(), 3, "two consumers plus one fresh observer");
+        for (index, mut peer) in peers.into_iter().enumerate() {
+            use std::io::Read;
+            peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut bytes = Vec::new();
+            peer.read_to_end(&mut bytes).unwrap();
+            assert_eq!(bytes.is_empty(), index != 0, "only the fresh observer speaks the protocol in this FD fixture");
+        }
     });
 }
 

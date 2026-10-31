@@ -44,6 +44,11 @@ pipeline entry points and the outer publication closure, not those UI effects.
 `coordinate(path) -> Result<Coordination>` is a non-Send, owning-thread reentrant
 writer lease over a persistent `.publication.lock` flock inode. Never unlink that
 file. Hold an outer lease across final mutation, `checked`, and Engine consumption.
+Reentrant guards share the locked descriptor and original directory identity.
+They can drop in either order: coordination lasts until the last guard drops.
+The `Rc` ownership makes guards neither `Send` nor `Sync`; acquire a new lease
+on another thread instead of moving or sharing a guard. Nested `publish_after`
+calls defer to the outer build, and a pending worker waits for all its guards.
 `checked(path, &bundle, &summary) -> Result<PublicationInputs>` returns the
 absolute `path`, `bundle_id`, and exact persisted `manifest` bytes. Feed those,
 plus the Engine caller's own request identity, to existing

@@ -12,36 +12,35 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fs::{File, Metadata},
-    marker::PhantomData,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 pub const IN_PROGRESS: &str = ".publication-pending";
 const LOCK: &str = ".publication.lock";
 type Built = (PathBuf, ApparentBundle, String);
-thread_local! { static HELD: RefCell<HashMap<PathBuf, Metadata>> = RefCell::new(HashMap::new()); }
+thread_local! { static HELD: RefCell<HashMap<PathBuf, Weak<Lease>>> = RefCell::new(HashMap::new()); }
 thread_local! { static PUBLISHING: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new()); }
 
 /// Writer coordination, not capture admission. Reentrant only on the owning thread.
 /// The persistent flock inode is never unlinked or replaced.
+/// Every guard shares ownership; only the last guard releases coordination.
 pub struct Coordination {
     path: PathBuf,
-    lock: Option<File>,
+    lease: Rc<Lease>,
+}
+
+struct Lease {
+    // Closing this descriptor releases flock after the last owning-thread guard.
+    _lock: File,
     root: Metadata,
-    _not_send: PhantomData<Rc<()>>,
 }
 
 pub fn coordinate(path: &Path) -> Result<Coordination> {
     let path = fs::absolute(path)?;
-    if let Some(root) = HELD.with(|held| held.borrow().get(&path).cloned()) {
-        return Ok(Coordination {
-            path,
-            lock: None,
-            root,
-            _not_send: PhantomData,
-        });
+    if let Some(lease) = HELD.with(|held| held.borrow().get(&path).and_then(Weak::upgrade)) {
+        return Ok(Coordination { path, lease });
     }
     let root = Directory::open(&path, true)?;
     let lock = root.leaf(LOCK, true)?;
@@ -58,21 +57,21 @@ pub fn coordinate(path: &Path) -> Result<Coordination> {
         fs::same(&lock.metadata()?, &root.file(LOCK)?.metadata()?),
         "publication lock replaced"
     );
-    HELD.with(|held| held.borrow_mut().insert(path.clone(), metadata.clone()));
-    Ok(Coordination {
-        path,
-        lock: Some(lock),
+    let lease = Rc::new(Lease {
+        _lock: lock,
         root: metadata,
-        _not_send: PhantomData,
-    })
+    });
+    HELD.with(|held| {
+        held.borrow_mut()
+            .insert(path.clone(), Rc::downgrade(&lease))
+    });
+    Ok(Coordination { path, lease })
 }
 
 impl Drop for Coordination {
     fn drop(&mut self) {
-        if let Some(lock) = self.lock.take() {
+        if Rc::strong_count(&self.lease) == 1 {
             HELD.with(|held| held.borrow_mut().remove(&self.path));
-            // Close releases the lock before a pending worker can acquire it.
-            drop(lock);
         }
     }
 }
@@ -105,7 +104,7 @@ pub fn publish_after(path: &Path, build: impl FnOnce() -> Result<Built>) -> Resu
     let publishing = Publishing(absolute);
     let root = Directory::open(path, false)?;
     ensure!(
-        fs::same_directory(&guard.root, &root.0.metadata()?),
+        fs::same_directory(&guard.lease.root, &root.0.metadata()?),
         "bundle replaced before build"
     );
     root.write(IN_PROGRESS, b"publication has not completed\n")?;
@@ -142,7 +141,10 @@ pub fn publish_after(path: &Path, build: impl FnOnce() -> Result<Built>) -> Resu
 pub fn checked(path: &Path, expected: &ApparentBundle, summary: &str) -> Result<PublicationInputs> {
     let guard = coordinate(path)?;
     ensure!(
-        fs::same_directory(&guard.root, &Directory::open(path, false)?.0.metadata()?),
+        fs::same_directory(
+            &guard.lease.root,
+            &Directory::open(path, false)?.0.metadata()?
+        ),
         "bundle replaced before validation"
     );
     checked_with(path, expected, summary, || Ok(()))

@@ -1763,7 +1763,7 @@ pub fn start_worker() {
 
 #[cfg(test)]
 #[path = "hosted_tests.rs"]
-mod regression_tests;
+pub(crate) mod regression_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1254,9 +1254,7 @@ impl ApparentCoordinator {
         match effect {
             Effect::Close => {
                 self.settings = None;
-                if let Some(active) = self.share_login.take() {
-                    active.store(false, std::sync::atomic::Ordering::SeqCst);
-                }
+                self.cancel_share_login();
                 if let Some((_, _, active)) = self.share_pending.take() {
                     active.store(false, std::sync::atomic::Ordering::SeqCst);
                 }
@@ -1268,12 +1266,12 @@ impl ApparentCoordinator {
                     let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
                     self.share_login = Some(active.clone());
                     cx.spawn(async move |entity, cx| {
+                        let worker_active = active.clone();
                         let result = cx.background_executor().spawn(async move {
-                            crate::hosted::connect_sharing(&|| active.load(std::sync::atomic::Ordering::SeqCst))
+                            crate::hosted::connect_sharing(&|| worker_active.load(std::sync::atomic::Ordering::SeqCst))
                         }).await;
                         let _ = entity.update(cx, |coord, _| {
-                            coord.share_login = None;
-                            if result.is_ok() { crate::hosted::start_worker(); }
+                            if coord.finish_share_login(&active, result.is_ok()) { crate::hosted::start_worker(); }
                         });
                     }).detach();
                 }
@@ -1298,6 +1296,22 @@ impl ApparentCoordinator {
             }
             _ => {}
         }
+    }
+
+    fn cancel_share_login(&mut self) {
+        if let Some(active) = self.share_login.take() {
+            active.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn finish_share_login(&mut self, active: &std::sync::Arc<std::sync::atomic::AtomicBool>, succeeded: bool) -> bool {
+        // A cancelled request can finish after Settings has started another login.
+        // Only its owner may clear the cancellation handle or start the worker.
+        if !self.share_login.as_ref().is_some_and(|current| std::sync::Arc::ptr_eq(current, active)) {
+            return false;
+        }
+        self.share_login = None;
+        succeeded && active.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Keeps a fresh read of the grants and remembers what was granted. (The key tap follows
@@ -2521,6 +2535,7 @@ impl ApparentCoordinator {
             }).await;
             let _ = entity.update(cx, |coord, cx| {
                 if !active.load(std::sync::atomic::Ordering::SeqCst)
+                    || !coord.share_pending.as_ref().is_some_and(|(_, _, current)| std::sync::Arc::ptr_eq(current, &active))
                     || coord.capture_generation != generation
                     || coord.completed_dir.as_ref() != Some(&bundle)
                     || !matches!(coord.island_phase, IslandPhase::Completed { .. }) { return; }
@@ -6648,6 +6663,35 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hosted_settings_late_login_cannot_erase_newer_cancellation() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let (sender, _receiver) = flume::unbounded();
+        let mut coord = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        let a = Arc::new(AtomicBool::new(true));
+        coord.share_login = Some(a.clone());
+        coord.cancel_share_login(); // Close Settings A.
+        assert!(!a.load(Ordering::SeqCst));
+        let b = Arc::new(AtomicBool::new(true));
+        coord.share_login = Some(b.clone()); // Reopen Settings and start B.
+        let mut worker_starts = 0;
+        let result = crate::hosted::regression_tests::deferred_cancelled_settings_login(b.clone(), || {
+            worker_starts += usize::from(coord.finish_share_login(&a, false));
+            coord.cancel_share_login(); // Close Settings B before approval.
+        });
+        worker_starts += usize::from(coord.finish_share_login(&b, result.is_ok()));
+        assert!(!b.load(Ordering::SeqCst));
+        assert!(result.is_err());
+        assert_eq!(worker_starts, 0, "cancelled completion started the upload worker");
+        assert!(coord.share_login.is_none());
+        let c = Arc::new(AtomicBool::new(true));
+        coord.share_login = Some(c.clone());
+        assert!(!coord.finish_share_login(&a, true), "stale success must not start a worker");
+        assert!(Arc::ptr_eq(coord.share_login.as_ref().unwrap(), &c));
+        assert!(coord.finish_share_login(&c, true), "the current approved login still starts its worker");
+        assert!(!coord.finish_share_login(&c, true), "duplicate completion must not restart a worker");
+    }
 
     #[test]
     fn failed_hidden_shortcut_attempt_cannot_lend_eligibility_to_menu_capture() {

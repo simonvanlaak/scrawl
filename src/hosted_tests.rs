@@ -366,6 +366,36 @@ fn hosted_security_source_parent_swap_fails_closed() {
     );
 }
 
+/// Hold the real login transport while the coordinator delivers deferred UI events.
+pub(crate) fn deferred_cancelled_settings_login(active: Arc<AtomicBool>, cancel: impl FnOnce()) -> Result<()> {
+    let f = Fixture::new();
+    let server = Server::new("upload");
+    atomic_json(&f.client.config, &json!({"unrelated":{"kept":true},"cloud":{"enabled":false,"uploadConsent":false,"server":server.url}})).unwrap();
+    let before = fs::read(&f.client.config).unwrap();
+    let gate = Arc::new(MediaGate::default());
+    server.state.lock().unwrap().media_gate = Some(gate.clone());
+    let client = f.client.clone();
+    let url = server.url.clone();
+    let worker = std::thread::spawn(move || {
+        client.login_allowed(&url, "upload", true, false, &|| active.load(Ordering::SeqCst))
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.started.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let reached_approval = gate.started.load(Ordering::SeqCst);
+    cancel();
+    gate.release.store(true, Ordering::SeqCst); // Approve B only after Settings B closes.
+    let result = worker.join().unwrap();
+    assert!(reached_approval, "login never reached deferred approval");
+    assert_eq!(server.state.lock().unwrap().polls, 2);
+    assert!(!f.client.state.join("upload.credential").exists(), "cancelled login published credentials");
+    assert_eq!(fs::read(&f.client.config).unwrap(), before, "cancelled login published consent");
+    assert!(!f.client.enabled());
+    assert!(f.client.jobs().unwrap().is_empty());
+    result
+}
+
 struct Fixture {
     root: PathBuf,
     client: Client,
@@ -533,6 +563,15 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         } else if s.polls == 1 {
             json!({"status":"pending"}).to_string().into_bytes()
         } else {
+            if let Some(gate) = s.media_gate.clone() {
+                drop(s);
+                gate.started.store(true, Ordering::SeqCst);
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !gate.release.load(Ordering::SeqCst) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                s = state.lock().unwrap();
+            }
             json!({"status":"approved","scope":if matches!(s.mode.as_str(), "wrong-scope" | "upload") {"upload"} else {"read"},"accessToken":"synthetic-approved-secret"}).to_string().into_bytes()
         }
     } else if s.mode == "slow" {

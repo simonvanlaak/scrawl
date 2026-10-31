@@ -1186,7 +1186,11 @@ fn hosted_explicit_upload_recovers_changed_expired_and_tombstoned_ids() {
     );
     // An immutable reserved manifest cannot be reused after the local bundle changes.
     let stage = Scratch::new(&f.client.state).unwrap();
-    let mut job = f.client.jobs().unwrap().remove(0);
+    let mut job = f
+        .client
+        .jobs()
+        .unwrap_or_else(|_| panic!("Could not read hosted queue for explicit upload recovery"))
+        .remove(0);
     job.files = snapshot(&bundle, &stage.0).unwrap();
     job.status = "failed".into();
     f.client.save_job(&job).unwrap();

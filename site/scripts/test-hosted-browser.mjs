@@ -121,7 +121,10 @@ try {
       await page.locator('.hosted-details .hosted-limits > summary').click()
       assert.match(await page.locator('.hosted-details').innerText(), /500,000,000[\s\S]*90,000,000[\s\S]*20 accounts[\s\S]*30 days/)
       await page.getByRole('button', { name: 'Review access', exact: true }).click()
-      if (!test.anonymous) assert.match(await page.getByRole('dialog').innerText(), /--scope read --no-browser/)
+      if (!test.anonymous) {
+        assert.equal(await page.getByRole('dialog').locator('pre code').innerText(), `apparent connect login --server ${apiOrigin || 'https://YOUR-HOSTED-API-ORIGIN'} --scope read --no-browser`)
+        assert.match(await page.getByRole('dialog').innerText(), /Update Apparent to use apparent connect\. Older apps can use apparent cloud; it remains a compatibility alias\./)
+      }
       await page.keyboard.press('Escape')
       await agent.focus(); await page.keyboard.press('Home')
       assert.equal(await computer.getAttribute('aria-selected'), 'true')
@@ -130,7 +133,13 @@ try {
       assert.equal(await page.locator('.hosted-details').getAttribute('open'), null)
       const connect = page.getByRole('button', { name: 'Connect', exact: true })
       await connect.click()
-      if (!test.anonymous) assert.match(await page.getByRole('dialog').innerText(), /--scope upload --consent-upload/)
+      if (!test.anonymous) {
+        assert.deepEqual(await page.getByRole('dialog').locator('pre code').allInnerTexts(), [
+          `apparent connect login --server ${apiOrigin || 'https://YOUR-HOSTED-API-ORIGIN'} --scope upload --consent-upload`,
+          'apparent connect status\napparent connect status --account',
+        ])
+        assert.match(await page.getByRole('dialog').innerText(), /Update Apparent to use apparent connect\. Older apps can use apparent cloud; it remains a compatibility alias\./)
+      }
       assert.equal(writes.length, 0, 'tabs, details and setup never mutate')
       if (!test.anonymous) { await page.screenshot({ path: `${evidence}/${test.name}-setup.png`, fullPage: true }); await page.keyboard.press('Escape'); assert.equal(await connect.evaluate(e => e === document.activeElement), true) }
     }

@@ -558,6 +558,69 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   `final-ledger-push-complete.log` retain that repair proof; no source was changed
   to hide a fixture failure. Interrupted attempts are not credited.
 
+### Approved lifecycle and checked-publication adoption (2026-10-31)
+
+- Following the leaf/CI/host checkpoints above, adopted all 13 #211 commits in
+  their verified original order from `9a678faf..36dfbfde`: `b37ce0d0`,
+  `7337f2b5`, `310ced05`, `7d9cf506`, `8208368b`, `0feca163`, `1ed99e1a`,
+  `4a64c062`, `35d68edf`, `72229c83`, `2fb16212`, `de97ef24`, `36dfbfde`.
+  None was already a canonical ancestor. `cherry-pick -x` produced no conflict;
+  code checkpoint `20189a5c13a7169a69edad5b05a899b524eb10bf`, tree
+  `42a831d7397a4a88cf3df81461b0f71830efbec2`, is published. All 33 changed paths
+  match final approved donor `36dfbfde982a4e5622ec6a95ffd89898f086c5d8`
+  (tree `e74e0a824eb715e111e54f52c35ee019d136c97b`) in blobs and modes.
+  The preceding leaf, secure u32 repair, CI selector/workflow, host subtree,
+  manifests/locks and hooks remain byte-identical. This ledger alone follows.
+- Reused parent-supplied provider review 35, completed caller review 40 and
+  re-review 54 approval of the complete 13-file `2fb16212..36dfbfde` repair,
+  with no blocking security/correctness findings. Supplied meaningful RED
+  (four failures of five), GREEN five, focused 14 and root 706/0/3 remain donor
+  evidence, not fresh integration runs. No redundant provider loop or nested
+  review was launched for the unchanged approved bytes.
+- **Now adopted:** GUI screen/phone and timed CLI callers admit before media,
+  retain synchronous source ownership through teardown and detached finalizing,
+  and consume checked publication before success. Phone EOF carries originating
+  Arc identity and is rejected before effects when stale; intentional teardown
+  suppresses notification before join while genuine EOF still notifies. Screen
+  and phone final real-frame flags are read after producer join. Whiteboard
+  mutations/fallback remain inside the owned outer publication coordination.
+  Retention maintenance consumes Engine exclusion. See `docs/bundle-publication.md`
+  and `capture/engine/README.md` for the exact, limited contracts.
+- Fresh canonical mandatory checkpoint hook passed: 10 guard tests, full offline
+  root binary build and full root suite, **706 passed / 0 failed / 3 ignored**.
+  Fresh focused command `cargo test -j 3 --offline -- capture_runtime::tests::
+  ui::tests::real_ ui::tests::owned_start_failure review40_ --test-threads=2`
+  passed 14 tests (695 filtered). Six CI selector tests and four host diagnostic
+  tests passed. The actual Engine selector, under `CARGO_NET_OFFLINE=true` with
+  a trusted private HOME-child TMPDIR, passed fmt/library build/all 32 Engine
+  tests. Dependency tree remains unchanged and GPUI-free. Root/Engine test
+  totals are separate, not added together or confused with child subprocesses.
+- Fresh built canonical CLI ran synthetic `reprocess ... --bench 1 --transcriber
+  apple` and the same command with `--live-speed 1`; both exited 0. Each output
+  movie has a different inode on the same filesystem, identical movie bytes and
+  link count one. Complete source file hashes/inodes/devices/link counts stayed
+  unchanged. Used an independently copied known synthetic fixture and isolated
+  HOME/config/runtime with display/DBus variables absent, not live capture data.
+  Manifest/summary/contact sheet/keyframe inspected: one tiny blue movie frame
+  with oversized inherited demo ink and no microphone audio are intentional
+  mismatched-fixture limits, not native rendering/audio proof.
+- Logs and identity receipts:
+  `~/.local/share/apparent/refactor-evidence/lifecycle-integration/`
+  (`donor-sequence.json`, `exact-scope.json`, `checkpoint-push.log`,
+  `focused-caller.log`, `ci-selector.log`, `host-tests.log`,
+  `engine-selector.log`, `engine-tree.txt`, `verify-replay.py`,
+  `replay/results.json`, `replay/{ordinary,live-speed}.log`). Reused upstream
+  five-job web/Engine CI evidence remains at #212 run `41216210451` for the
+  earlier exact inputs; web inputs did not change here. No fresh web run or
+  combined-candidate Mac result is claimed.
+- Still open: full Mac root compilation/lifecycle, Linux native GUI/capture/
+  preview switching, real clipboard/upload effects, complete reader/writer
+  lease coverage and standalone Agent. Pure frame/candidate leaves still have
+  distinct root donors: **root re-export adoption/donor removal remains HOLD**
+  until separately assigned after this checkpoint. No whole Phase C completion,
+  production Desktop host approval, install, VM/native capture, live config,
+  merge, deployment, release or outbound delivery.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

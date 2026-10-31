@@ -91,3 +91,45 @@ fn publication_checks_wav_persistence_before_transcription_or_manifest() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn publication_screen_wrapper_checks_journal_and_keeps_required_audio() {
+    for collide in [true, false] {
+        let root = std::env::temp_dir().join(crate::make_bundle_id());
+        std::fs::create_dir_all(&root).unwrap();
+        if collide {
+            std::fs::create_dir(root.join(recover::UNFINISHED)).unwrap();
+        }
+        let mut target = target();
+        target.frame.x = 0.12345678901234567;
+        // Valid, empty captured WAV avoids any native/network transcriber call.
+        let recorded = audio::recorded_audio_from_wav(audio::encode_wav_16k(&[]).unwrap()).unwrap();
+        let result = finalize_capture_bundle(
+            &root,
+            target,
+            capture::ScreenRecording {
+                frames: vec![RgbaFrame::new(0, 32, 32, vec![128; 32 * 32 * 4])],
+                video: None,
+                duration_ms: 1,
+                video_offset_ms: 0,
+            },
+            vec![],
+            vec![],
+            Some(recorded),
+            None,
+            windows::ActivityLog::default(),
+            None,
+        );
+        if collide {
+            assert!(result.is_err());
+            assert!(!root.join("apparent.json").exists());
+        } else {
+            let (_, bundle, summary) = result.unwrap();
+            assert_eq!(bundle.audio.as_deref(), Some("audio.wav"));
+            assert!(!root.join(recover::UNFINISHED).exists());
+            assert!(!root.join(publication::IN_PROGRESS).exists());
+            publication::checked(&root, &bundle, &summary).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

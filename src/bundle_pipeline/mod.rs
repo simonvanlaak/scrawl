@@ -317,6 +317,7 @@ pub fn finalize_capture_bundle(
     }
     let wav_path = bundle_dir.join("audio.wav");
     let has_wav = wav_path.exists();
+    let wav_required = recorded_audio.is_some() || has_wav;
     recover::write(
         bundle_dir,
         &recover::Unfinished {
@@ -422,7 +423,10 @@ pub fn finalize_capture_bundle(
             ..SourceExtras::default()
         },
     );
-    built
+    let built = built?;
+    anyhow::ensure!(!wav_required || built.1.audio.as_deref() == Some("audio.wav"),
+        "captured audio disappeared during bundle construction");
+    Ok(built)
     })
 }
 

@@ -1359,7 +1359,8 @@ impl ConfigWriter {
                 directory.as_raw_fd(),
                 name.as_ptr(),
                 flags | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                0o600 as libc::mode_t,
+                // C variadic arguments require promotion: Darwin's mode_t is u16.
+                0o600 as libc::c_uint,
             )
         };
         if fd < 0 {

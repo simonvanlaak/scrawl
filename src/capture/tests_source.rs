@@ -8,6 +8,8 @@ fn extracted_sources_never_request_input_monitoring() {
         include_str!("recorder.rs"),
         include_str!("telemetry.rs"),
         include_str!("artifacts.rs"),
+        include_str!("../../capture/engine/src/recording/mod.rs"),
+        include_str!("../../capture/engine/src/model.rs"),
     ];
     let calls = [
         concat!("CGRequest", "ListenEventAccess"),
@@ -29,7 +31,12 @@ fn desktop_types_stay_out_of_the_direct_recorder_and_artifact_sources() {
     let recorder = include_str!("recorder.rs");
     let artifacts = include_str!("artifacts.rs");
     let desktop = include_str!("telemetry.rs");
-    for source in [recorder, artifacts] {
+    for source in [
+        recorder,
+        artifacts,
+        include_str!("../../capture/engine/src/recording/mod.rs"),
+        include_str!("../../capture/engine/src/model.rs"),
+    ] {
         for dependency in [
             "LiveOverlayEvent",
             "SharedCaptureTelemetry",

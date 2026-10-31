@@ -1,5 +1,5 @@
-//! Pure candidate storage preparation, not a second recorder or production adoption.
-//! Root donors remain until the parent's paired adoption deletes them and re-exports here.
+//! Pure candidate storage shared with the root through re-exports, not a second recorder.
+//! Native sampling, readiness and session teardown remain in the root application.
 use std::{path::PathBuf, time::Duration};
 
 use crate::model::RgbaFrame;
@@ -9,7 +9,7 @@ pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// decoded from `recording.mp4` at full size afterwards.
 pub const CANDIDATE_EDGE: f64 = 480.0;
 /// Without a recording to decode from, the candidates are the keyframes, so keep them sharper.
-pub(crate) const CANDIDATE_EDGE_NO_VIDEO: f64 = 1280.0;
+pub const CANDIDATE_EDGE_NO_VIDEO: f64 = 1280.0;
 /// The candidates' memory ceiling, however long the capture runs.
 pub const CANDIDATE_BUDGET_BYTES: usize = 384 << 20;
 

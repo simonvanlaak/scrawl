@@ -79,7 +79,9 @@ completed ISO-BMFF boxes, embedded video descriptions, sample sizes, chunk exten
 and timing counts. **Movie codec payload decoding is not claimed**; fragmented
 MP4 and unusual sample-table variants are not supported by this validator. No
 optional platform decoder, new dependency or external ffmpeg process is required
-at publication. The tiny checked-in H.264 fixture is synthetic (see its README).
+at publication. Tiny checked-in H.264 MP4 and genuine QuickTime MOV fixtures
+are synthetic (see their README for muxing, sample tables and full-frame decode
+evidence). They do not establish compatibility with every native writer variant.
 
 All inventoried files, nested directories, bundle root and parent are fsynced;
 metadata, inode identity and the complete inventory are checked for replacement.

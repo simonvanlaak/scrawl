@@ -81,59 +81,77 @@ fn publication_coordination_blocks_other_threads_until_last_guard_in_either_drop
 
 #[test]
 fn publication_checks_real_image_audio_movie_and_exact_manifest_inputs() {
-    let fixture = Fixture::new();
-    let (_, mut bundle, summary) = fixture.build();
-    let root = Directory::open(&fixture.0, false).unwrap();
-    root.write(
-        "audio.wav",
-        &crate::audio::encode_wav_16k(&[0.0; 16]).unwrap(),
-    )
-    .unwrap();
-    root.write(
-        "recording.mov",
-        include_bytes!("../../../tests/fixtures/publication/tiny.mp4"),
-    )
-    .unwrap();
-    bundle.audio = Some("audio.wav".into());
-    bundle.video = Some("recording.mov".into());
-    let manifest = serde_json::to_vec_pretty(&bundle).unwrap();
-    root.write("apparent.json", &manifest).unwrap();
-    let inputs = checked(&fixture.0, &bundle, &summary).unwrap();
-    assert_eq!(inputs.manifest, manifest);
-    assert_eq!(inputs.bundle_id, bundle.id);
-    assert_eq!(inputs.path, fixture.0);
-    for (name, bytes) in [
-        ("audio.wav", b"RIFF invalid WAV".as_slice()),
-        ("recording.mov", b"not a movie".as_slice()),
-        ("contact-sheet.png", b"not PNG".as_slice()),
+    for (movie_name, movie_bytes) in [
+        (
+            "recording.mp4",
+            include_bytes!("../../../tests/fixtures/publication/tiny.mp4").as_slice(),
+        ),
+        (
+            "recording.mov",
+            include_bytes!("../../../tests/fixtures/publication/tiny.mov").as_slice(),
+        ),
     ] {
-        let old = std::fs::read(fixture.0.join(name)).unwrap();
-        root.write(name, bytes).unwrap();
-        assert!(
-            checked(&fixture.0, &bundle, &summary).is_err(),
-            "accepted {name}"
-        );
-        root.write(name, &old).unwrap();
+        let fixture = Fixture::new();
+        let (_, mut bundle, summary) = fixture.build();
+        let root = Directory::open(&fixture.0, false).unwrap();
+        root.write(
+            "audio.wav",
+            &crate::audio::encode_wav_16k(&[0.0; 16]).unwrap(),
+        )
+        .unwrap();
+        root.write(movie_name, movie_bytes).unwrap();
+        bundle.audio = Some("audio.wav".into());
+        bundle.video = Some(movie_name.into());
+        let manifest = serde_json::to_vec_pretty(&bundle).unwrap();
+        root.write("apparent.json", &manifest).unwrap();
+        let inputs = checked(&fixture.0, &bundle, &summary).unwrap();
+        assert_eq!(inputs.manifest, manifest);
+        assert_eq!(inputs.bundle_id, bundle.id);
+        assert_eq!(inputs.path, fixture.0);
+        for (name, bytes) in [
+            ("audio.wav", b"RIFF invalid WAV".as_slice()),
+            (movie_name, b"not a movie".as_slice()),
+            ("contact-sheet.png", b"not PNG".as_slice()),
+        ] {
+            let old = std::fs::read(fixture.0.join(name)).unwrap();
+            root.write(name, bytes).unwrap();
+            assert!(
+                checked(&fixture.0, &bundle, &summary).is_err(),
+                "accepted {name}"
+            );
+            root.write(name, &old).unwrap();
+        }
+        root.write("summary.md", b"stale summary").unwrap();
+        assert!(checked(&fixture.0, &bundle, &summary).is_err());
     }
-    root.write("summary.md", b"stale summary").unwrap();
-    assert!(checked(&fixture.0, &bundle, &summary).is_err());
 }
 
 #[test]
 fn publication_rejects_movie_with_valid_boxes_but_truncated_sample_payload() {
-    let fixture = Fixture::new();
-    let (_, mut bundle, summary) = fixture.build();
-    let mut movie = include_bytes!("../../../tests/fixtures/publication/tiny.mp4").to_vec();
-    let mdat = movie.windows(4).position(|w| w == b"mdat").unwrap();
-    // Keep every box syntactically valid, but claim video samples in an empty mdat.
-    movie[mdat - 4..mdat].copy_from_slice(&8u32.to_be_bytes());
-    movie.truncate(mdat + 4);
-    let root = Directory::open(&fixture.0, false).unwrap();
-    root.write("recording.mp4", &movie).unwrap();
-    bundle.video = Some("recording.mp4".into());
-    root.write("apparent.json", &serde_json::to_vec(&bundle).unwrap())
-        .unwrap();
-    assert!(checked(&fixture.0, &bundle, &summary).is_err());
+    for (movie_name, movie_bytes) in [
+        (
+            "recording.mp4",
+            include_bytes!("../../../tests/fixtures/publication/tiny.mp4").as_slice(),
+        ),
+        (
+            "recording.mov",
+            include_bytes!("../../../tests/fixtures/publication/tiny.mov").as_slice(),
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let (_, mut bundle, summary) = fixture.build();
+        let mut movie = movie_bytes.to_vec();
+        let mdat = movie.windows(4).position(|w| w == b"mdat").unwrap();
+        // Keep every box syntactically valid, but claim video samples in an empty mdat.
+        movie[mdat - 4..mdat].copy_from_slice(&8u32.to_be_bytes());
+        movie.truncate(mdat + 4);
+        let root = Directory::open(&fixture.0, false).unwrap();
+        root.write(movie_name, &movie).unwrap();
+        bundle.video = Some(movie_name.into());
+        root.write("apparent.json", &serde_json::to_vec(&bundle).unwrap())
+            .unwrap();
+        assert!(checked(&fixture.0, &bundle, &summary).is_err());
+    }
 }
 
 #[test]

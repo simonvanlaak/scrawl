@@ -102,9 +102,7 @@ pub fn mark_unsafe_video(bundle_dir: &Path) -> Result<()> {
 
 pub fn read(bundle_dir: &Path) -> Result<Unfinished> {
     let path = bundle_dir.join(UNFINISHED);
-    serde_json::from_slice(
-        &std::fs::read(&path).with_context(|| format!("Could not read {}", path.display()))?,
-    )
+    serde_json::from_str(&crate::bundle_pipeline::publication::read_text(bundle_dir, UNFINISHED)?)
     .with_context(|| format!("Invalid {}", path.display()))
 }
 
@@ -225,6 +223,7 @@ pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
         read(dir)
             .and_then(|unfinished| crate::rebuild_screen_bundle_with(dir, unfinished, None, media))
     } else if orphaned(dir) {
+        crate::bundle_pipeline::publication::preflight_sources(dir, Some(&dir.join(VIDEO)))?;
         let probe = (media.probe)(&dir.join(VIDEO));
         let audio_ms = std::fs::read(dir.join(AUDIO))
             .ok()

@@ -4,7 +4,7 @@ mod paths;
 mod phone;
 pub use phone::Phone;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::{bundle_pipeline::publication, model::ApparentBundle};
 use anyhow::{Context, Result, bail, ensure};

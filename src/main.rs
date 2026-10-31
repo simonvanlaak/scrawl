@@ -244,7 +244,8 @@ enum TuneCommand {
 enum Command {
     /// Opt-in hosted account and upload queue management.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    Cloud { #[command(subcommand)] command: hosted::CloudCommand },
+    #[command(alias = "cloud")]
+    Connect { #[command(subcommand)] command: hosted::ConnectCommand },
     /// Retrieve and validate a complete hosted capture using a separate read credential.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     Fetch {
@@ -604,10 +605,32 @@ enum Command {
 enum CaptureCommand {
     /// Read the running GUI's phase and opaque capture identity as JSON.
     State,
+    /// Start the normal GUI screen capture without toggling or launching an app.
+    Start {
+        /// Wait until a real screen frame arrives (portal consent may be needed).
+        #[arg(long)]
+        wait: bool,
+        /// Maximum wait in seconds. Timeout leaves an admitted capture intact; inspect its ID.
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        timeout: u64,
+        /// Retry a known start request without starting a second capture (32 hex characters).
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Finish only a matching, already-active capture.
-    Stop { capture_id: String },
+    Stop {
+        capture_id: String,
+        /// Wait for this capture's saved bundle, not merely stop acceptance.
+        #[arg(long)]
+        wait: bool,
+        /// Maximum wait in seconds. Retry or inspect the same ID after timeout.
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        timeout: u64,
+    },
     /// Discard only a matching pending or active capture.
     Cancel { capture_id: String },
+    /// Read this capture's result, retained only for the running GUI's lifetime.
+    Inspect { capture_id: String },
 }
 
 /// `skills/apparent/SKILL.md`, the same text `bunx skills add tryapparent/apparent` installs.
@@ -1718,7 +1741,7 @@ fn main() -> Result<()> {
     };
     match command {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        Command::Cloud { command } => hosted::command(command),
+        Command::Connect { command } => hosted::command(command),
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         Command::Fetch { id, out, wait } => hosted::fetch(&id, &out, wait),
         #[cfg(target_os = "linux")]
@@ -1740,16 +1763,19 @@ fn main() -> Result<()> {
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         Command::Capture { command } => {
-            let action = match &command {
-                CaptureCommand::State => None,
-                CaptureCommand::Stop { capture_id } => Some((agent_capture::Action::Stop, capture_id.as_str())),
-                CaptureCommand::Cancel { capture_id } => Some((agent_capture::Action::Cancel, capture_id.as_str())),
+            use agent_capture::Action;
+            let (action, id, wait, timeout) = match command {
+                CaptureCommand::State => (None, None, false, 4),
+                CaptureCommand::Start { wait, timeout, request_id } =>
+                    (Some(Action::Start), Some(match request_id { Some(id) => id, None => agent_capture::new_id()? }), wait, timeout),
+                CaptureCommand::Stop { capture_id, wait, timeout } => (Some(Action::Stop), Some(capture_id), wait, timeout),
+                CaptureCommand::Cancel { capture_id } => (Some(Action::Cancel), Some(capture_id), false, 4),
+                CaptureCommand::Inspect { capture_id } => (Some(Action::Inspect), Some(capture_id), false, 4),
             };
-            let response = agent_capture::command(action)?;
-            println!("{response}");
-            let value: serde_json::Value = serde_json::from_str(&response)?;
-            ensure!(value.get("error").is_none(), "GUI capture control: {response}");
-            ensure!(!matches!(value["outcome"].as_str(), Some("wrong_capture" | "not_ready")), "GUI capture control: {response}");
+            let value = agent_capture::execute(action.zip(id.as_deref()), wait, Duration::from_secs(timeout));
+            println!("{value}");
+            ensure!(!value["error"].is_string(), "GUI capture control: {value}");
+            ensure!(!matches!(value["outcome"].as_str(), Some("wrong_capture" | "not_ready")), "GUI capture control: {value}");
             Ok(())
         }
         Command::App { record, iphone } => {
@@ -2606,6 +2632,79 @@ fn copy_confirmation(dir: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn hosted_connect_is_canonical_in_help_and_usage() {
+        let help = Cli::try_parse_from(["apparent", "--help"]).err().unwrap().to_string();
+        assert!(help.lines().any(|line| line.trim_start().starts_with("connect ")), "{help}");
+        assert!(!help.lines().any(|line| line.trim_start().starts_with("cloud ")), "{help}");
+        for name in ["connect", "cloud"] {
+            for tail in [vec!["--help"], vec!["login", "--help"], vec!["upload", "--help"]] {
+                let mut args = vec!["apparent", name];
+                args.extend(tail);
+                let error = Cli::try_parse_from(args).err().unwrap();
+                assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+                assert!(!error.use_stderr());
+                let text = error.to_string();
+                assert!(text.contains("apparent connect"), "{text}");
+                assert!(!text.contains("apparent cloud"), "{text}");
+            }
+            let error = Cli::try_parse_from(["apparent", name, "login"]).err().unwrap().to_string();
+            assert!(error.contains("apparent connect login --server <SERVER>"), "{error}");
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn hosted_connect_and_cloud_parse_identical_commands_and_flags() {
+        use clap::CommandFactory;
+        for tail in [
+            vec!["login", "--server", "https://hosted.tryapparent.com"],
+            vec!["login", "--server", "https://hosted.tryapparent.com", "--scope", "read", "--no-browser"],
+            vec!["login", "--server", "https://hosted.tryapparent.com", "--scope", "upload", "--consent-upload", "--no-browser"],
+            vec!["status"], vec!["status", "--account"], vec!["logout"],
+            vec!["disable"], vec!["retry"], vec!["upload", "./synthetic capture.apparent"],
+        ] {
+            let parse = |name| {
+                let mut args = vec!["apparent", name];
+                args.extend(tail.iter().copied());
+                assert!(matches!(Cli::try_parse_from(&args).unwrap().command, Some(Command::Connect { .. })));
+                let matches = Cli::command().try_get_matches_from(args).unwrap();
+                assert_eq!(matches.subcommand_name(), Some("connect"));
+                matches.subcommand().unwrap().1.clone()
+            };
+            assert_eq!(parse("connect"), parse("cloud"), "{tail:?}");
+        }
+        for name in ["connect", "cloud"] {
+            for tail in [vec!["login"], vec!["login", "--server", "https://hosted.tryapparent.com", "--scope", "admin"], vec!["status", "--consent-upload"], vec!["upload"]] {
+                let mut args = vec!["apparent", name];
+                args.extend(tail);
+                assert!(Cli::try_parse_from(args).is_err());
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn capture_owned_start_and_wait_parser() {
+        for args in [
+            vec!["apparent", "capture", "start", "--wait", "--timeout", "30"],
+            vec!["apparent", "capture", "stop", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--wait", "--timeout", "60"],
+            vec!["apparent", "capture", "inspect", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+        ] {
+            assert!(Cli::try_parse_from(&args).is_ok(), "{args:?}");
+        }
+        for timeout in ["0", "3601", "bad"] {
+            assert!(Cli::try_parse_from(["apparent", "capture", "start", "--timeout", timeout]).is_err());
+            assert!(Cli::try_parse_from(["apparent", "capture", "stop", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--timeout", timeout]).is_err());
+        }
+        for command in ["start", "stop", "inspect"] {
+            let error = Cli::try_parse_from(["apparent", "capture", command, "--help"]).err().unwrap();
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+            assert!(!error.use_stderr());
+        }
+    }
 
     #[test]
     fn copy_confirmation_does_not_imply_visuals_reached_the_agent() {

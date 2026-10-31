@@ -65,8 +65,11 @@ Without the `input` group, a capture on Wayland has no clicks, keys or ⇧ ink o
 
 Explicit Screen and Area work on the tested desktops. The Window picker lists X11/XWayland windows only; use Screen or Area for native Wayland apps. A portal window source exists internally, but the UI does not currently offer it. A press of the record shortcut now requests all connected displays once its keys come up, however long they're held; this new default still needs exact-candidate native proof. The tray menu's **Choose What to Record…** opens the scoped picker, which stays open until you choose a target or press Esc. The Mac-only iPhone mode is hidden. Screen sharing can ask again if a desktop does not honor the saved restore token. Cancel while the dialog is open cancels the pending capture; a failed or empty capture reports an error rather than producing demo imagery, and `latest` skips its unfinished directory. Actual native picker dismissal still needs proof.
 
-`apparent capture state` reports `starting` until the portal supplies a real frame. An agent can
-cancel that pending capture by its observed ID but cannot stop-and-save it until `recording`.
+`apparent capture start --wait --timeout 30` uses the running GUI's normal interaction-aware
+screen path and returns its own request ID. Portal consent still applies; `capture state` reports
+`starting` until a real frame arrives. An agent can cancel its owned pending ID but cannot
+stop-and-save it until `recording`. `capture stop <id> --wait --timeout 60` returns the exact saved
+bundle path for that ID; `capture inspect <id>` recovers its process-lifetime receipt after timeout.
 See `docs/capture.md` for the same-user GUI control protocol on both supported platforms.
 
 Plasma 5 can report successful GlobalShortcuts binding with an empty result. Apparent validates both returned bindings and uses KGlobalAccel directly on Plasma 5, so the shortcut does not also type into the focused app.

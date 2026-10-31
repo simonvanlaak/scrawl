@@ -1016,6 +1016,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         urgent: thread_urgent,
         frames: thread_frames,
         real_frame_seen: thread_real_frame_seen,
+        startup_failed,
         video_offset_ms: thread_offset,
     } = sampler;
     let initial_excluded = excluded_window_ids
@@ -1042,6 +1043,10 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     };
     let shot_config = sck_config(&sampler_target, shot_edge);
     let mut filter_and_config = filter.map(|f| (f, shot_config));
+    if filter_and_config.is_none() {
+        apparent_log("Screen capture failed to start: no ScreenCaptureKit filter");
+        startup_failed.store(true, Ordering::Release);
+    }
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -1094,13 +1099,20 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             thread::park_timeout(Duration::from_millis(30));
             continue;
         }
+        // A terminal startup error cannot recover into a different readiness result. Keep
+        // servicing privacy exclusions above until the owner explicitly Stops or Cancels.
         if urgent || last_sample.elapsed() >= interval {
             last_sample = Instant::now();
             let t_ms = started_at.elapsed().as_millis() as u64;
-            let frame = filter_and_config
-                .as_ref()
-                .and_then(|(filter, config)| capture_sck_frame(filter, config, t_ms));
-            push_sck_candidate(&thread_frames, &thread_real_frame_seen, frame, urgent);
+            if let Some((filter, config)) = filter_and_config.as_ref() {
+                super::sample_real_candidate(
+                    &thread_frames,
+                    &thread_real_frame_seen,
+                    &startup_failed,
+                    urgent,
+                    || capture_sck_frame(filter, config, t_ms),
+                );
+            }
         }
         thread::park_timeout(Duration::from_millis(30));
     }
@@ -1120,17 +1132,6 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         return None;
     }
     video_path
-}
-
-fn push_sck_candidate(
-    frames: &Mutex<crate::capture::CandidateBuffer>,
-    real_frame_seen: &AtomicBool,
-    frame: Option<RgbaFrame>,
-    urgent: bool,
-) {
-    if let Some(frame) = frame {
-        super::push_candidate(frames, real_frame_seen, frame, urgent, true);
-    }
 }
 
 fn build_sck_filter_and_config(
@@ -1276,24 +1277,27 @@ fn capture_sck_frame(
     filter: &SCContentFilter,
     config: &SCStreamConfiguration,
     t_ms: u64,
-) -> Option<RgbaFrame> {
+) -> Result<RgbaFrame, String> {
     // Development-only fault injection: keep the movie recording, but force the
     // privacy-filtered screenshot path to fail for an end-to-end GUI check.
     #[cfg(debug_assertions)]
     if std::env::var("APPARENT_TEST_DROP_SCK_FRAMES").as_deref() == Ok("1") {
-        return None;
+        return Err("test-injected screenshot failure".into());
     }
-    let image = SCScreenshotManager::capture_image(filter, config).ok()?;
-    let width = u32::try_from(image.width()).ok()?;
-    let height = u32::try_from(image.height()).ok()?;
+    // Acquisition and conversion can fail for an individual sample. The sampler retries;
+    // these unclassified errors do not establish a terminal setup/source failure.
+    let image = SCScreenshotManager::capture_image(filter, config)
+        .map_err(|error| format!("{error:?}"))?;
+    let width = u32::try_from(image.width()).map_err(|error| error.to_string())?;
+    let height = u32::try_from(image.height()).map_err(|error| error.to_string())?;
     if width == 0 || height == 0 {
-        return None;
+        return Err("screenshot has zero dimensions".into());
     }
-    let rgba = image.rgba_data().ok()?;
+    let rgba = image.rgba_data().map_err(|error| format!("{error:?}"))?;
     if rgba.len() != (width as usize) * (height as usize) * 4 {
-        return None;
+        return Err("screenshot has invalid pixel length".into());
     }
-    Some(RgbaFrame::new(t_ms, width, height, rgba))
+    Ok(RgbaFrame::new(t_ms, width, height, rgba))
 }
 
 /// macOS prompts over a capture (`windows::system_prompts_over`): ScreenCaptureKit's "bypass
@@ -1882,22 +1886,6 @@ mod tests {
     use super::*;
     use crate::model::TargetFrame;
 
-    #[test]
-    fn failed_sck_screenshot_does_not_insert_demo_pixels() {
-        let candidates = Mutex::new(crate::capture::CandidateBuffer::new(1 << 20));
-        let real_frame_seen = AtomicBool::new(false);
-        push_sck_candidate(&candidates, &real_frame_seen, None, true);
-        assert_eq!(candidates.lock().unwrap().len(), 0);
-        assert!(!real_frame_seen.load(Ordering::Acquire));
-        push_sck_candidate(
-            &candidates,
-            &real_frame_seen,
-            Some(RgbaFrame::new(220, 4, 4, vec![0; 64])),
-            false,
-        );
-        assert_eq!(candidates.lock().unwrap().len(), 1);
-        assert!(real_frame_seen.load(Ordering::Acquire));
-    }
     #[test]
     fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {
         // Dvorak puts B where QWERTY has N (45) and T where QWERTY has K (40).

@@ -20,6 +20,7 @@ fn sampler() -> Sampler {
         started_at: Instant::now(), stopping: Arc::new(AtomicBool::new(false)),
         urgent: Arc::new(AtomicBool::new(true)), frames: Arc::new(Mutex::new(CandidateBuffer::new(1_000_000))),
         real_frame_seen: Arc::new(AtomicBool::new(false)), video_offset_ms: Arc::new(AtomicU64::new(0)),
+        startup_failed: Arc::new(AtomicBool::new(false)),
     }
 }
 
@@ -184,6 +185,7 @@ fn all_sources_ending_after_frames_finishes_and_preserves_partial_capture() {
     let mut session = super::super::ScreenCaptureSession {
         started_at: s.started_at, stopping: Arc::clone(&s.stopping), urgent_snapshot: Arc::clone(&s.urgent),
         frames: Arc::clone(&s.frames), real_frame_seen: Arc::clone(&s.real_frame_seen),
+        startup_failed: Arc::clone(&s.startup_failed),
         video_offset_ms: Arc::clone(&s.video_offset_ms), sampler_thread: None, displays: state,
         _recording: crate::retention::Recording::start(),
     };

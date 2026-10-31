@@ -62,18 +62,60 @@ Mac streams whose exclusion transition or teardown cannot be certified invalidat
 `phase` (`idle`, `selecting`, `starting`, `recording`, `processing`, or `completed`) and a
 `capture_id` only while a capture is pending or active. `starting` means no real screen frame has
 arrived yet (on Linux this includes a pending portal chooser); it is **not** proof of recording.
-The ID is random per capture, including a switch to a new target. It is not a bundle path or a
-claim of who started the capture. Never cancel a capture merely because one is present: obtain
-the ID from a start you initiated and compare it with a fresh state read.
+The ID is opaque per capture, including a switch to a new target. A global state read is not a
+claim of who started it. Never cancel a capture merely because one is present.
+
+`apparent capture start --wait --timeout 30` atomically admits a new request on the GUI thread,
+uses the normal immediate screen-recording path (telemetry, microphone, ink and existing
+permission/portal checks), and returns that request's `capture_id`, not an ID inferred from global
+state. It refuses occupied recording, picker, preview and processing sessions without toggling.
+It requires an already running GUI and does not launch one. Without `--wait` it returns admission;
+with it, success requires `status: "recording"` after a real frame arrives.
+
+For driver-crash-safe retry, retain a 32-hex-character ID before sending and pass
+`--request-id <id>`. Within that GUI process, the same ID returns the existing receipt and cannot
+start twice. Rejected IDs are tombstoned too; a deliberately new attempt needs a new ID. Queued
+admission expires after at most three seconds (or the shorter caller deadline), so a delayed
+request cannot silently start after rejection. An admitted capture is **not** cancelled when the
+readiness wait times out. Inspect the owned ID or explicitly cancel it.
 
 `apparent capture stop <capture_id>` finishes only that capture after a frame arrives;
 `apparent capture cancel <capture_id>` discards it even while pending. A mismatched ID or a stop
-while still starting fails without acting. An already ended ID returns `already_ended`, so retries
-do not toggle, start, or alter a newer capture. These commands control the GUI, not a separate
+while still starting fails without acting. An ended ID returns `already_ended` when no other
+capture is active, and a retained terminal result remains retrievable even during a newer capture.
+Retries do not toggle, start, or alter a newer capture. These commands control the GUI, not a separate
 blocking `record --duration` process. They require a running app and return errors if its control
 socket cannot answer. Neither sends a capture to a chat; finishing uses the ordinary local bundle
 and clipboard path. A `stopping` reply means finalization has begun, not that the bundle has
-already been saved; read state again to observe processing or completion.
+already been saved.
+
+`apparent capture stop <id> --wait --timeout 60` sends one Stop and then inspects only that ID.
+It succeeds only with `status: "saved"` and `bundle_path` from that capture's successful production
+finalizer, never from `phase == "completed"`, `latest` or a directory scan. `capture inspect <id>`
+reads the same receipt. Results (including failed/cancelled/rejected IDs) last for the GUI process's
+lifetime only; an app restart loses them. This is not durable bundle history. Cancel has no bundle
+path. Finalization failure has no saved path and includes `error: "finalization_failed"` and a
+diagnostic `message`.
+
+All capture commands emit one JSON object on stdout and diagnostics on stderr. Usage errors exit
+2; execution failures exit nonzero. Receipt fields are `capture_id` (string), `status` (string),
+`bundle_path` (string on saved, otherwise null), and `error` (symbolic string or null). Status is
+`starting`, `recording`, `processing`, `saved`, `cancelled`, `failed`, `rejected` or `unknown`.
+State keeps its existing `{ "state": { "phase": ..., "capture_id": ... } }` shape; Stop/Cancel
+also include `outcome` and global `state` in their initial reply. Do not rely on those fields in a
+waited reply: it may be the final read-only receipt. Transport/timeout errors may lack `status`
+and `bundle_path`, but carry the owned ID and recovery text. The bounded wait is 1–3600 seconds.
+Useful errors include `occupied`, `admission_expired`, `start_failed`, `unknown_capture`,
+`finalization_failed`, `cancelled`, `timeout`, `control_unavailable`, `app_busy`, `app_unresponsive`
+and `invalid_response`; `outcome: "wrong_capture"` or `"not_ready"` also fails. After disconnect
+or timeout, inspect/retry the same ID before deciding on a new take.
+
+For an agent-authored proof video, see [Agent video workflow](agent-video-workflow.md):
+start ownership, settled input geometry, bounded completion checks and final-file QA.
+These controls change neither delivered media nor export/routing policy, so they are not gated
+behind an export or handoff experiment. They add no automatic clipboard, paste or upload behavior
+beyond the normal GUI finish path. Shared tests do not replace exact-candidate GUI proof on Linux
+and Mac before release.
 
 ## Capture history
 

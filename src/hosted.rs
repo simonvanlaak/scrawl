@@ -24,7 +24,7 @@ const RETENTION: u64 = 7 * 24 * 60 * 60;
 const JSON_LIMIT: u64 = 2_000_000;
 
 #[derive(Subcommand)]
-pub enum CloudCommand {
+pub enum ConnectCommand {
     /// Sign in through a device code. Upload requires explicit --consent-upload.
     Login {
         #[arg(long)]
@@ -542,7 +542,7 @@ impl Client {
         self.enqueue_with_intent(bundle, true)
     }
     fn enqueue_with_intent(&self, bundle: &Path, explicit: bool) -> Result<String> {
-        ensure!(self.enabled(), "Enable hostedSync and grant upload consent with cloud login --scope upload --consent-upload");
+        ensure!(self.enabled(), "Enable hostedSync and grant upload consent with apparent connect login --scope upload --consent-upload");
         private_dir(&self.state)?;
         #[cfg(test)]
         regression_tests::run_hook("enqueue_before_lock", bundle);
@@ -620,7 +620,7 @@ impl Client {
             .ok()?
             .into_iter()
             .find(|j| j.bundle == bundle && self.active(j) && j.status != "cancelled")?;
-        Some(format!("\nHosted capture: {} ({}; local original remains available).\nOn the agent machine, sign in separately with `apparent cloud login --server {} --scope read`, then run:\napparent fetch {} --out ./{}.apparent --wait 120\nNever paste account tokens. Fetch waits for the complete bundle.\n", job.id, job.status, job.server, job.id, job.id))
+        Some(format!("\nHosted capture: {} ({}; local original remains available).\nOn the agent machine, sign in separately with `apparent connect login --server {} --scope read`, then run:\napparent fetch {} --out ./{}.apparent --wait 120\nNever paste account tokens. Fetch waits for the complete bundle.\n", job.id, job.status, job.server, job.id, job.id))
     }
     fn request(
         &self,
@@ -1441,37 +1441,37 @@ fn publish_noreplace(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn command(command: CloudCommand) -> Result<()> {
+pub fn command(command: ConnectCommand) -> Result<()> {
     let client = Client::default();
     match command {
-        CloudCommand::Login {
+        ConnectCommand::Login {
             server,
             scope,
             consent_upload,
             no_browser,
         } => client.login(&server, &scope, consent_upload, !no_browser),
-        CloudCommand::Status { account } => {
+        ConnectCommand::Status { account } => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&client.status(account)?)?
             );
             Ok(())
         }
-        CloudCommand::Logout => {
+        ConnectCommand::Logout => {
             client.disable(true)?;
             println!("Signed out locally; pending uploads cancelled. Server data expires after seven days.");
             Ok(())
         }
-        CloudCommand::Disable => {
+        ConnectCommand::Disable => {
             client.disable(false)?;
             println!("Hosted uploads disabled; pending uploads cancelled.");
             Ok(())
         }
-        CloudCommand::Retry => {
+        ConnectCommand::Retry => {
             client.retry()?;
             client.process_once()
         }
-        CloudCommand::Upload { bundle } => {
+        ConnectCommand::Upload { bundle } => {
             let bundle = crate::handoff::resolve_bundle_dir(&bundle)?;
             println!(
                 "Queued hosted capture: {}",

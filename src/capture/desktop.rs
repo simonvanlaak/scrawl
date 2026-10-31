@@ -12,6 +12,7 @@ pub(crate) type Runner = Box<dyn FnOnce(Sampler) -> Option<PathBuf> + Send>;
 
 struct Worker {
     frames: Arc<Mutex<CandidateBuffer>>,
+    startup_failed: Arc<AtomicBool>,
     stopping: Arc<AtomicBool>,
     urgent: Arc<AtomicBool>,
     offset: Arc<AtomicU64>,
@@ -90,6 +91,7 @@ fn coordinate(sampler: Sampler, state: Arc<Mutex<Vec<CapturedDisplay>>>,
     for (i, runner) in runners.into_iter().enumerate() {
         let d = &mut displays[i];
         let frames = Arc::new(Mutex::new(CandidateBuffer::latest()));
+        let startup_failed = Arc::new(AtomicBool::new(false));
         let stopping = Arc::new(AtomicBool::new(false));
         let urgent = Arc::new(AtomicBool::new(false));
         let offset = Arc::new(AtomicU64::new(0));
@@ -104,6 +106,7 @@ fn coordinate(sampler: Sampler, state: Arc<Mutex<Vec<CapturedDisplay>>>,
             target, video_output_path: path, excluded_window_ids: Arc::clone(&sampler.excluded_window_ids),
             started_at: sampler.started_at, stopping: Arc::clone(&stopping), urgent: Arc::clone(&urgent),
             frames: Arc::clone(&frames), real_frame_seen: Arc::new(AtomicBool::new(false)),
+            startup_failed: Arc::clone(&startup_failed),
             video_offset_ms: Arc::clone(&offset),
         };
         let handle = match runner {
@@ -113,7 +116,7 @@ fn coordinate(sampler: Sampler, state: Arc<Mutex<Vec<CapturedDisplay>>>,
             Err(message) => { fail(d, launch_ms, message); None },
             _ => None,
         };
-        workers.push(Worker { frames, stopping, urgent, offset, handle });
+        workers.push(Worker { frames, startup_failed, stopping, urgent, offset, handle });
     }
     let mut latest = vec![None; displays.len()];
     let size = super::capture_size(&sampler.target, super::CANDIDATE_EDGE);
@@ -139,7 +142,8 @@ fn coordinate(sampler: Sampler, state: Arc<Mutex<Vec<CapturedDisplay>>>,
                 d.started_ms.get_or_insert(frame.t_ms); latest[i] = Some(frame);
             }
             let gone = inventory.as_ref().is_some_and(|list| !list.iter().any(|other| other.id == d.id && other.frame == d.frame));
-            let ended = worker.handle.as_ref().is_none_or(JoinHandle::is_finished);
+            let ended = worker.startup_failed.load(Ordering::Acquire)
+                || worker.handle.as_ref().is_none_or(JoinHandle::is_finished);
             let timeout = source_timed_out(&worker.frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner), latest[i].as_ref(), launch_ms, now);
             if gone || ended || timeout || injected(d.id, "loss", now) {
                 fail(d, latest[i].as_ref().map_or(now, |f| f.t_ms), if gone { "Display disconnected or moved" } else { "Display stream unavailable" });
@@ -147,7 +151,10 @@ fn coordinate(sampler: Sampler, state: Arc<Mutex<Vec<CapturedDisplay>>>,
             } else if urgent { worker.urgent.store(true, Ordering::Release); }
         }
         *state.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = displays.clone();
-        if displays.iter().all(|d| d.failure.is_some()) { break; }
+        if displays.iter().all(|d| d.failure.is_some()) {
+            sampler.startup_failed.store(true, Ordering::Release);
+            break;
+        }
         if urgent || last_sample.elapsed() >= super::FRAME_SAMPLE_INTERVAL {
             last_sample = Instant::now();
             if let Some(frame) = composite(sampler.target.frame, size, now, &displays, &latest) {

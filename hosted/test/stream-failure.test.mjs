@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {fixture,id,file} from './helpers.mjs';
 const rejected=await build({stdin:{resolveDir:process.cwd(),contents:`
- import worker from './src/worker.js';
+ import worker from './src/worker.ts';
  export default {fetch(request,env){
   if(request.headers.has('X-Test-Reject'))return worker.fetch(request,{...env,BUCKET:{
    put(){return Promise.reject(new Error('provider failure secret-token-do-not-expose'));},

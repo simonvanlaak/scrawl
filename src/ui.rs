@@ -570,8 +570,9 @@ fn start_video_export() {
     #[cfg(not(target_os = "linux"))]
     say(Some("Exporting…".into()));
     // Pin the input before another capture can replace latest during a chooser or worker.
-    let loaded = crate::handoff::load_bundle(std::path::Path::new("latest"));
-    let recovery_capture = loaded.as_ref().ok().map(|(dir, _)| dir.clone());
+    let resolved = crate::handoff::resolve_bundle_dir(std::path::Path::new("latest"));
+    let recovery_capture = Some(resolved.as_ref().ok().cloned().unwrap_or_else(|| PathBuf::from("latest")));
+    let loaded = resolved.and_then(|directory| crate::handoff::load_bundle(&directory));
     let worker_capture = recovery_capture.clone();
     let spawned = std::thread::Builder::new()
         .name("apparent-export".into())
@@ -1076,12 +1077,8 @@ impl ApparentCoordinator {
                 .defer(vec![crate::onboarding::Permission::Accessibility]);
             return;
         }
-        let dir = match crate::handoff::resolve_bundle_dir(&self.take_paste_target()) {
-            Ok(dir) => dir,
-            Err(error) => {
-                crate::error_recovery::report("Paste failed", format!("{error:#}"), None);
-                return;
-            }
+        let Some(dir) = crate::error_recovery::resolve_target("Paste failed", &self.take_paste_target()) else {
+            return;
         };
         if matches!(self.island_phase, IslandPhase::Completed { .. }) {
             self.dismiss_island(cx);
@@ -6213,7 +6210,10 @@ fn open_review_capture(
     path: &std::path::Path,
     cx: &mut App,
 ) -> bool {
-    match crate::handoff::load_bundle(path) {
+    let Some(directory) = crate::error_recovery::resolve_target("Could not open capture", path) else {
+        return false;
+    };
+    match crate::handoff::load_bundle(&directory) {
         Ok(bundle) => {
             coord.update(cx, |coord, cx| {
                 coord.mark_handled(path);
@@ -6225,7 +6225,7 @@ fn open_review_capture(
         Err(error) => {
             coord.update(cx, |coord, cx| {
                 coord.review_status = Some(format!("Could not open capture: {error}"));
-                crate::error_recovery::report("Could not open capture", format!("{error:#}"), None);
+                crate::error_recovery::report("Could not open capture", format!("{error:#}"), Some(directory));
                 cx.notify();
             });
             false

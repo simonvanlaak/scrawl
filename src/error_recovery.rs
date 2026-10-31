@@ -69,9 +69,24 @@ fn operation_title(title: &str) -> &'static str {
 }
 
 fn completed_capture(path: &Path) -> Option<PathBuf> {
+    // An alias is not a pinned target after admission has failed.
+    if path == Path::new("latest") {
+        return None;
+    }
     crate::handoff::load_bundle(path)
         .ok()
         .map(|(directory, _)| directory)
+}
+
+/// Resolve once at admission, retaining an unavailable explicit request on failure.
+pub fn resolve_target(title: &str, requested: &Path) -> Option<PathBuf> {
+    match crate::handoff::resolve_bundle_dir(requested) {
+        Ok(directory) => Some(directory),
+        Err(error) => {
+            report(title, format!("{error:#}"), Some(requested.to_owned()));
+            None
+        }
+    }
 }
 
 fn recovery_capture(
@@ -333,7 +348,7 @@ mod tests {
         let original = fixture.bundle("original", true).canonicalize().unwrap();
         // The same real admission boundaries used by Paste and Export. A fresh
         // process keeps latest/config and the global report slot out of other tests.
-        let paste = crate::handoff::resolve_bundle_dir(Path::new("latest")).unwrap();
+        let paste = resolve_target("Paste failed", Path::new("latest")).unwrap();
         let (export, _) = crate::handoff::load_bundle(Path::new("latest")).unwrap();
         let newer = fixture.bundle("newer", true);
         let manifest_path = newer.join("apparent.json");
@@ -356,6 +371,18 @@ mod tests {
         }
         fs::remove_file(original.join("apparent.json")).unwrap();
         report("Paste failed", "original disappeared", Some(original));
+        assert!(PENDING.lock().unwrap().take().unwrap().capture.is_none());
+        // Production admission must not erase an explicit failed request to None.
+        for title in ["Paste failed", "Could not open capture"] {
+            assert!(resolve_target(title, &fixture.0.join("missing.apparent")).is_none());
+            assert!(PENDING.lock().unwrap().take().unwrap().capture.is_none());
+        }
+        // An unresolved alias from a failed admission is not permission to retry latest.
+        report(
+            "Video export failed",
+            "admission failed",
+            Some(PathBuf::from("latest")),
+        );
         assert!(PENDING.lock().unwrap().take().unwrap().capture.is_none());
     }
 

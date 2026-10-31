@@ -617,12 +617,8 @@ fn start_video_export() {
                     crate::error_recovery::report("Video export failed", format!("{error:#}"), worker_capture);
                     #[cfg(target_os = "linux")]
                     {
-                        let detail = format!("{error:#}");
-                        say(Some(format!(
-                            "Export failed: {}",
-                            detail.chars().take(120).collect::<String>()
-                        )));
-                        crate::linux::shell::notify("Video export failed", &detail);
+                        say(Some("Export failed — see recovery window".into()));
+                        crate::linux::shell::notify("Video export failed", "Open Apparent for recovery options. Details are in the app log.");
                     }
                     #[cfg(not(target_os = "linux"))]
                     say(Some("Export failed".into()));
@@ -646,7 +642,7 @@ fn start_video_export() {
             say(Some("Export failed: could not start worker; retry".into()));
             crate::linux::shell::notify(
                 "Video export failed",
-                &format!("Could not start export worker: {error}"),
+                "Could not start export. Open Apparent for recovery options.",
             );
         }
         #[cfg(not(target_os = "linux"))]
@@ -1090,10 +1086,7 @@ impl ApparentCoordinator {
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
-                    &format!(
-                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
-                        dir.display()
-                    ),
+                    "Open Apparent to review the saved capture and retry. Details are in the app log.",
                 );
             }
         });
@@ -2496,10 +2489,7 @@ impl ApparentCoordinator {
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
-                    &format!(
-                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
-                        dir.display()
-                    ),
+                    "Open Apparent to review the saved capture and retry. Details are in the app log.",
                 );
             }
         });
@@ -3370,7 +3360,7 @@ impl ApparentCoordinator {
                                 Err(error) => {
                                     apparent_log(format!("Capture failed: {error:#}"));
                                     #[cfg(target_os = "linux")]
-                                    crate::linux::shell::notify("Capture failed", &error.to_string());
+                                    crate::linux::shell::notify("Capture failed", "Open Apparent for recovery options. Details are in the app log.");
                                     if let Ok(mut status) = CAPTURE_STATUS.lock() {
                                         *status = Some(if error.to_string().starts_with("No screen frames were captured") {
                                             "Capture failed — no screen frames".into()
@@ -5492,7 +5482,7 @@ impl Render for BundleReviewWindow {
                                                     format!("{e:#}"),
                                                     Some(copy_dir.clone()),
                                                 );
-                                                format!("Copy failed: {e}")
+                                                "Copy failed — see recovery window".into()
                                             }
                                         });
                                         cx.notify();
@@ -6224,7 +6214,7 @@ fn open_review_capture(
         }
         Err(error) => {
             coord.update(cx, |coord, cx| {
-                coord.review_status = Some(format!("Could not open capture: {error}"));
+                coord.review_status = Some("Could not open capture — see recovery window".into());
                 crate::error_recovery::report("Could not open capture", format!("{error:#}"), Some(directory));
                 cx.notify();
             });

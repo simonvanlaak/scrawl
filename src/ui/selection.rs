@@ -239,10 +239,15 @@ impl ApparentCoordinator {
                     let _ = audio.stop();
                 }
             }
-            CaptureSource::Phone(session) => session.cancel(),
+            CaptureSource::Phone(session) => { let _ = session.stop(); },
             CaptureSource::Lab => return Some((rec.target, rec._metal_overlay)),
         }
         let _ = std::fs::remove_dir_all(rec.bundle_dir);
+        if let Some(ownership) = rec.ownership {
+            if let Err(error) = ownership.cancel() {
+                apparent_log(format!("Capture cancellation failed: {error:#}"));
+            }
+        }
         Some((rec.target, rec._metal_overlay))
     }
 

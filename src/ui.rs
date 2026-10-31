@@ -805,6 +805,7 @@ struct ActiveRecording {
     target: TargetInfo,
     bundle_dir: PathBuf,
     source: CaptureSource,
+    ownership: Option<crate::capture_runtime::Capture>,
     _metal_overlay: Option<LaserOverlay>,
 }
 

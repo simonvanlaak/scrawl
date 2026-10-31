@@ -170,11 +170,11 @@ report paused/failed state to the server outside queue/config locks.
 The copied handoff explains that anyone with the link can view and download this
 capture. Shared links can be stopped without deleting the private recording;
 downloads and third-party preview caches cannot be recalled. CLI
-`apparent cloud shares list` follows encoded `nextCursor` pages to exhaustion;
-`apparent cloud shares revoke <management-id>` reads back the complete list.
+`apparent connect shares list` follows encoded `nextCursor` pages to exhaustion;
+`apparent connect shares revoke <management-id>` reads back the complete list.
 
 **Candidate, not native acceptance:** first-time API configuration still uses the
-CLI (`cloud login --server <API origin> --scope read`). Actual Linux GUI and Mac
+CLI (`connect login --server <API origin> --scope read`). Actual Linux GUI and Mac
 native pill/Swift Settings proof, onboarding cancellation and foreground
 clipboard tests, and the real-feature walkthrough remain release gates. See
 [hosted client](hosted-client.md) for limits and isolated synthetic test commands.

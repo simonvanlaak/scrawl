@@ -840,6 +840,8 @@ pub struct ApparentCoordinator {
     capture_generation: u64,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     agent_capture_id: Option<String>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    agent_captures: crate::agent_capture::Registry,
     #[cfg(target_os = "linux")]
     agent_finishing: bool,
     last_live_no_words: bool,
@@ -961,6 +963,8 @@ impl ApparentCoordinator {
             capture_generation: 0,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             agent_capture_id: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            agent_captures: crate::agent_capture::Registry::default(),
             #[cfg(target_os = "linux")]
             agent_finishing: false,
             last_live_no_words: false,
@@ -1175,13 +1179,49 @@ impl ApparentCoordinator {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn agent_request(&mut self, request: crate::agent_capture::Request, cx: &mut Context<Self>) {
-        use crate::agent_capture::{Action, Outcome, decide};
+        use crate::agent_capture::{Action, Outcome};
+        // Report an ended sampler, but never discard another session as a side
+        // effect of State, Inspect or a competing Start. Cancellation stays explicit.
+        if matches!(self.active_recording.as_ref().map(|r| &r.source),
+            Some(CaptureSource::Screen { session, .. }) if session.failed_to_start()) {
+            if let Some(id) = &self.agent_capture_id {
+                self.agent_captures.set(&id, "failed", None, Some("start_failed"));
+            }
+        }
         let before = self.agent_state();
+        if before.phase == crate::agent_capture::Phase::Recording
+            && let Some(id) = &before.capture_id {
+            self.agent_captures.set(id, "recording", None, None);
+        }
+        if let Some((Action::Start, id)) = &request.action {
+            let occupied = self.lab || self.active_recording.is_some()
+                || self.is_selecting() || self.is_processing()
+                || self.iphone_preview.is_some() || self.agent_capture_id.is_some()
+                || self.recording_shortcut_key;
+            if self.agent_captures.admit(id, occupied, request.expired()) {
+                self.agent_capture_id = Some(id.clone());
+                self.record_screen_now(cx);
+                if self.active_recording.is_none() {
+                    self.agent_capture_id = None;
+                    self.agent_captures.set(id, "failed", None, Some("start_failed"));
+                }
+            }
+            let _ = request.reply.send(self.agent_captures.inspect(id).to_string());
+            return;
+        }
+        if let Some((Action::Inspect, id)) = &request.action {
+            let _ = request.reply.send(self.agent_captures.inspect(id).to_string());
+            return;
+        }
+        if request.action.is_some() && request.expired() {
+            let _ = request.reply.send(serde_json::json!({"error": "admission_expired", "state": before}).to_string());
+            return;
+        }
         let outcome = request
             .action
             .as_ref()
-            .map(|(action, id)| decide(&before, *action, id));
-        match (request.action, outcome) {
+            .map(|(action, id)| self.agent_captures.decide(&before, *action, id));
+        match (&request.action, outcome) {
             (Some((Action::Stop, _)), Some(Outcome::Stopping)) => {
                 #[cfg(target_os = "linux")]
                 { self.agent_finishing = true; }
@@ -1191,7 +1231,16 @@ impl ApparentCoordinator {
             _ => {}
         }
         let response = match outcome {
-            Some(outcome) => serde_json::json!({"outcome": outcome, "state": self.agent_state()}),
+            Some(outcome) => {
+                let mut response = self.agent_captures.inspect(&request.action.as_ref().unwrap().1);
+                // Preserve non-wait Stop/Cancel's existing outcome semantics.
+                response["outcome"] = serde_json::json!(outcome);
+                response["state"] = serde_json::json!(self.agent_state());
+                if outcome == Outcome::AlreadyEnded && response["status"] == "unknown" {
+                    response["error"] = serde_json::Value::Null;
+                }
+                response
+            },
             None => serde_json::json!({"state": before}),
         };
         let _ = request.reply.send(response.to_string());
@@ -1775,7 +1824,9 @@ impl ApparentCoordinator {
     /// its target and overlay.
     fn discard_recording(&mut self) -> Option<(TargetInfo, Option<LaserOverlay>)> {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        { self.agent_capture_id = None; }
+        if let Some(id) = self.agent_capture_id.take() {
+            self.agent_captures.set(&id, "cancelled", None, None);
+        }
         let rec = self.active_recording.take()?;
         let _ = self.telemetry.finish_session();
         match rec.source {
@@ -2936,11 +2987,12 @@ impl ApparentCoordinator {
         whiteboard::reset_for_capture(&self.whiteboard);
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            let Ok(id) = crate::agent_capture::new_id() else {
+            let Ok(id) = self.agent_capture_id.clone().map_or_else(crate::agent_capture::new_id, Ok) else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
                 self.cancel_recording(cx);
                 return;
             };
+            self.agent_captures.begin(&id);
             self.agent_capture_id = Some(id);
         }
         self.begin_playback();
@@ -3153,6 +3205,7 @@ impl ApparentCoordinator {
                 self.cancel_recording(cx);
                 return;
             };
+            self.agent_captures.begin(&id);
             self.agent_capture_id = Some(id);
         }
         self.recording_shortcut_key = false;
@@ -3208,7 +3261,11 @@ impl ApparentCoordinator {
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
-                    { self.agent_capture_id = None; }
+                    {
+                        if let Some(id) = self.agent_capture_id.take() {
+                            self.agent_captures.set(&id, "failed", None, Some("start_failed"));
+                        }
+                    }
                     self.telemetry.finish_session();
                     let _ = std::fs::remove_dir_all(&bundle_dir);
                     self.dismiss_island(cx);
@@ -3285,7 +3342,11 @@ impl ApparentCoordinator {
             return;
         };
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        { self.agent_capture_id = None; }
+        let finishing_id = self.agent_capture_id.take();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(id) = &finishing_id {
+            self.agent_captures.set(id, "processing", None, None);
+        }
         let feedback_capture = std::mem::take(&mut self.feedback_capture);
         #[cfg(target_os = "linux")]
         let auto_active = !std::mem::take(&mut self.agent_finishing)
@@ -3411,108 +3472,145 @@ impl ApparentCoordinator {
 
             let _ = entity
                 .update(cx, |coord, cx| {
-                    if !coord.accepts_capture_result(generation) {
-                        return;
-                    }
                     let (finalized, duration_ms) = result;
-                    coord.completed_dir = None;
-                    let (dir, bundle, _) = match finalized {
-                        Ok(capture) => capture,
-                        Err(error) => {
-                            apparent_log(format!("Capture failed: {error:#}"));
-                            #[cfg(target_os = "linux")]
-                            crate::linux::shell::notify("Capture failed", &error.to_string());
+                    coord.receive_capture_result(
+                        generation,
+                        #[cfg(any(target_os = "macos", target_os = "linux"))]
+                        finishing_id.as_deref(),
+                        feedback_capture,
+                        finalized,
+                        |dir| {
+                            #[cfg(any(target_os = "macos", target_os = "linux"))]
+                            crate::hosted::completed(dir);
+                        },
+                        |coord, finalized| {
+                            coord.completed_dir = None;
+                            let (dir, bundle, _) = match finalized {
+                                Ok(capture) => capture,
+                                Err(error) => {
+                                    apparent_log(format!("Capture failed: {error:#}"));
+                                    #[cfg(target_os = "linux")]
+                                    crate::linux::shell::notify("Capture failed", &error.to_string());
+                                    if let Ok(mut status) = CAPTURE_STATUS.lock() {
+                                        *status = Some(if error.to_string().starts_with("No screen frames were captured") {
+                                            "Capture failed — no screen frames".into()
+                                        } else {
+                                            "Capture failed".into()
+                                        });
+                                    }
+                                    coord.set_island_phase(IslandPhase::Dismissing);
+                                    cx.notify();
+                                    return;
+                                }
+                            };
+                            let frame_count = bundle.keyframes.len();
                             if let Ok(mut status) = CAPTURE_STATUS.lock() {
-                                *status = Some(if error.to_string().starts_with("No screen frames were captured") {
-                                    "Capture failed — no screen frames".into()
+                                *status = None;
+                            }
+                            #[cfg(target_os = "linux")]
+                            if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
+                                if summary.contains("Image quality: ") {
+                                    crate::linux::shell::notify(
+                                        "Capture used smaller keyframes",
+                                        "Full-quality MP4 decoding failed. Open summary.md for details and Settings › Recording for decoder setup.",
+                                    );
+                                }
+                            }
+                            // Feedback stays local until the user explicitly copies or attaches it.
+                            // For the blocked automatic trial, leave only text on Ctrl+V even if
+                            // the independent clipboardImage experiment is enabled.
+                            let clipboard_ready = !feedback_capture
+                                && (if auto_active {
+                                    #[cfg(target_os = "linux")]
+                                    { crate::handoff::copy_bundle_text_to_clipboard(&dir) }
+                                    #[cfg(not(target_os = "linux"))]
+                                    { crate::handoff::copy_bundle_to_clipboard(&dir) }
                                 } else {
-                                    "Capture failed".into()
+                                    crate::handoff::copy_bundle_to_clipboard(&dir)
+                                })
+                                .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                                .is_ok();
+                            #[cfg(target_os = "linux")]
+                            if auto_active && clipboard_ready {
+                                // Do not dispatch a paste until the receiver can prove its
+                                // draft identity and acknowledge the image attachment.
+                                if let Err(error) = crate::linux::auto_paste::auto_receiver_preflight() {
+                                    apparent_log(format!("Automatic draft paste skipped: {error:#}"));
+                                    crate::linux::shell::notify(
+                                        "Draft paste skipped",
+                                        &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", dir.display()),
+                                    );
+                                }
+                            } else if auto_active {
+                                crate::linux::shell::notify("Draft paste skipped", "Could not copy the handoff. Use the saved bundle from the paper tile.");
+                            }
+                            coord.completed_dir = Some(dir.clone());
+                            coord.last_local_capture_ms = crate::now_epoch_ms();
+                            if feedback_capture {
+                                // No automatic clipboard write: the completed pill must not claim
+                                // that this private capture was copied.
+                                coord.completed_note = Some("Saved · review".into());
+                            }
+                            #[cfg(target_os = "linux")]
+                            if auto_active {
+                                // No receiver receipt: keep the manual handoff visible.
+                                coord.completed_note = Some(crate::linux::auto_paste::completion_note(clipboard_ready).into());
+                            }
+                            coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
+                            if feedback_capture {
+                                coord.review_feedback = true;
+                                coord.review_status = Some("Review before sharing publicly. Nothing is uploaded automatically.".into());
+                                let entity = entity.clone();
+                                cx.defer(move |cx| {
+                                    close_capture_windows(cx);
+                                    if let Some(entity) = entity.upgrade() {
+                                        open_review_window(&entity, cx);
+                                    }
                                 });
                             }
-                            coord.set_island_phase(IslandPhase::Dismissing);
+                            coord.set_island_phase(IslandPhase::Completed {
+                                finished_at: Instant::now(),
+                                frame_count,
+                                duration_ms,
+                                inbox_count: 0,
+                            });
                             cx.notify();
-                            return;
-                        }
-                    };
-                    let frame_count = bundle.keyframes.len();
-                    #[cfg(any(target_os = "macos", target_os = "linux"))]
-                    if !feedback_capture {
-                        crate::hosted::completed(&dir);
-                    }
-                    if let Ok(mut status) = CAPTURE_STATUS.lock() {
-                        *status = None;
-                    }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(summary) = std::fs::read_to_string(dir.join("summary.md")) {
-                        if summary.contains("Image quality: ") {
-                            crate::linux::shell::notify(
-                                "Capture used smaller keyframes",
-                                "Full-quality MP4 decoding failed. Open summary.md for details and Settings › Recording for decoder setup.",
-                            );
-                        }
-                    }
-                    // Feedback stays local until the user explicitly copies or attaches it.
-                    // For the blocked automatic trial, leave only text on Ctrl+V even if
-                    // the independent clipboardImage experiment is enabled.
-                    let clipboard_ready = !feedback_capture
-                        && (if auto_active {
-                            #[cfg(target_os = "linux")]
-                            { crate::handoff::copy_bundle_text_to_clipboard(&dir) }
-                            #[cfg(not(target_os = "linux"))]
-                            { crate::handoff::copy_bundle_to_clipboard(&dir) }
-                        } else {
-                            crate::handoff::copy_bundle_to_clipboard(&dir)
-                        })
-                        .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
-                        .is_ok();
-                    #[cfg(target_os = "linux")]
-                    if auto_active && clipboard_ready {
-                        // Do not dispatch a paste until the receiver can prove its
-                        // draft identity and acknowledge the image attachment.
-                        if let Err(error) = crate::linux::auto_paste::auto_receiver_preflight() {
-                            apparent_log(format!("Automatic draft paste skipped: {error:#}"));
-                            crate::linux::shell::notify(
-                                "Draft paste skipped",
-                                &format!("{error:#}. Press Ctrl+V for the text; attach contact-sheet.png from {} if needed", dir.display()),
-                            );
-                        }
-                    } else if auto_active {
-                        crate::linux::shell::notify("Draft paste skipped", "Could not copy the handoff. Use the saved bundle from the paper tile.");
-                    }
-                    coord.completed_dir = Some(dir.clone());
-                    coord.last_local_capture_ms = crate::now_epoch_ms();
-                    if feedback_capture {
-                        // No automatic clipboard write: the completed pill must not claim
-                        // that this private capture was copied.
-                        coord.completed_note = Some("Saved · review".into());
-                    }
-                    #[cfg(target_os = "linux")]
-                    if auto_active {
-                        // No receiver receipt: keep the manual handoff visible.
-                        coord.completed_note = Some(crate::linux::auto_paste::completion_note(clipboard_ready).into());
-                    }
-                    coord.set_review_bundle((dir, bundle), coord.completed_note.clone());
-                    if feedback_capture {
-                        coord.review_feedback = true;
-                        coord.review_status = Some("Review before sharing publicly. Nothing is uploaded automatically.".into());
-                        let entity = entity.clone();
-                        cx.defer(move |cx| {
-                            close_capture_windows(cx);
-                            if let Some(entity) = entity.upgrade() {
-                                open_review_window(&entity, cx);
-                            }
-                        });
-                    }
-                    coord.set_island_phase(IslandPhase::Completed {
-                        finished_at: Instant::now(),
-                        frame_count,
-                        duration_ms,
-                        inbox_count: 0,
-                    });
-                    cx.notify();
+                        },
+                    );
                 });
         })
         .detach();
+    }
+
+    /// Dispatches a finalizer receipt separately from effects on the current capture UI.
+    fn receive_capture_result(
+        &mut self,
+        generation: u64,
+        #[cfg(any(target_os = "macos", target_os = "linux"))] finishing_id: Option<&str>,
+        feedback_capture: bool,
+        finalized: anyhow::Result<(PathBuf, ApparentBundle, String)>,
+        on_completed: impl FnOnce(&std::path::Path),
+        on_current: impl FnOnce(&mut Self, anyhow::Result<(PathBuf, ApparentBundle, String)>),
+    ) {
+        // The worker still owns its exact ID's receipt after dismissal. Only its
+        // UI/clipboard/onboarding effects lose ownership when a new capture starts.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some(id) = finishing_id {
+            self.agent_captures.finish(id, finalized.as_ref()
+                .map(|(dir, _, _)| dir.as_path())
+                .map_err(|error| format!("{error:#}")));
+        }
+        // A saved ordinary capture completes independently of its pill. Hosted
+        // admission rechecks current consent; feedback and failed takes stay local.
+        if !feedback_capture {
+            if let Ok((dir, _, _)) = &finalized {
+                on_completed(dir);
+            }
+        }
+        if !self.accepts_capture_result(generation) {
+            return;
+        }
+        on_current(self, finalized);
     }
 
     fn accepts_capture_result(&self, generation: u64) -> bool {
@@ -6663,6 +6761,156 @@ pub fn run_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn deferred_finalizer_success_survives_dismissal_and_new_capture() {
+        for processing_b in [false, true] {
+            deferred_finalizer_receipt_survives_dismissal_and_new_capture(true, processing_b, false);
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn deferred_finalizer_failure_survives_dismissal_and_new_capture() {
+        for processing_b in [false, true] {
+            deferred_finalizer_receipt_survives_dismissal_and_new_capture(false, processing_b, false);
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn deferred_feedback_finalizer_stays_local_after_dismissal() {
+        for succeeded in [false, true] {
+            for processing_b in [false, true] {
+                deferred_finalizer_receipt_survives_dismissal_and_new_capture(succeeded, processing_b, true);
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn deferred_finalizer_receipt_survives_dismissal_and_new_capture(succeeded: bool, processing_b: bool, feedback: bool) {
+        use crate::onboarding::{Effect, Flow, Grants, Input, Permission, Session, Status, Step};
+        let (sender, _receiver) = flume::unbounded();
+        let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        let grants = Grants {
+            statuses: Permission::REQUIRED.into_iter().map(|p| (p, Status::Granted)).collect(),
+            ..Default::default()
+        };
+        coordinator.onboarding = Some(Session::for_test(
+            Flow::tour(Step::TryIt, Some(grants)).with_first_capture(true, true, false),
+        ));
+        let bundle: ApparentBundle = serde_json::from_value(serde_json::json!({
+            "version": 1, "id": "a", "createdAtMs": 0, "durationMs": 1000,
+            "target": {"mode": "display", "displayId": 0,
+                "frame": {"x": 0.0, "y": 0.0, "width": 640.0, "height": 480.0, "scale": 1.0}},
+            "transcript": {"source": "test", "text": "", "segments": []},
+            "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png"
+        })).unwrap();
+        let exact_path = PathBuf::from("/synthetic/finalizer/a-exact.apparent");
+        // Hold A's result until B starts, then deliver through finish_recording's
+        // production coordinator dispatch, not a test recreation of its guard.
+        let deferred = if succeeded {
+            Ok((exact_path.clone(), bundle.clone(), String::new()))
+        } else {
+            Err(anyhow::anyhow!("A's deferred finalizer failed"))
+        };
+        assert!(coordinator.agent_captures.admit("a", false, false));
+        coordinator.agent_capture_id = Some("a".into());
+        coordinator.set_island_phase(IslandPhase::Recording);
+        // finish_recording detaches A's ID before starting its finalizer.
+        let finishing_id = coordinator.agent_capture_id.take().unwrap();
+        coordinator.agent_captures.set(&finishing_id, "processing", None, None);
+        coordinator.set_island_phase(IslandPhase::Processing);
+        let generation_a = coordinator.capture_generation;
+
+        // Native Escape uses cancel_recording: its state-only cancellation and
+        // dismiss_island's phase transition revoke UI ownership, not A's worker.
+        coordinator.cancel_capture_attempt();
+        coordinator.set_island_phase(IslandPhase::Dismissing);
+        coordinator.set_island_phase(IslandPhase::Hidden);
+        assert_eq!(coordinator.agent_captures.inspect("a")["status"], "processing");
+        assert!(coordinator.agent_captures.admit("b", false, false));
+        coordinator.agent_capture_id = Some("b".into());
+        coordinator.onboarding.as_mut().unwrap().input(Input::ShortcutTriggered);
+        coordinator.set_island_phase(IslandPhase::Recording);
+        coordinator.agent_captures.set("b", "recording", None, None);
+        if processing_b {
+            // Also cover B already finalizing: a phase-only guard must not accept A.
+            coordinator.agent_capture_id.take();
+            coordinator.agent_captures.set("b", "processing", None, None);
+            coordinator.set_island_phase(IslandPhase::Processing);
+        }
+        let state_b = coordinator.agent_state();
+        let receipt_b = coordinator.agent_captures.inspect("b");
+        let generation_b = coordinator.capture_generation;
+        coordinator.completed_dir = Some(PathBuf::from("/synthetic/b-review.apparent"));
+        coordinator.completed_note = Some("B's note".into());
+        coordinator.review_bundle = Some((PathBuf::from("/synthetic/b-review.apparent"), bundle));
+        let review_b = coordinator.review_bundle.clone();
+
+        let mut completed = Vec::new();
+        coordinator.receive_capture_result(generation_a, Some(&finishing_id), feedback, deferred, |dir| {
+            completed.push(dir.to_path_buf());
+        }, |_, _| {
+            panic!("stale A must not enter UI/clipboard/onboarding effects");
+        });
+        assert_eq!(completed, if succeeded && !feedback { vec![exact_path.clone()] } else { vec![] });
+        let receipt_a = coordinator.agent_captures.inspect("a");
+        if succeeded {
+            assert_eq!(receipt_a, serde_json::json!({
+                "capture_id": "a", "status": "saved", "bundle_path": exact_path, "error": null
+            }));
+        } else {
+            assert_eq!(receipt_a, serde_json::json!({
+                "capture_id": "a", "status": "failed", "bundle_path": null,
+                "error": "finalization_failed", "message": "A's deferred finalizer failed"
+            }));
+        }
+        assert_eq!(coordinator.agent_state(), state_b);
+        assert_eq!(coordinator.agent_captures.inspect("b"), receipt_b);
+        assert_eq!(coordinator.capture_generation, generation_b);
+        assert_eq!(coordinator.completed_dir, Some(PathBuf::from("/synthetic/b-review.apparent")));
+        assert_eq!(coordinator.completed_note.as_deref(), Some("B's note"));
+        assert_eq!(coordinator.review_bundle, review_b);
+        assert_eq!(coordinator.onboarding.as_mut().unwrap().action("continue"), Effect::None);
+    }
+
+    #[test]
+    fn current_finalizer_completes_once_before_ui_for_agent_and_manual_captures() {
+        for owned in [false, true] {
+            for feedback in [false, true] {
+                let (sender, _receiver) = flume::unbounded();
+                let mut coordinator = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+                coordinator.set_island_phase(IslandPhase::Processing);
+                let generation = coordinator.capture_generation;
+                if owned {
+                    assert!(coordinator.agent_captures.admit("a", false, false));
+                    coordinator.agent_captures.set("a", "processing", None, None);
+                }
+                let bundle = serde_json::from_value(serde_json::json!({
+                    "version": 1, "id": "a", "createdAtMs": 0, "durationMs": 1000,
+                    "target": {"mode": "display", "displayId": 0,
+                        "frame": {"x": 0.0, "y": 0.0, "width": 640.0, "height": 480.0, "scale": 1.0}},
+                    "transcript": {"source": "test", "text": "", "segments": []},
+                    "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png"
+                })).unwrap();
+                let path = PathBuf::from("/synthetic/current-exact.apparent");
+                let effects = std::cell::RefCell::new(Vec::new());
+                coordinator.receive_capture_result(generation, owned.then_some("a"), feedback,
+                    Ok((path.clone(), bundle, String::new())),
+                    |dir| { assert_eq!(dir, path); effects.borrow_mut().push("completed"); },
+                    |coord, result| {
+                        assert_eq!(result.unwrap().0, path);
+                        if owned {
+                            assert_eq!(coord.agent_captures.inspect("a")["status"], "saved");
+                        }
+                        effects.borrow_mut().push("ui");
+                    });
+                assert_eq!(*effects.borrow(), if feedback { vec!["ui"] } else { vec!["completed", "ui"] });
+            }
+        }
+    }
 
     #[test]
     fn hosted_settings_late_login_cannot_erase_newer_cancellation() {

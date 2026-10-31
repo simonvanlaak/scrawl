@@ -1,4 +1,4 @@
-# Hosted API Worker
+# Apparent Connect API Worker
 
 Private Cloudflare Worker, D1 metadata and R2 bundle bytes. Public UI is owned by the site. See [`../docs/hosted-api.md`](../docs/hosted-api.md) for the shared browser/native contract.
 
@@ -17,6 +17,10 @@ Production code counts streamed chunks through `FixedLengthStream` and asks R2 t
 The five runtime modules in `src/*.ts` use strict TypeScript and official Workers binding types; `src/types.ts` contains only binding/domain declarations. `npm run typecheck` checks without emitting files. `npm run build` runs that check before bundling `src/worker.ts` to the unchanged deploy artifact `dist/worker.js`. Tests, dev and deploy all run this checked build first. Plain JavaScript tests remain in `test/*.mjs`. `npm run dev` uses local Wrangler; local browser OAuth needs secure cookie-compatible localhost routing and a controlled provider or authorized Google test client. `wrangler.toml` contains intentionally unusable resource/origin placeholders. No test provisions remote resources.
 
 ## Deployment checklist (parent authorization required)
+
+The gated main-branch delivery workflow and its separate activation prerequisites
+are documented in [`../docs/continuous-delivery.md`](../docs/continuous-delivery.md).
+It never applies migrations or initializes the budget ledger.
 
 - Discover the actual Cloudflare account/routes and existing resources first; do not deploy this template blindly.
 - **Local SQL budgets pass; remote Free verification is still blocked.** See the measured operation counts below. The template omits the Paid-only `limits.cpu_ms` override. Local native-checksum tests and statement counts do not prove Free's 10ms CPU limit. Do not activate Paid or deploy without the parent's separate decision.

@@ -7,6 +7,70 @@ use std::sync::{
 };
 
 #[test]
+fn hosted_connect_disabled_upload_suggests_canonical_login() {
+    let f = Fixture::new();
+    let error = f.client.enqueue(&f.bundle()).unwrap_err().to_string();
+    assert!(
+        error.contains("apparent connect login --scope upload --consent-upload"),
+        "{error}"
+    );
+    assert!(!error.contains("cloud login"), "{error}");
+}
+
+#[test]
+fn hosted_connect_alias_command_subprocess() {
+    use clap::Parser;
+    let Some(name) = std::env::var_os("APPARENT_TEST_CONNECT_ALIAS") else {
+        return;
+    };
+    let cli = crate::Cli::try_parse_from(["apparent", name.to_str().unwrap(), "disable"]).unwrap();
+    let Some(crate::Command::Connect { command: parsed }) = cli.command else {
+        panic!("not a hosted command");
+    };
+    command(parsed).unwrap();
+}
+
+#[test]
+fn hosted_connect_and_cloud_execute_same_disable_without_network() {
+    for name in ["connect", "cloud"] {
+        let f = Fixture::new();
+        let server = Server::new("");
+        f.authorize(&server.url);
+        let bundle = f.bundle();
+        f.client.enqueue(&bundle).unwrap();
+        let credential = fs::read(f.client.state.join("upload.credential")).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "hosted::regression_tests::hosted_connect_alias_command_subprocess",
+                "--nocapture",
+            ])
+            .env("APPARENT_TEST_CONNECT_ALIAS", name)
+            .env("APPARENT_CONFIG", &f.client.config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains("Hosted uploads disabled; pending uploads cancelled."));
+        let raw: Value = serde_json::from_slice(&fs::read(&f.client.config).unwrap()).unwrap();
+        assert_eq!(raw["cloud"]["enabled"], false);
+        assert_eq!(raw["cloud"]["uploadConsent"], false);
+        assert_eq!(raw["unrelated"]["kept"], true);
+        assert!(raw.get("connect").is_none());
+        assert_eq!(f.client.jobs().unwrap()[0].status, "cancelled");
+        assert_eq!(
+            fs::read(f.client.state.join("upload.credential")).unwrap(),
+            credential
+        );
+        assert_eq!(server.state.lock().unwrap().requests, 0);
+    }
+}
+
+#[test]
 fn hosted_config_setting_snapshot_cannot_restore_consent() {
     use std::sync::mpsc::channel;
     let f = Fixture::new();
@@ -770,6 +834,8 @@ fn hosted_roundtrip_pending_pointer_restart_complete_and_no_overwrite() {
         pointer.contains("pending")
             && pointer.contains(&id)
             && pointer.contains("--scope read")
+            && pointer.contains("apparent connect login --server")
+            && !pointer.contains("apparent cloud")
             && !pointer.contains("secret")
     );
     assert_eq!(server.state.lock().unwrap().requests, 0);

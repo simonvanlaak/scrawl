@@ -7,12 +7,12 @@ import {fixture,id,file} from './helpers.mjs';
 // real D1/R2, not an emulation of Cloudflare's remote CPU or billing enforcement.
 const instrumented=await build({stdin:{resolveDir:process.cwd(),contents:`
  import worker from './src/worker.js';
- let failedDelete=false,failedStamp=false;
+ let failedDelete=false,failedStamp=false,deletePages=0,stampPages=0;
  function counted(env,counts){
   const DB={prepare(sql){const wrap=s=>({bind(...args){if(args.length>100)throw new Error('D1 parameter budget exceeded');return wrap(s.bind(...args));},
-   first(...args){counts.sql++;return s.first(...args);},all(...args){counts.sql++;return s.all(...args);},run(...args){counts.sql++;if(env.FAIL_STAMP&&!failedStamp&&sql.startsWith('UPDATE attempts SET cleaned_at')){failedStamp=true;throw new Error('injected stamp failure');}return s.run(...args);},raw:s});return wrap(env.DB.prepare(sql));},
-   batch(items){counts.sql+=items.length;return env.DB.batch(items.map(s=>s.raw));}};
-  const BUCKET=new Proxy(env.BUCKET,{get(target,key){const value=target[key];return typeof value==='function'? (...args)=>{counts.r2++;if(key==='delete'&&env.FAIL_DELETE&&!failedDelete){failedDelete=true;throw new Error('injected delete failure');}return value.apply(target,args);}:value;}});
+   first(...args){counts.sql++;return s.first(...args);},all(...args){counts.sql++;return s.all(...args);},run(...args){counts.sql++;return s.run(...args);},sql,raw:s});return wrap(env.DB.prepare(sql));},
+   batch(items){counts.sql+=items.length;if(items.some(s=>s.sql.startsWith('UPDATE attempts SET cleaned_at'))){stampPages++;if(env.FAIL_STAMP&&!failedStamp&&stampPages===Number(env.FAIL_AT||1)){failedStamp=true;throw new Error('injected stamp failure');}}return env.DB.batch(items.map(s=>s.raw));}};
+  const BUCKET=new Proxy(env.BUCKET,{get(target,key){const value=target[key];return typeof value==='function'? async(...args)=>{counts.r2++;if(key==='delete'){deletePages++;if(env.FAIL_DELETE&&!failedDelete&&deletePages===Number(env.FAIL_AT||1)){failedDelete=true;throw new Error('injected delete failure');}}const result=await value.apply(target,args);if(key==='put'&&env.TOMBSTONE_AFTER_PUT)await env.DB.prepare("UPDATE captures SET status='deleted'").run();return result;}:value;}});
   return {...env,DB,BUCKET};
  }
  export default {
@@ -37,8 +37,8 @@ test('512-file admission/completion stay within Free statement and internal-serv
  const complete=await f.call(p+'/complete',{token:a.token,method:'POST'});
  assert.equal(complete.status,200);
  assert.equal(Number(complete.headers.get('X-Test-R2')),512);
- assert.equal(Number(complete.headers.get('X-Test-SQL')),5);
- assert.ok(512+5<1000,'internal service budget is not the external 50-fetch budget');
+ assert.equal(Number(complete.headers.get('X-Test-SQL')),6);
+ assert.ok(512+6<1000,'internal service budget is not the external 50-fetch budget');
  for(const [suffix,options] of [['/complete',{method:'POST'}],['',{}],['/files/frames/frame-0.png',{}],['/files/frames/frame-0.png',{method:'PUT',raw:''}],['',{method:'DELETE'}],['',{method:'POST',body:{files}}]]){
   const r=await f.call(p+suffix,{token:a.token,...options});
   assert.equal(r.status,options.body?404:200);assert.ok(Number(r.headers.get('X-Test-SQL'))<=50);
@@ -111,5 +111,35 @@ for(const failure of ['FAIL_DELETE','FAIL_STAMP'])test(failure+' preserves clean
  await f.bucket.put('failure-0001','late');
  for(let i=0;i<2;i++)assert.equal((await worker.scheduled()).outcome,'ok');
  assert.equal(await f.bucket.head('failure-0001'),null);
+ }finally{await f.close();}
+});
+
+test('PUT success, duplicate, checksum failure, cap denial and lost-publication failure have bounded SQL',async()=>{
+ for(const tombstone of [false,true]){
+ const f=await fixture({TOMBSTONE_AFTER_PUT:tombstone}, {scriptPath:undefined,script:instrumented.outputFiles[0].text});try{
+ const a=await f.identity('put-budget'),p='/v1/captures/'+id(312);
+ await f.call(p,{token:a.token,method:'POST',body:{files:[file()]}});
+ const upload=raw=>f.call(p+'/files/summary.md',{token:a.token,method:'PUT',raw});
+ const first=await upload('hello');
+ console.log('PUT first/lost publication:',first.status,first.headers.get('X-Test-SQL'),first.headers.get('X-Test-R2'));
+ assert.equal(first.status,tombstone?404:200);assert.equal(Number(first.headers.get('X-Test-SQL')),tombstone?12:7);assert.equal(Number(first.headers.get('X-Test-R2')),tombstone?3:1);
+ if(!tombstone){
+  for(const [raw,status,sql] of [['hello',200,9],['wrong',400,8]]){const r=await upload(raw);console.log('PUT retry:',r.status,r.headers.get('X-Test-SQL'),r.headers.get('X-Test-R2'));assert.equal(r.status,status);assert.equal(Number(r.headers.get('X-Test-SQL')),sql);assert.equal(Number(r.headers.get('X-Test-R2')),2);}
+  await f.db.prepare('UPDATE r2_budget SET a_cap=a_used').run();const r=await upload('hello');assert.equal(r.status,503);assert.equal(Number(r.headers.get('X-Test-SQL')),6);assert.equal(Number(r.headers.get('X-Test-R2')),0);
+ }
+ }finally{await f.close();}
+ }
+});
+
+for(const failure of ['FAIL_DELETE','FAIL_STAMP'])test(failure+' on cleanup page ten stays bounded and retries',async()=>{
+ const f=await fixture({[failure]:true,FAIL_AT:10}, {scriptPath:undefined,script:instrumented.outputFiles[0].text});try{
+ const a=await f.identity('late-failure'),capture=id(313);
+ await f.call('/v1/captures/'+capture,{token:a.token,method:'POST',body:{files:[file()]}});
+ await f.call('/v1/captures/'+capture,{token:a.token,method:'DELETE'});
+ await f.db.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO attempts(key,capture_id,created_at) SELECT printf('last-%04d',i),?,0 FROM n").bind(capture).run();
+ const worker=await f.mf.getWorker();assert.equal((await worker.scheduled()).outcome,'exception');
+ assert.equal((await f.db.prepare('SELECT count(*) AS n FROM attempts WHERE cleaned_at>0').first()).n,900);
+ assert.equal((await worker.scheduled()).outcome,'ok');
+ assert.equal((await f.db.prepare('SELECT count(*) AS n FROM attempts WHERE cleaned_at=0').first()).n,0);
  }finally{await f.close();}
 });

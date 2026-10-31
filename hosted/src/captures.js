@@ -1,4 +1,5 @@
-import {DAY,random,hex,json,fail,stmt,body,bearer,usage} from './common.js';
+import {DAY,hex,json,fail,stmt,body,bearer,usage} from './common.js';
+import {checkedHeads,getObject,uploadAttempt,settledAttempt,deleteAttempts} from './storage.js';
 const live="status!='deleted' AND expires_at>? AND (status='ready' OR pending_until>?)";
 export function validPath(path) {
  return typeof path==='string'&&path.length<=128&&/^(apparent\.json|summary\.md|contact-sheet(?:-full)?\.png|audio\.wav|recording\.(mp4|mov)|finish-trace\.json|timeline\.json|frames(?:-full)?\/frame-[0-9]+\.png)$/.test(path);
@@ -60,7 +61,7 @@ export async function captureRoutes(request,env,url) {
  if(action==='complete'&&method==='POST') {
   if(c.status==='ready')return json(info(c));
   const {results:files}=await stmt(env,'SELECT * FROM files WHERE capture_id=?',id).all();
-  for(const f of files){if(!f.object_key)fail('not_ready',409);const h=await env.BUCKET.head(f.object_key);if(!verified(h,f))fail('not_ready',409);}
+  await checkedHeads(env,files,verified);
   await stmt(env,`UPDATE captures SET status='ready' WHERE id=? AND account_id=? AND status='pending' AND ${live}`,id,a.account_id,Date.now(),Date.now()).run();
   const ready=await capture(env,id,a.account_id);if(ready.status!=='ready')fail('not_ready',409);return json(info(ready));
  }
@@ -70,13 +71,13 @@ export async function captureRoutes(request,env,url) {
   const f=await stmt(env,'SELECT * FROM files WHERE capture_id=? AND path=?',id,path).first();if(!f)fail('not_found',404);
   if(method==='GET') {
    if(c.status!=='ready')fail('not_ready',409);
-   const object=f.object_key&&await env.BUCKET.get(f.object_key);if(!object)fail('not_found',404);
+   const object=await getObject(env,f.object_key);if(!object)fail('not_found',404);
    await capture(env,id,a.account_id);
    return new Response(object.body,{headers:{'Content-Type':mime(path),'Content-Length':String(f.size),'Content-Disposition':'attachment; filename="'+path.split('/').at(-1)+'"','X-Content-Type-Options':'nosniff'}});
   }
   if(method==='PUT') {
-   const key=`${a.account_id}/${id}/${random()}`;
-   await stmt(env,'INSERT INTO attempts(key,capture_id,created_at) VALUES(?,?,?)',key,id,Date.now()).run();
+   const attempt=await uploadAttempt(env,id,a.account_id,f),{key}=attempt;
+   let terminal=0;
    try {
     // R2 verifies SHA256 natively, including retries. Each attempt uses a new key;
     // a retry can never replace the original object, even before validation ends.
@@ -84,19 +85,21 @@ export async function captureRoutes(request,env,url) {
     const reader=request.body?.getReader();
     const cancel=e=>{void writer.abort(e).catch(()=>{});if(reader)void reader.cancel(e).catch(()=>{});void fixed.readable.cancel(e).catch(()=>{});};
     const write=receive(reader,f,writer).catch(e=>{cancel(e);throw e;});
-    const put=env.BUCKET.put(key,fixed.readable,{sha256:f.sha256}).catch(e=>{cancel(e);throw e;});
+    const put=Promise.resolve().then(()=>attempt.put(fixed.readable)).catch(e=>{cancel(e);throw e;});
     // allSettled keeps both promises observed when either stream end fails.
-    const results=await Promise.allSettled([write,put]);if(results[0].status==='rejected')throw results[0].reason;if(results[1].status==='rejected'){
+    const results=await Promise.allSettled([write,put]);
+    await settledAttempt(env,key);terminal=1;
+    if(results[0].status==='rejected')throw results[0].reason;if(results[1].status==='rejected'){
      // Provider text is used only for classification, never returned or logged.
      if(/(?:sha-?256|checksum|digest).*(?:match|invalid)|(?:match|invalid).*(?:sha-?256|checksum|digest)/i.test(String(results[1].reason?.message)))fail('hash_mismatch');
      throw results[1].reason;
     }
     if(!verified(results[1].value,f))fail('hash_mismatch');
-    if(f.object_key||c.status==='ready') {await capture(env,id,a.account_id);await env.BUCKET.delete(key);return json({ok:true});}
+    if(f.object_key||c.status==='ready') {await capture(env,id,a.account_id);await deleteAttempts(env,[{key,terminal}]);return json({ok:true});}
     const changed=await stmt(env,`UPDATE files SET object_key=? WHERE capture_id=? AND path=? AND object_key IS NULL AND EXISTS(SELECT 1 FROM captures WHERE id=? AND status='pending' AND ${live})`,key,id,path,id,Date.now(),Date.now()).run();
-    if(!changed.meta.changes){await env.BUCKET.delete(key);await capture(env,id,a.account_id);}
+    if(!changed.meta.changes){await deleteAttempts(env,[{key,terminal}]);await capture(env,id,a.account_id);}
     return json({ok:true});
-   }catch(e){await env.BUCKET.delete(key).catch(()=>{});throw e;}
+   }catch(e){await deleteAttempts(env,[{key,terminal}]).catch(()=>{});throw e;}
   }
  }
  fail('not_found',404);
@@ -116,14 +119,10 @@ export async function cleanup(env) {
  await stmt(env,"UPDATE captures SET status='deleted' WHERE status!='deleted' AND (expires_at<=? OR (status='pending' AND pending_until<=?))",now,now).run();
  // Keep attempt records: a PUT already in flight can finish after this sweep.
  // Repeated deletion of tombstoned keys makes that orphan harmless and reclaimable.
- const {results}=await stmt(env,"SELECT a.key FROM attempts a JOIN captures c ON c.id=a.capture_id LEFT JOIN files f ON f.object_key=a.key WHERE c.status='deleted' OR (f.object_key IS NULL AND a.created_at<?) ORDER BY a.cleaned_at,a.key LIMIT 1000",now-DAY).all();
+ const {results}=await stmt(env,"SELECT a.key,a.terminal FROM attempts a JOIN captures c ON c.id=a.capture_id LEFT JOIN files f ON f.object_key=a.key WHERE c.status='deleted' OR (f.object_key IS NULL AND a.created_at<?) ORDER BY a.cleaned_at,a.key LIMIT 1000",now-DAY).all();
  for(let i=0;i<results.length;i+=100){
   const page=results.slice(i,i+100);
-  const keys=page.map(r=>r.key);
-  await env.BUCKET.delete(keys);
-  // Advance only after a successful delete. Retain tombstones and rotate the
-  // same bounded page, including keys whose PUT may still finish later.
-  await stmt(env,'UPDATE attempts SET cleaned_at=? WHERE key IN (SELECT value FROM json_each(?))',now,JSON.stringify(keys)).run();
+  await deleteAttempts(env,page,now);
  }
  await env.DB.batch([stmt(env,'DELETE FROM sessions WHERE expires_at<=?',now),stmt(env,'DELETE FROM tokens WHERE expires_at<=?',now),stmt(env,'DELETE FROM oauth_states WHERE expires_at<=?',now),stmt(env,'DELETE FROM devices WHERE expires_at<=?',now),stmt(env,'DELETE FROM rate_limits WHERE window<?',Math.floor(now/3600000)-1)]);
 }

@@ -13,7 +13,7 @@ function parsedURL(value, base) {
 
 function documentBase(element) {
   const url = parsedURL(element?.attrs.find((attr) => attr.name === "href").value ?? publicSite, publicSite)
-  return !url || ["data:", "javascript:"].includes(url.protocol) ? new URL(publicSite) : url
+  return !url || ["data:", "javascript:", "vbscript:"].includes(url.protocol) ? new URL(publicSite) : url
 }
 
 function firstDocumentBase(node) {

@@ -6,12 +6,29 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import { createContext, runInContext } from "node:vm"
+import { parse } from "parse5"
 
 const html = readFileSync(process.env.OG_STAGE_HTML || new URL("og-video/stage.html", import.meta.url), "utf8")
-const inlineScripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
-  .filter(([, attributes]) => !/\bsrc\s*=/i.test(attributes))
-  .map(([, , code]) => code)
+function inlineScriptCode(html) {
+  const scripts = []
+  function visit(node) {
+    if (node.namespaceURI === "http://www.w3.org/1999/xhtml" && node.tagName === "script" && !node.attrs.some((attr) => attr.name === "src")) {
+      scripts.push(node.childNodes.map((child) => child.value ?? "").join(""))
+    }
+    // Template content is inert and is not part of document.childNodes.
+    for (const child of node.childNodes ?? []) visit(child)
+  }
+  visit(parse(html))
+  return scripts
+}
+const inlineScripts = inlineScriptCode(html)
 assert.ok(inlineScripts.length, "the stage must have an executable inline loader")
+
+test("extracts actual inline scripts with HTML closing syntax and attributes", () => {
+  assert.deepEqual(inlineScriptCode(`<script SRC="external.js"></script>
+    <template><script>inert()</script></template>
+    <SCRIPT data-note=">">actual()</sCrIpT\t\n bar>`), ["actual()"])
+})
 const base = "https://stage.example/scripts/og-video/stage.html"
 const concepts = ["apparent-fix", "apparent-lasso", "apparent-pile"]
 

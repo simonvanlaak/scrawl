@@ -36,6 +36,7 @@ const rejected = [
   { head: '<template><base href="https://example.org/"></template><base href="https://github.com/">', body: '<meta http-equiv="refresh" content="0; URL=kitlangton/tap">' },
   { head: '<base target="_blank"><base href="https://github.com/">', body: '<template><a href="kitlangton/tap">future link</a></template>' },
   { head: '<base href="javascript:void(0)">', body: '<a href="//apparent.kitlangton.com/">download</a>' },
+  { head: '<base href="vbscript:legacy">', body: '<a href="//apparent.kitlangton.com/">download</a>' },
   { head: '<base href="data:text/plain,inert">', body: '<meta http-equiv="refresh" content="0;//apparent.kitlangton.com/">' },
   '<template><a href="https://apparent.kitlangton.com/">future link</a></template>',
   '<code>brew install --cask kitlangton/tap/apparent;</code>',

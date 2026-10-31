@@ -124,7 +124,7 @@ fn diagnostic_authorization_private_bus_fixture() {
             drop(held);
         });
         let mut peers = Vec::new();
-        for _ in 0..2 { peers.push(remote_peers.recv_async().await.unwrap()); }
+        for _ in 0..4 { peers.push(remote_peers.recv_async().await.unwrap()); }
         is_ready.recv_async().await.unwrap();
         fn observe(label: &str) {
             let fds: HashMap<_, _> = std::fs::read_dir("/proc/self/fd").unwrap().filter_map(|entry| {
@@ -145,12 +145,18 @@ fn diagnostic_authorization_private_bus_fixture() {
         observe("active");
         release.send(()).unwrap();
         worker.join().unwrap();
-        for mut peer in peers {
+        for (index, mut peer) in peers.into_iter().enumerate() {
             peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             use std::io::Read;
-            assert_eq!(peer.read(&mut [0]).unwrap(), 0, "actual last descriptor release must produce EOF");
-            assert!(closes.recv_timeout(Duration::from_secs(2)).is_ok());
+            let mut protocol = Vec::new();
+            peer.read_to_end(&mut protocol).expect("actual last descriptor release must produce EOF");
+            if index % 2 == 0 {
+                assert!(protocol.is_empty(), "the recording connection must never acquire a competing reader");
+            } else {
+                assert!(!protocol.is_empty(), "only the fresh observer connection speaks PipeWire");
+            }
         }
+        for _ in 0..2 { assert!(closes.recv_timeout(Duration::from_secs(2)).is_ok()); }
         observe("completed");
     });
 }

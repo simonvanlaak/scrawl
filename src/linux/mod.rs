@@ -26,6 +26,7 @@ pub mod media;
 pub mod microphone;
 pub mod overlay;
 pub mod portal;
+mod portal_graph;
 pub mod privacy;
 pub mod shell;
 pub mod shortcuts;

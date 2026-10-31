@@ -304,7 +304,31 @@ visibility of a portal's private remote. Join selected node/client IDs and
 otherwise report private-graph visibility UNKNOWN separately from observed
 descriptor/session release. An object ID reused with a different serial is
 not the old object. A foreign backend survivor is not a recording leak.
-These diagnostics do not themselves connect to, inspect or drain PipeWire.
+With diagnostics enabled, a second `OpenPipeWireRemote` call for the same
+authorized Session supplies a **fresh observer connection**, never a clone of
+the recording socket. `role=observer` records its held descriptor separately.
+A bounded, read-only Linux adapter uses the installed PipeWire 0.3 library to
+read Core info and the registry, then disconnects and destroys its core before
+`graph_snapshot` is emitted. It creates no stream, binds no source, activates
+nothing and reads no media. The registry wait is capped at 300 ms; errors,
+missing library, missing ownership properties and incomplete snapshots remain
+UNKNOWN. No Cargo dependency or preference is added.
+
+`graph_snapshot.graph` reports the actual `server_cookie` and each Start-returned
+node's `serial`, `client_id` and `client_serial`, where visible. It whitelists
+numeric identifiers only. `observer_released` describes adapter teardown, not
+independent OS proof; check the observer socket's absence separately before a
+resource verdict. An independent global view may join these facts only after
+matching the Core cookie and source/client serials. The observer connection is
+already closed before normal recording starts.
+
+Registry disappearance still does **not** prove source deletion. PipeWire
+`pw_global_update_permissions` sends the same `global_remove` notification when
+read permission is revoked as object destruction does. A permission-scoped
+view that loses an object therefore remains UNKNOWN, not PASS. A same-core,
+same-serial selected source that survives can establish FAIL. Do not count a
+shared backend client alone as a recording leak. Native GUI acceptance and an
+authoritative backend/server deletion observation remain separate gates.
 
 `cargo test --offline linux::portal -- --test-threads=2` includes an isolated
 private D-Bus portal that returns real Unix descriptors through ashpd, checks

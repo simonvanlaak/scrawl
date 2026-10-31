@@ -752,6 +752,30 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                         anyhow::ensure!(!streams.streams().is_empty(), "Nothing was shared");
                         let fd = PortalFd::new(proxy.open_pipe_wire_remote(&session).await?, diagnostic.clone(),
                             serde_json::json!({"role": "remote"}));
+                        // A distinct portal call creates the observer connection. Never
+                        // duplicate the recording socket into a second protocol reader.
+                        if diagnostic.0.is_some() {
+                            let nodes: Vec<_> = streams.streams().iter().map(|s| s.pipe_wire_node_id()).collect();
+                            let graph = match proxy.open_pipe_wire_remote(&session).await {
+                                Ok(observer) => {
+                                    let mut observer = PortalFd::new(observer, diagnostic.clone(),
+                                        serde_json::json!({"role": "observer"}));
+                                    let (tx, rx) = flume::bounded(1);
+                                    let started = std::thread::Builder::new().name("apparent-graph-probe".into())
+                                        .spawn(move || {
+                                            let graph = super::portal_graph::probe(observer.fd.take().unwrap(), &nodes);
+                                            // The native probe has disconnected and destroyed its
+                                            // core before this explanatory drop record is emitted.
+                                            drop(observer);
+                                            let _ = tx.send(graph);
+                                        });
+                                    if started.is_ok() { rx.recv_async().await.unwrap_or_else(|_| serde_json::json!({"status": "UNKNOWN"})) }
+                                    else { serde_json::json!({"status": "UNKNOWN", "observer_released": true}) }
+                                }
+                                Err(_) => serde_json::json!({"status": "UNKNOWN", "observer_released": true}),
+                            };
+                            fd.event("graph_snapshot", serde_json::json!({"graph": graph}));
+                        }
                         let authorized = streams.streams().iter().enumerate().map(|(index, stream)| {
                             let rect = match (stream.position(), stream.size()) {
                                 (Some((x, y)), Some((w, h))) => Some([f64::from(x), f64::from(y), f64::from(w), f64::from(h)]),

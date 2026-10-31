@@ -12,12 +12,12 @@ export function apiOrigin(config = import.meta.env.VITE_HOSTED_API_ORIGIN as str
   if (!config) return ""
   const url = new URL(config)
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-  if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("Invalid hosted API origin configuration.")
+  if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("Invalid Connect API origin configuration.")
   return url.origin
 }
 export function signInUrl(device: boolean, userCode: string): string {
   // Only fixed local destinations; never forward a URL supplied by the visitor.
-  const returnTo = device ? `/hosted/device?code=${encodeURIComponent(userCode)}` : "/hosted"
+  const returnTo = device ? `/connect/device?code=${encodeURIComponent(userCode)}` : "/connect"
   return `${apiOrigin()}/auth/google/start?returnTo=${encodeURIComponent(returnTo)}`
 }
 async function request(path: string, csrfToken?: string, body?: object): Promise<unknown> {
@@ -33,25 +33,25 @@ async function request(path: string, csrfToken?: string, body?: object): Promise
       if (response.status === 401) throw new Error("Your session has ended. Sign in again, then retry.")
       if (response.status === 403) throw new Error("This request was not authorized. Reload the page before trying again.")
       if (response.status === 404 || response.status === 410) throw new Error("This device code was not found or has expired. Request a new code in your app or agent.")
-      throw new Error("Hosted Apparent is unavailable right now. Nothing was confirmed. Please retry.")
+      throw new Error("Connect is unavailable right now. Nothing was confirmed. Please retry.")
     }
     if (response.status === 204) return null
-    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("Hosted Apparent returned an unexpected response. Please retry later.")
+    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("Connect returned an unexpected response. Please retry later.")
     return await response.json()
   } catch (error) {
-    if (error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError")) throw new Error("Could not reach hosted Apparent. Check your connection and retry.")
+    if (error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError")) throw new Error("Could not reach Connect. Check your connection and retry.")
     throw error
   } finally { clearTimeout(timeout) }
 }
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") throw new Error("Hosted Apparent returned an invalid response.")
+  if (!value || typeof value !== "object") throw new Error("Connect returned an invalid response.")
   return value as Record<string, unknown>
 }
 export async function session(): Promise<Session> {
   const data = record(await request("/v1/session"))
   if (data.authenticated === false) return { authenticated: false }
   const user = record(data.account), beta = record(data.slots), waitlist = record(user.waitlist)
-  if (data.authenticated !== true || typeof user.email !== "string" || typeof data.csrfToken !== "string" || !data.csrfToken || !["active", "waitlist"].includes(user.beta as string) || beta.limit !== 20 || !Number.isInteger(beta.used) || (beta.used as number) < 0 || (beta.used as number) > 20 || typeof waitlist.interestedAtFiveDollars !== "boolean") throw new Error("Hosted Apparent returned an invalid account response.")
+  if (data.authenticated !== true || typeof user.email !== "string" || typeof data.csrfToken !== "string" || !data.csrfToken || !["active", "waitlist"].includes(user.beta as string) || beta.limit !== 20 || !Number.isInteger(beta.used) || (beta.used as number) < 0 || (beta.used as number) > 20 || typeof waitlist.interestedAtFiveDollars !== "boolean") throw new Error("Connect returned an invalid account response.")
   // Pick only needed fields. Extra server fields (especially credentials) never reach UI state.
   return { authenticated: true, user: { email: user.email }, csrfToken: data.csrfToken, beta: { access: user.beta === "active", capacity: 20, enrolled: beta.used as number }, waitlist: { joined: user.beta === "waitlist", interestedAtFiveDollars: waitlist.interestedAtFiveDollars } }
 }

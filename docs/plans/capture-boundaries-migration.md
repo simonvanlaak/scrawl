@@ -305,6 +305,66 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   real-config edit, deployment, merge or outbound delivery. Existing #199 stays
   draft; final head/tree and exact remote/PR readback are in the handoff.
 
+### Approved recorder seam integration (2026-10-31)
+
+- Starting canonical identity: clean `integration/capture-boundaries-plan` at
+  `871850340895c734c0ebb5336c0b655a3780f619`, tree
+  `0cbcb2c067c56437bc62a72ed7caf5f48f7bf342`. Donor range from
+  `3cf6aba7392954e9ad29cc63bc4100cb99db08de` contains exactly one commit,
+  `1733c6eaeb76eb858f8e8d52208b32e32c1882a1` (tree
+  `f6e2618614f8be4276a604fd86967c26fc40f9ff`). Adopted only that commit with
+  `cherry-pick -x` as `8d6b8c75189b57699b2c36371a214fe55ad21d02`, tree
+  `9e8981291c889937b37b7deff6d48bc072e0daab`; no ancestor integration or squash.
+- All eight approved donor blobs and file modes match exactly: `src/capture.rs`,
+  `src/capture/{recorder,telemetry,artifacts,tests_recorder,tests_telemetry,tests_artifacts,tests_source}.rs`.
+  All 532 other starting tracked paths remain identical at code checkpoint;
+  this ledger is the sole subsequent exception. Existing native capture modules,
+  all 16 Engine files, web/config/pipeline/helper/build/manifests/locks and hooks
+  are unchanged. Changed text stays below 2000 lines (capture facade: 826).
+- Coordinator supplied independent **PASS**, no blockers, on the exact frozen
+  donor: compatibility exports, Mac cfg/access scope, telemetry callbacks,
+  stop/drop join, retention guard and artifact ordering are source-approved.
+  No nested agents or additional behavior changes were introduced here.
+- Fresh combined Linux evidence:
+  `/srv/clanker-hermes/cache/scratch/recorder-seam-integration/`.
+  `checkpoint-push.log` records unchanged pre-push hooks: offline root build
+  `-j 3`, 10 Python guard tests, full root **674 passed / 0 failed / 3 ignored**.
+  Nested subprocess summaries are not added to that total. `focused-capture.log`
+  records `cargo test -j 3 --offline capture:: -- --test-threads=2`:
+  **46 passed / 0 failed / 0 ignored**, 631 filtered. File-based Rust 2024
+  formatting on all eight owned files and base-to-head whitespace checks pass.
+  Receipts retain exact command/cwd/head/tree/exits and log SHA-256 hashes.
+- Memory/disk/process preflight found no competing Cargo/native compilation
+  before checkpoint publication; no worker was killed or target copied. Linux
+  has no `taskpolicy`; documented plain Cargo fallback used. Invocation-local
+  cache routing matches donor evidence (empty `RUSTC_WRAPPER`, env CMake
+  launchers, explicit `GGML_CCACHE=OFF`); no shared cache/config was changed.
+  Final docs publication must still run the unchanged hooks; that required run
+  is not a discretionary second acceptance suite for a new SHA.
+- Engine package **22 passed** evidence from the preceding integration is reused,
+  not freshly rerun: all package sources, manifest/lock and root dependency inputs
+  are identical and the package remains outside the root dependency graph.
+  Donor **674/3**, focused **46**, artifact/source comparison and synthetic bundle
+  inspection remain evidence at their original identity in
+  `/srv/clanker-hermes/cache/scratch/recorder-seam-evidence/HANDOFF.md`.
+  No real local bundle was available there; no media or native acquisition was
+  generated during this integration.
+- Nonblocking limitation: artifact roundtrip compares two outputs of the same
+  writer, not an independent golden/original implementation. It establishes
+  roundtrip consistency, not independent artifact equivalence. Record this
+  limitation rather than changing approved tests in this slice.
+- Recorder still transitively reaches Desktop/native telemetry via the platform
+  sampler and uses application retention/model types; artifact persistence still
+  calls the application renderer. This is an in-crate seam, **not** a standalone
+  Engine/Agent or GUI-free dependency closure. Desktop Settings/onboarding/AX/page
+  attribution remain explicitly in telemetry. Existing caller behavior is retained.
+- macOS cfg/access review is source-only, not compilation/session proof. Native
+  proof packet remains pinned to older **87185034** and cannot certify this changed
+  recorder source. The exact eight-file source delta is available for the next
+  native candidate; Linux GUI/acquisition, Mac/native/media acceptance, runtime
+  wiring and platform matrix remain outstanding. No install, VM, live config,
+  media capture, merge, deployment or outbound delivery. Existing #199 stays draft.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

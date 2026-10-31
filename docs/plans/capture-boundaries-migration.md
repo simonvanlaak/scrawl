@@ -621,6 +621,53 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   production Desktop host approval, install, VM/native capture, live config,
   merge, deployment, release or outbound delivery.
 
+### Approved production model/recording leaf adoption (2026-10-31)
+
+- Verified clean canonical `7224094844c2aefd292f775cce9376cb70cb4443`, tree
+  `0bb6b2dc2b0bb685133b990d500fac08c1c7bc6f`, and matching remote before writing.
+  Adopted only #215 commit `6e92f80d833a403e4fc0889b7e5b05ab77d3a76f` with
+  `cherry-pick -x` as `ba9370c5a85bf67446e88645479cb032b61bb08b`. Its whole tree
+  `6881221281a38ad33090a90f166db5dac60ed612` exactly equals the frozen reviewed
+  donor, including all manifests, locks, embedded assets and build inputs.
+  Exactly six approved files change; this non-embedded ledger follows separately.
+- **Production leaf identity now adopted:** root model paths re-export Engine
+  TargetInfo/CaptureMode/TargetFrame/RgbaFrame; root recorder paths re-export
+  CandidateBuffer/ScreenRecording/constants. Duplicate root donor definitions
+  are deleted. NO_VIDEO is public in Engine and remains crate-private at root.
+  Three pure characterization tests moved intact, the temporary donor-source
+  test was removed, and source privacy/architecture checks cover Engine leaves.
+  Native sampler/readiness/stop/drop, admission, lifecycle, checked publication,
+  providers, CI and diagnostic host bytes are unchanged. Review 59 approved the
+  exact six-file boundary with no findings; review 54's unchanged lifecycle proof
+  is retained. No new provider review loop or nested agent.
+- Fresh unchanged mandatory checkpoint hook completed successfully: 10 hook
+  tests, `cargo build -j 3 --offline`, full root
+  `cargo test -j 3 --offline -- --test-threads=2`: **704 passed / 0 failed /
+  3 ignored**. Root count changes reflect moved tests plus the type-identity
+  regression, not discarded behavior coverage. No bypass or in-progress push
+  is credited as success.
+- Reused source-identical donor proof at `6e92f80d`: focused root recorder eight,
+  source-audit two, Engine library build and all **35 Engine tests** (13+3+1+11+7),
+  unchanged GPUI-free dependency tree. Read actual retained logs in
+  `~/.local/share/apparent/refactor-evidence/engine-leaf-adoption/`. Whole-tree
+  equality includes runtime/build inputs, so another discretionary run is not
+  required for the cherry-picked SHA. These are reused results, not fresh runs.
+- Live #215 readback at the exact donor head shows all five jobs successful in
+  run `41218338535`. Mac Engine job `124587478509` log readback confirms library
+  build and complete 35-test pass, no failures/ignored/filtered; Linux Engine and
+  web jobs are also green. This is package Mac/Linux proof, **not full Mac root
+  compilation or native GUI/capture acceptance**. Unchanged web proof is reused;
+  no all-web rerun. Existing Engine model staging comment is known nonblocking
+  documentation debt outside this six-file adoption, not actual runtime state.
+- Private integration receipts/logs:
+  `~/.local/share/apparent/refactor-evidence/leaf-production-integration/`
+  (`exact-donor.json`, `checkpoint-push.log`, final ledger push/readback and
+  Linux binary provenance receipt). Existing native packets bound to `72240948`
+  or older `87185034` do not attest this candidate. New candidate/native artifact
+  binding is still required; this host's binary build does not supply it.
+  No new native build/session, GUI, VM, install, live config, merge, close,
+  deployment or release. Full lease coverage and GUI-free Agent remain open.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

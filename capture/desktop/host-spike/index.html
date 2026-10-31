@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Apparent · Desktop host spike</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <header><span class="mark" aria-hidden="true">↗</span> Apparent <span class="tag">Host laboratory</span></header>
+    <h1>Web controls.<br>Native ink stays native.</h1>
+    <p class="intro">This independent diagnostic window tests the control boundary, not screen recording. The working overlay is untouched.</p>
+    <section aria-labelledby="bridge-title">
+      <h2 id="bridge-title">Control bridge <span id="transport">Connecting…</span></h2>
+      <dl><div><dt>Host revision</dt><dd id="revision">—</dd></div><div><dt>Overlay owner</dt><dd>Existing native host</dd></div><div><dt>Recording capability</dt><dd>Not exposed</dd></div></dl>
+      <div class="actions"><button id="echo" disabled>Send diagnostic pulse</button><button id="refresh" disabled>Reconnect / read state</button><button id="stale" disabled>Try stale command</button></div>
+      <p id="status" role="status" aria-live="polite">Waiting for the diagnostic host.</p>
+      <pre id="event" aria-label="Last host reply">No command sent.</pre>
+    </section>
+    <footer>No microphone · No capture files · No preferences · No Connect account<br>This is not a native overlay acceptance result.</footer>
+  </main>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

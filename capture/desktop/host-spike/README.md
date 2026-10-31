@@ -7,7 +7,7 @@ the default. This package imports none of them and cannot control the live app.
 
 ## Run the harmless control boundary
 
-Node 22+; no installation needed for browser mode:
+Node >=22.12.0 (matching Electron and its downloader); no installation needed for browser mode:
 
 ```sh
 cd capture/desktop/host-spike

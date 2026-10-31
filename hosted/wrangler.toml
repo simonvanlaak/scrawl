@@ -1,0 +1,28 @@
+# Copy this template and replace origins/resource identifiers only after approval.
+# No resources are created by npm test or npm run build.
+name = "apparent-hosted"
+main = "dist/worker.js"
+compatibility_date = "2026-02-05"
+workers_dev = false
+preview_urls = false
+
+[vars]
+API_ORIGIN = "https://api.example.invalid"
+SITE_ORIGIN = "https://site.example.invalid"
+GOOGLE_CLIENT_ID = "CONFIGURE_GOOGLE_CLIENT_ID"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "apparent-hosted"
+database_id = "00000000-0000-0000-0000-000000000000" # Replace with authorized database ID.
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "configure-authorized-private-bucket"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[observability]
+enabled = false

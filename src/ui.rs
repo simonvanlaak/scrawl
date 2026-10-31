@@ -3284,6 +3284,10 @@ impl ApparentCoordinator {
                         }
                     };
                     let frame_count = bundle.keyframes.len();
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
+                    if !feedback_capture {
+                        crate::hosted::completed(&dir);
+                    }
                     if let Ok(mut status) = CAPTURE_STATUS.lock() {
                         *status = None;
                     }

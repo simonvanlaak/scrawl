@@ -1,0 +1,25 @@
+.hosted-page { min-height: 100svh; color-scheme: light; }
+.hosted-account-link { margin-left: auto; text-decoration: underline; text-underline-offset: 4px; }
+.hosted-main { max-width: 760px; padding: 52px 24px 72px; margin: auto; }
+.hosted-eyebrow { color: #5d506c; font-size: 15px; }
+.hosted-main h1 { margin: 12px 0 20px; font-size: clamp(36px, 7vw, 56px); line-height: 1.1; font-weight: 500; letter-spacing: -.045em; }
+.hosted-main h2 { font-size: 24px; font-weight: 500; line-height: 1.25; letter-spacing: -.025em; }
+.hosted-main p { line-height: 1.55; overflow-wrap: anywhere; }
+.hosted-intro { font-size: 20px; max-width: 560px; }
+.hosted-panel { margin-top: 32px; border: 1px solid #cfc5d8; border-radius: 16px; background: #fffaf4; padding: 28px; }
+.hosted-panel h2:first-child { margin-top: 0; }
+.hosted-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 12px 22px; border: 1px solid #020102; border-radius: 999px; background: #b7a5d8; color: #020102; font-size: 16px; font-weight: 500; text-align: center; }
+.hosted-primary:hover { background: #a58dcf; }
+.hosted-page button:disabled { opacity: .55; cursor: wait; }
+.hosted-page a:focus-visible, .hosted-page input:focus-visible { outline: 3px solid #7a58c7; outline-offset: 4px; }
+.hosted-identity { display: flex; align-items: baseline; gap: 20px; justify-content: space-between; border-bottom: 1px solid #ddd4e2; padding-bottom: 12px; }
+.hosted-identity p { margin-top: 0; font-size: 15px; }
+.hosted-identity button, .hosted-error button { text-decoration: underline; text-underline-offset: 4px; min-height: 44px; flex-shrink: 0; }
+.hosted-check { display: flex; align-items: flex-start; gap: 12px; line-height: 1.5; cursor: pointer; }
+.hosted-check input { width: 20px; height: 20px; margin: 2px 0; flex-shrink: 0; accent-color: #7654a8; }
+.hosted-quiet { color: #62566b; font-size: 15px; }
+.hosted-policy { padding: 16px 0; color: #62566b; }
+.hosted-policy h2 { color: #020102; font-size: 20px; }
+.hosted-error { border-left: 3px solid #9f342a; padding: 0 0 0 16px; color: #842b23; margin-bottom: 20px; }
+.hosted-permission { border-top: 1px solid #ddd4e2; margin-top: 24px; padding-top: 8px; }
+@media (max-width: 480px) { .hosted-main { padding: 28px 18px 48px; } .hosted-panel { padding: 20px; } .hosted-identity { display: block; } .hosted-identity button { padding-left: 0; } }

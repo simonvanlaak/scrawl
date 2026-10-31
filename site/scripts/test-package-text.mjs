@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -32,6 +32,8 @@ function packageFixture(html) {
     return {
       ...result,
       preserved: existsSync(join(root, "dist-apparent", "previous.txt")),
+      previous: existsSync(join(root, "dist-apparent", "previous.txt")) ? readFileSync(join(root, "dist-apparent", "previous.txt"), "utf8") : null,
+      outputFiles: readdirSync(join(root, "dist-apparent")),
       published: existsSync(join(root, "dist-apparent", "index.html")) ? readFileSync(join(root, "dist-apparent", "index.html"), "utf8") : null,
       leaked: ["appcast.xml", "llms.txt", "skill.md", "og.mp4", "narration.mp3", "narration-iphone.mp3", "releases", "map-tyyxsf5b", "private-pitch.html"]
         .filter((name) => existsSync(join(root, "dist-apparent", name))),
@@ -42,7 +44,7 @@ function packageFixture(html) {
 }
 
 test("packages real text across inline markup and entities without rewriting HTML or copying private files", () => {
-  const html = `${canonical}<body><h1>Visual feedback gets lo<span>st</span></h1><h2>We believe work should b&#101;</h2></body>`
+  const html = `${canonical}<body><h1 style="display: block">Visual feedback gets lo<span>st</span></h1><h2>We believe work should b&#101;</h2></body>`
   const result = packageFixture(html)
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.published, html)
@@ -54,6 +56,12 @@ for (const [name, content] of [
   ["script", `<script>${heading}; ${belief}</script>`],
   ["style", `<style>/* ${heading}; ${belief} */</style>`],
   ["template", `<template>${heading} ${belief}</template>`],
+  ["hidden ancestor", `<div hidden><section><h1>${heading}</h1><h2>${belief}</h2></section></div>`],
+  ["hidden attribute with false value", `<div hidden="false">${heading} ${belief}</div>`],
+  ["inline display:none ancestor", `<div style="color: red; display: none;"><section>${heading} ${belief}</section></div>`],
+  ["inline display:none important", `<div style="DISPLAY : NONE !important">${heading} ${belief}</div>`],
+  ["noscript", `<noscript>${heading} ${belief}</noscript>`],
+  ["iframe fallback", `<iframe>${heading} ${belief}</iframe>`],
   ["comment", `<!-- > ${heading} ${belief} -->`],
   ["attribute", `<div title="> ${heading} ${belief}">unrelated</div>`],
   ["missing headline", `<h2>${belief}</h2>`],
@@ -64,6 +72,8 @@ for (const [name, content] of [
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /Refusing to package a stale or unrelated build/)
     assert.equal(result.preserved, true)
+    assert.equal(result.previous, "previous artifact")
+    assert.deepEqual(result.outputFiles, ["previous.txt"])
     assert.equal(result.published, null)
   })
 }

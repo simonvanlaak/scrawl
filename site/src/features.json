@@ -288,13 +288,13 @@
     {
       "id": "agent-capture-control",
       "group": "record",
-      "name": "Local capture inspection and explicit stop/cancel",
-      "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
-      "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "name": "Owned GUI capture start, inspection and stop/wait",
+      "says": "A same-user CLI atomically starts the normal interaction-aware GUI capture, waits for real frames, and stops by the request's opaque ID. Stop can wait for that capture's exact saved bundle. Retries and inspection use process-lifetime receipts, never global latest state; cancel can discard an owned pending capture. No toggle, app auto-launch or session sending.",
+      "status": "branch:t3/explore-agent-video-workflows",
       "added": "2026-10-28",
       "platforms": ["mac", "linux"],
-      "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
-      "docs": ["docs/capture.md", "docs/linux.md"]
+      "note": "Existing state/stop/cancel had Linux disposable-VM proof. New owned start/wait receipts have shared Rust contract tests; exact-candidate Linux GUI and Mac runtime proof are required before release. No media change or new experiment gate.",
+      "docs": ["docs/capture.md", "docs/linux.md", "docs/agent-video-workflow.md"]
     },
     {
       "id": "capsule",

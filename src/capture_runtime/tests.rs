@@ -40,6 +40,7 @@ impl Fixture {
         child(self, "contender").wait();
         assert!(!self.0.join("audio.wav").exists());
         assert!(!self.0.join("recording.mov").exists());
+        assert!(!self.0.join("playback").exists());
     }
 }
 impl Drop for Fixture {
@@ -99,6 +100,7 @@ fn subprocess() {
     if std::env::var("APPARENT_CALLER_MODE").unwrap() == "contender" {
         // Same production admission decision used before each caller's media start.
         let admitted = Capture::start_in(runtime, &path.join("contender.apparent"), || {
+            fs::write(path.join("playback"), b"playback side effect").unwrap();
             fs::write(path.join("audio.wav"), b"media side effect").unwrap();
             fs::write(path.join("recording.mov"), b"media side effect").unwrap();
         });

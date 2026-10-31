@@ -324,7 +324,7 @@ pub fn run_app(
                     loop_coord.update(cx, |coord, cx| {
                         if let Err(error) = coord.sync_capture_ownership() {
                             apparent_log(format!("Capture ownership failed: {error:#}"));
-                            coord.cancel_recording(cx);
+                            coord.finish_recording(cx);
                         }
                     });
                     motion::poll_tune();

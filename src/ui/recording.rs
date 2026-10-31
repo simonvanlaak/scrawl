@@ -21,6 +21,9 @@ pub(super) fn finalize_owned_capture(
 impl ApparentCoordinator {
     pub(super) fn sync_capture_ownership(&mut self) -> anyhow::Result<()> {
         let Some(rec) = self.active_recording.as_mut() else { return Ok(()) };
+        if matches!(&rec.source, CaptureSource::Screen { session, .. } if session.failed_to_start()) {
+            anyhow::bail!("screen media failed to start");
+        }
         let seen = match &rec.source {
             CaptureSource::Screen { session, .. } => session.has_frames(),
             CaptureSource::Phone(session) => session.has_recording(),
@@ -555,7 +558,9 @@ impl ApparentCoordinator {
         if recorded {
             self.finish_recording(cx);
         } else {
-            self.cancel_recording(cx);
+            // An unsolicited helper failure is not a user cancellation. The
+            // ordinary worker tears down media and commits a Failed Engine receipt.
+            self.finish_recording(cx);
         }
     }
 

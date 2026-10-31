@@ -310,7 +310,7 @@ pub fn run_app(
                                 coord.request_immediate_frame();
                                 cx.notify();
                             }
-                            LiveOverlayEvent::PhoneEnded => coord.phone_ended(cx),
+                            LiveOverlayEvent::PhoneEnded(identity) => coord.phone_ended(&identity, cx),
                             LiveOverlayEvent::Onboarding(event) => {
                                 coord.onboarding_event(event, cx)
                             }

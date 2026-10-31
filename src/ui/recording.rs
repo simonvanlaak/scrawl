@@ -541,27 +541,25 @@ impl ApparentCoordinator {
         self.present_recording_island(cx);
     }
 
-    /// The mirror ended without being asked: keep what was recorded, or drop an empty capture.
-    pub(super) fn phone_ended(&mut self, cx: &mut Context<Self>) {
+    /// Late EOF from an old preview/recording must not act on its replacement.
+    pub(super) fn accepts_phone_end(&self, identity: &Arc<()>) -> bool {
+        self.iphone_preview.as_ref().is_some_and(|session| session.matches_end(identity))
+            || matches!(&self.active_recording, Some(ActiveRecording {
+                source: CaptureSource::Phone(session), ..
+            }) if session.matches_end(identity))
+    }
+
+    /// The current mirror ended without being asked: finalize or fail its capture.
+    pub(super) fn phone_ended(&mut self, identity: &Arc<()>, cx: &mut Context<Self>) {
+        if !self.accepts_phone_end(identity) { return; }
         if self.iphone_preview.is_some() {
             self.iphone_preview = None;
             self.set_selection_mode(SelectionMode::Area, cx);
             return;
         }
-        let recorded = match &self.active_recording {
-            Some(ActiveRecording {
-                source: CaptureSource::Phone(session),
-                ..
-            }) => session.has_recording(),
-            _ => return,
-        };
-        if recorded {
-            self.finish_recording(cx);
-        } else {
-            // An unsolicited helper failure is not a user cancellation. The
-            // ordinary worker tears down media and commits a Failed Engine receipt.
-            self.finish_recording(cx);
-        }
+        // The worker joins the reader and checks final readiness. An unsolicited
+        // helper failure is Failed, not a user cancellation or a guessed Saved.
+        self.finish_recording(cx);
     }
 
     pub fn cancel_recording(&mut self, cx: &mut Context<Self>) {
@@ -609,11 +607,6 @@ impl ApparentCoordinator {
         let (events, strokes) = self.telemetry.finish_session();
         let bundle_dir = rec.bundle_dir;
         let target = rec.target;
-        let frame_seen = match &rec.source {
-            CaptureSource::Screen { session, .. } => session.has_frames(),
-            CaptureSource::Phone(session) => session.has_recording(),
-            CaptureSource::Lab => false,
-        };
         let mut ownership = rec.ownership;
         let source = rec.source;
         // Drop the Metal overlay immediately on the main thread so the screen frame clears,
@@ -660,7 +653,7 @@ impl ApparentCoordinator {
                             windows,
                         } => (session, audio, windows),
                         CaptureSource::Phone(session) => {
-                            let stopped = session.stop();
+                            let (stopped, frame_seen) = session.stop_with_readiness();
                             let finalized = finalize_owned_capture(ownership.take(), frame_seen, &final_whiteboard, || stopped.and_then(|recording| {
                                 crate::phone::finalize_live_capture(
                                     &bundle_dir,
@@ -683,7 +676,7 @@ impl ApparentCoordinator {
                     };
                     let stop_started = Instant::now();
                     let (recording, recorded_audio, mut activity) = std::thread::scope(|s| {
-                        let screen_handle = s.spawn(|| screen_session.stop());
+                        let screen_handle = s.spawn(|| screen_session.stop_with_readiness());
                         let win_handle = s.spawn(|| {
                             window_log
                                 .map(crate::windows::WindowLogger::stop)
@@ -698,6 +691,7 @@ impl ApparentCoordinator {
                     });
                     activity.stop_started = Some(stop_started);
                     activity.stop_ms = Some(stop_started.elapsed().as_millis() as u64);
+                    let (recording, frame_seen) = recording;
                     let duration_ms = recording.duration_ms;
                     let finalized = finalize_owned_capture(ownership.take(), frame_seen, &final_whiteboard, || crate::finalize_capture_bundle(
                         &bundle_dir,

@@ -757,6 +757,24 @@ pub struct ScreenCaptureSession {
 }
 
 impl ScreenCaptureSession {
+    /// An owned session with synthetic history, without threads or OS capture.
+    #[cfg(test)]
+    pub(crate) fn with_test_history(frame: RgbaFrame) -> Self {
+        let mut frames = CandidateBuffer::new(CANDIDATE_BUDGET_BYTES);
+        frames.push(frame, true);
+        Self {
+            started_at: Instant::now(),
+            stopping: Arc::new(AtomicBool::new(false)),
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames: Arc::new(Mutex::new(frames)),
+            real_frame_seen: Arc::new(AtomicBool::new(true)),
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: None,
+            displays: Arc::new(Mutex::new(Vec::new())),
+            _recording: crate::retention::Recording::start(),
+        }
+    }
+
     pub fn start(
         target: TargetInfo,
         video_output_path: Option<PathBuf>,

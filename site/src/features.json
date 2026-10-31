@@ -85,6 +85,7 @@
       "name": "Interactive homepage belief",
       "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
       "status": "main",
+      "added": "2026-10-30",
       "platforms": ["mac", "linux"],
       "docs": ["site/docs/belief-release.md"]
     },
@@ -284,6 +285,7 @@
       "name": "Local capture inspection and explicit stop/cancel",
       "says": "A same-user CLI reads the running GUI capture phase and its opaque identity. Stop requires real frames; cancel can discard a pending or active capture. Neither command toggles recording or sends to a session.",
       "status": "branch:t3/issue-101-agent-capture-control-integrated",
+      "added": "2026-10-28",
       "platforms": ["mac", "linux"],
       "note": "Linux GUI verified in a disposable VM; Mac runtime verification is still required before release.",
       "docs": ["docs/capture.md", "docs/linux.md"]
@@ -983,6 +985,7 @@
       "name": "apparent export",
       "says": "One .mp4 with ink, pins, clicks and aligned recorded audio. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac"],
       "note": "Rendered with AVFoundation in the helper.",
       "docs": ["README.md#export-as-video", "docs/export-and-retention.md"]
@@ -1004,6 +1007,7 @@
       "name": "Local timed export narration",
       "says": "Explicit --narration script generates Kokoro bm_fable speech locally for the export only; --no-audio deliberately exports silence. Sources stay unchanged.",
       "status": "experiment:exportNarration",
+      "added": "2026-10-30",
       "platforms": ["mac", "linux"],
       "note": "Requires separate verified worker/model provisioning. Native platform proof remains required before release.",
 
@@ -1013,12 +1017,12 @@
       "id": "export-menu",
       "group": "export",
       "name": "Export from the menu",
-      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent with progress beside the menu bar icon.",
+      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent on Mac or a native Save dialog destination on Linux, with visible progress and failure feedback.",
       "status": "experiment:videoExport",
-      "platforms": ["mac"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-18",
       "config": [{ "key": "videoExport", "value": "true", "does": "Show Export Last Capture as Video… (Settings › Recording › Experimental)" }],
-      "docs": ["README.md#export-as-video"]
+      "docs": ["README.md#export-as-video", "docs/export-and-retention.md#linux-tray-export", "docs/linux.md"]
     },
 
     {
@@ -1103,9 +1107,20 @@
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",
       "status": "main",
+      "added": "2026-10-29",
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]
+    },
+    {
+      "id": "onboarding-first-capture",
+      "group": "install",
+      "name": "Choose and try your Record shortcut",
+      "says": "Onboarding requires an explicit shortcut choice and a successful shortcut-started recording before it can finish. Closing leaves setup unfinished for the next launch.",
+      "status": "experiment:onboardingFirstCapture",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Desktop-owned Linux shortcuts must be explicitly accepted rather than edited. Native Mac and Linux interaction proof is required before promotion.",
+      "docs": ["docs/onboarding-and-settings.md"]
     },
     {
       "id": "permission-card",

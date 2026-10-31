@@ -117,6 +117,7 @@ fn worker() {
         session.processing().unwrap();
         let output = Path::new(&root).join("output.apparent");
         std::fs::create_dir(&output).unwrap();
+        std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o700)).unwrap();
         let manifest = format!("{{\"version\":1,\"id\":\"{B}\"}}");
         std::fs::write(output.join("apparent.json"), &manifest).unwrap();
         std::fs::set_permissions(

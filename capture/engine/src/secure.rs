@@ -11,6 +11,9 @@ pub(crate) fn invalid() -> io::Error {
     io::Error::other("unsafe or inconsistent engine state")
 }
 fn name(s: &str) -> io::Result<CString> {
+    if s.is_empty() || matches!(s, "." | "..") || s.contains('/') {
+        return Err(invalid());
+    }
     CString::new(s).map_err(|_| invalid())
 }
 fn cvt(fd: i32) -> io::Result<File> {
@@ -22,6 +25,15 @@ fn cvt(fd: i32) -> io::Result<File> {
     }
 }
 pub(crate) fn directory(path: &Path) -> io::Result<File> {
+    walk_directory(path, false)
+}
+/// Output paths must descend through root/current-user-owned, non-writable
+/// ancestors. Root-owned sticky directories (e.g. /tmp) protect owned entries.
+/// The final directory must always be current-user-owned and non-writable.
+pub(crate) fn trusted_directory(path: &Path) -> io::Result<File> {
+    walk_directory(path, true)
+}
+fn walk_directory(path: &Path, trusted: bool) -> io::Result<File> {
     if !path.is_absolute() {
         return Err(invalid());
     }
@@ -42,12 +54,27 @@ pub(crate) fn directory(path: &Path) -> io::Result<File> {
                 libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
             )
         })?;
+        if trusted {
+            let m = dir.metadata()?;
+            let uid = unsafe { libc::geteuid() };
+            let sticky_root = m.uid() == 0 && m.mode() & libc::S_ISVTX != 0;
+            if (m.uid() != 0 && m.uid() != uid) || (m.mode() & 0o022 != 0 && !sticky_root) {
+                return Err(invalid());
+            }
+        }
+    }
+    if trusted {
+        let m = dir.metadata()?;
+        if m.uid() != unsafe { libc::geteuid() } || m.mode() & 0o022 != 0 {
+            return Err(invalid());
+        }
     }
     Ok(dir)
 }
 pub(crate) struct Store {
     dir: File,
     path: PathBuf,
+    parent: Option<std::sync::Arc<Store>>,
 }
 impl Store {
     /// The caller provisions the one stable runtime directory; never chmod unsafe state.
@@ -61,14 +88,44 @@ impl Store {
         Ok(Self {
             dir,
             path: path.into(),
+            parent: None,
         })
     }
+    /// Permanent private namespace, created only while the root transaction is held.
+    pub fn child(self: &std::sync::Arc<Self>, key: &str) -> io::Result<std::sync::Arc<Self>> {
+        self.check()?;
+        let leaf = name(key)?;
+        let rc = unsafe { libc::mkdirat(self.dir.as_raw_fd(), leaf.as_ptr(), 0o700) };
+        if rc != 0 && io::Error::last_os_error().kind() != io::ErrorKind::AlreadyExists {
+            return Err(io::Error::last_os_error());
+        }
+        let dir = cvt(unsafe {
+            libc::openat(
+                self.dir.as_raw_fd(),
+                leaf.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        })?;
+        let child = std::sync::Arc::new(Self {
+            dir,
+            path: self.path.join(key),
+            parent: Some(self.clone()),
+        });
+        child.check()?;
+        child.dir.sync_all()?;
+        self.dir.sync_all()?;
+        Ok(child)
+    }
     pub fn check(&self) -> io::Result<()> {
+        if let Some(parent) = &self.parent {
+            parent.check()?;
+        }
         let m = self.dir.metadata()?;
         let current = directory(&self.path)?.metadata()?;
         if m.dev() != current.dev()
             || m.ino() != current.ino()
             || m.mode() & 0o777 != 0o700
+            || m.uid() != unsafe { libc::geteuid() }
             || m.nlink() == 0
         {
             return Err(invalid());

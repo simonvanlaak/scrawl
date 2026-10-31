@@ -1,4 +1,4 @@
-use crate::secure::{directory, invalid};
+use crate::secure::{invalid, trusted_directory};
 use std::os::{
     fd::{AsRawFd, FromRawFd},
     unix::fs::MetadataExt,
@@ -18,11 +18,14 @@ pub struct FinalizerSuccess {
     dir: File,
     manifest: Vec<u8>,
 }
+// Production serializes events, stroke points, transcript and window/context
+// histories, not a small receipt. Keep a separate bounded manifest budget.
+const MAX_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 impl FinalizerSuccess {
     pub fn validate(request: &str, bundle: &str, path: &Path, manifest: &[u8]) -> io::Result<Self> {
         crate::identity::validate(request, 32)?;
-        crate::identity::validate(bundle, 32)?;
-        if manifest.len() > 65536 {
+        crate::identity::validate_bundle(bundle)?;
+        if manifest.len() > MAX_MANIFEST_BYTES {
             return Err(invalid());
         }
         let value: serde_json::Value = serde_json::from_slice(manifest).map_err(|_| invalid())?;
@@ -33,16 +36,21 @@ impl FinalizerSuccess {
             request: request.into(),
             bundle: bundle.into(),
             path: path.into(),
-            dir: directory(path)?,
+            dir: trusted_directory(path)?,
             manifest: manifest.into(),
         };
         result.check()?;
         Ok(result)
     }
     pub(crate) fn check(&self) -> io::Result<()> {
-        let current = directory(&self.path)?.metadata()?;
+        let current = trusted_directory(&self.path)?.metadata()?;
         let pinned = self.dir.metadata()?;
-        if current.dev() != pinned.dev() || current.ino() != pinned.ino() {
+        if current.dev() != pinned.dev()
+            || current.ino() != pinned.ino()
+            || pinned.uid() != unsafe { libc::geteuid() }
+            || pinned.mode() & 0o022 != 0
+            || pinned.nlink() == 0
+        {
             return Err(invalid());
         }
         for marker in [c".unsafe-video", c"unfinished.json"] {
@@ -81,7 +89,9 @@ impl FinalizerSuccess {
             return Err(invalid());
         }
         let mut bytes = Vec::new();
-        (&file).take(65537).read_to_end(&mut bytes)?;
+        (&file)
+            .take((MAX_MANIFEST_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)?;
         if bytes != self.manifest {
             return Err(invalid());
         }

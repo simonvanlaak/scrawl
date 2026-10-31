@@ -43,7 +43,7 @@ impl Record {
         if record.receipt.version != 1 || record.receipt.request_id != id {
             return Err(invalid());
         }
-        crate::identity::validate(&record.receipt.bundle_id, 32)?;
+        crate::identity::validate_bundle(&record.receipt.bundle_id)?;
         crate::identity::validate(&record.token, 64)?;
         if (record.receipt.status == Status::Saved) != record.receipt.bundle_path.is_some() {
             return Err(invalid());

@@ -33,6 +33,7 @@ fn finalizer_rechecks_exact_bytes_directory_and_completion_markers() {
         session.processing().unwrap();
         let path = root.join(&bundle);
         fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         let manifest = format!(r#"{{"version":1,"id":"{bundle}"}}"#);
         let leaf = path.join("apparent.json");
         fs::write(&leaf, &manifest).unwrap();

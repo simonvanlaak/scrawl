@@ -5,13 +5,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Fixture(PathBuf);
+pub(crate) struct Fixture(PathBuf);
 pub(super) fn default_runtime() -> Result<Runtime> {
     static FIXTURE: std::sync::OnceLock<Fixture> = std::sync::OnceLock::new();
     Ok(FIXTURE.get_or_init(Fixture::new).runtime())
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         // Engine rejects writable ancestors even beneath a private directory. Do not
         // weaken it or chmod the host scratch directory merely to make fixtures pass.
         let path = dirs::home_dir()
@@ -25,11 +25,21 @@ impl Fixture {
         paths::provision(&path.join("runtime"), true).unwrap();
         Self(path)
     }
-    fn runtime(&self) -> Runtime {
+    pub(crate) fn runtime(&self) -> Runtime {
         Runtime::open(&self.0.join("runtime")).unwrap()
     }
-    fn output(&self) -> PathBuf {
+    pub(crate) fn output(&self) -> PathBuf {
         self.0.join("synthetic.apparent")
+    }
+    pub(crate) fn start(&self) -> (Capture, String) {
+        let (capture, ()) = Capture::start_in(self.runtime(), &self.output(), || ()).unwrap();
+        let request = capture.request.clone();
+        (capture, request)
+    }
+    pub(crate) fn assert_busy_in_child(&self) {
+        child(self, "contender").wait();
+        assert!(!self.0.join("audio.wav").exists());
+        assert!(!self.0.join("recording.mov").exists());
     }
 }
 impl Drop for Fixture {

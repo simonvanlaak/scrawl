@@ -1,5 +1,23 @@
 use super::*;
 
+/// Shared by both real screen and phone workers. No success escapes before the
+/// final whiteboard/fallback bytes pass publication and Engine completion.
+pub(super) fn finalize_owned_capture(
+    ownership: Option<crate::capture_runtime::Capture>,
+    frame_seen: bool,
+    board: &whiteboard::Board,
+    build: impl FnOnce() -> anyhow::Result<(PathBuf, ApparentBundle, String)>,
+) -> anyhow::Result<(PathBuf, ApparentBundle, String)> {
+    let mut ownership = ownership.ok_or_else(|| anyhow::anyhow!("missing capture ownership"))?;
+    if frame_seen { ownership.observed_frame()?; }
+    ownership.processing()?;
+    ownership.publish(|| {
+        let (dir, bundle, summary) = build()?;
+        let (bundle, summary) = whiteboard::finish_handoff(&dir, bundle, summary, board);
+        Ok((dir, bundle, summary))
+    })
+}
+
 impl ApparentCoordinator {
     pub(super) fn sync_capture_ownership(&mut self) -> anyhow::Result<()> {
         let Some(rec) = self.active_recording.as_mut() else { return Ok(()) };
@@ -638,11 +656,7 @@ impl ApparentCoordinator {
                         } => (session, audio, windows),
                         CaptureSource::Phone(session) => {
                             let stopped = session.stop();
-                            let finalized = (|| {
-                                let mut ownership = ownership.take().ok_or_else(|| anyhow::anyhow!("missing capture ownership"))?;
-                                if frame_seen { ownership.observed_frame()?; }
-                                ownership.processing()?;
-                                ownership.publish(|| stopped.and_then(|recording| {
+                            let finalized = finalize_owned_capture(ownership.take(), frame_seen, &final_whiteboard, || stopped.and_then(|recording| {
                                 crate::phone::finalize_live_capture(
                                     &bundle_dir,
                                     recording,
@@ -650,13 +664,7 @@ impl ApparentCoordinator {
                                     strokes,
                                     None,
                                 )
-                            }).map(|(dir, bundle, summary)| {
-                                let (bundle, summary) = whiteboard::finish_handoff(
-                                    &dir, bundle, summary, &final_whiteboard,
-                                );
-                                (dir, bundle, summary)
-                            }))
-                            })();
+                            }));
                             if let Err(error) = &finalized {
                                 apparent_log(format!("iPhone capture failed: {error:#}"));
                             }
@@ -686,11 +694,7 @@ impl ApparentCoordinator {
                     activity.stop_started = Some(stop_started);
                     activity.stop_ms = Some(stop_started.elapsed().as_millis() as u64);
                     let duration_ms = recording.duration_ms;
-                    let finalized = (|| {
-                        let mut ownership = ownership.take().ok_or_else(|| anyhow::anyhow!("missing capture ownership"))?;
-                        if frame_seen { ownership.observed_frame()?; }
-                        ownership.processing()?;
-                        ownership.publish(|| crate::finalize_capture_bundle(
+                    let finalized = finalize_owned_capture(ownership.take(), frame_seen, &final_whiteboard, || crate::finalize_capture_bundle(
                         &bundle_dir,
                         target,
                         recording,
@@ -700,14 +704,7 @@ impl ApparentCoordinator {
                         None,
                         activity,
                         None,
-                    )
-                    .map(|(dir, bundle, summary)| {
-                        let (bundle, summary) = whiteboard::finish_handoff(
-                            &dir, bundle, summary, &final_whiteboard,
-                        );
-                        (dir, bundle, summary)
-                    }))
-                    })();
+                    ));
                     (finalized, duration_ms)
                 })
                 .await;

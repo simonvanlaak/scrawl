@@ -421,6 +421,8 @@ impl Drop for Fixture {
 
 #[derive(Default)]
 struct State {
+    shares: usize,
+    revoked: bool,
     files: Vec<Asset>,
     capture_id: String,
     tombstones: BTreeSet<String>,
@@ -544,7 +546,12 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         );
         let parts: Vec<_> = route.split('/').collect();
         let id = parts.get(3).copied().unwrap_or("");
-        if s.tombstones.contains(id) {
+        if route == "/v1/shares" {
+            json!({"shares":if s.shares == 0 || s.revoked {vec![]} else {vec![json!({"id":"c".repeat(32),"captureId":s.capture_id,"url":format!("{origin}/s/{}", "b".repeat(64)),"status":"uploading","createdAt":123,"expiresAt":12345,"title":"Synthetic capture"})]}}).to_string().into_bytes()
+        } else if route == format!("/v1/shares/{}", "c".repeat(32)) && method == "DELETE" {
+            s.revoked = true;
+            json!({"ok":true}).to_string().into_bytes()
+        } else if s.tombstones.contains(id) {
             status = 410;
             json!({"error":{"code":"expired"}}).to_string().into_bytes()
         } else if method == "POST" && parts.len() == 4 {
@@ -562,6 +569,10 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
             json!({"id":id,"status":if s.ready {"ready"} else {"pending"}})
                 .to_string()
                 .into_bytes()
+        } else if parts.get(4) == Some(&"share") {
+            assert_eq!(id, s.capture_id);
+            s.shares += 1;
+            json!({"url":format!("{origin}/s/{}", "b".repeat(64)),"status":if s.ready {"ready"} else {"uploading"},"expiresAt":12345}).to_string().into_bytes()
         } else if parts.get(4) == Some(&"files") {
             let path = parts[5..].join("/");
             if method == "PUT" {
@@ -600,6 +611,50 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, origin: &str) {
         result.len()
     );
     let _ = stream.write_all(&result);
+}
+
+#[test]
+fn hosted_sharing_management_uses_management_id_and_verifies_revoke() {
+    let f = Fixture::new();
+    let server = Server::new("");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment("hostedSharing");
+    f.client.share(&f.bundle()).unwrap();
+    let shares = f.client.shares().unwrap();
+    assert_eq!(shares["shares"][0]["id"], "c".repeat(32));
+    let before = server.state.lock().unwrap().requests;
+    assert!(f.client.revoke_share(&"b".repeat(64)).is_err());
+    assert_eq!(server.state.lock().unwrap().requests, before);
+    f.client.revoke_share(&"c".repeat(32)).unwrap();
+    assert!(f.client.shares().unwrap()["shares"].as_array().unwrap().is_empty());
+    assert!(server.state.lock().unwrap().revoked);
+}
+
+#[test]
+fn hosted_sharing_reserves_before_media_reuses_url_and_resumes_queue() {
+    let f = Fixture::new();
+    let server = Server::new("");
+    f.authorize(&server.url);
+    crate::handoff::enable_experiment("hostedSharing");
+    let bundle = f.bundle();
+    let url = f.client.share(&bundle).unwrap();
+    assert_eq!(url, format!("{}/s/{}", server.url, "b".repeat(64)));
+    assert!(server.state.lock().unwrap().data.is_empty(), "link must be reserved before full media upload");
+    let id = f.client.jobs().unwrap()[0].id.clone();
+    assert_eq!(f.client.share(&bundle).unwrap(), url);
+    assert_eq!(f.client.jobs().unwrap().len(), 1);
+    let restarted = Client::at(f.client.config.clone());
+    restarted.process_once().unwrap();
+    assert_eq!(restarted.jobs().unwrap()[0].status, "ready");
+    assert_eq!(restarted.jobs().unwrap()[0].id, id);
+    assert_eq!(restarted.share(&bundle).unwrap(), url);
+    let another = f.root.join("another.apparent");
+    fs::rename(&bundle, &another).unwrap();
+    restarted.enqueue(&another).unwrap();
+    fs::rename(&another, &bundle).unwrap();
+    assert!(restarted.jobs().unwrap().iter().any(|j| j.id == id), "sharing identity must survive ordinary queue pruning");
+    restarted.disable(false).unwrap();
+    assert!(restarted.share(&bundle).is_err());
 }
 
 #[test]

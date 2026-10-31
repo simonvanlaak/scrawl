@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const HOSTED_SYNC: &str = "hostedSync";
+pub const HOSTED_SHARING: &str = "hostedSharing";
 const MAX_BYTES: u64 = 500_000_000;
 const MAX_FILES: usize = 512;
 const MAX_FILE_BYTES: u64 = 90_000_000;
@@ -50,6 +51,19 @@ pub enum CloudCommand {
     Retry,
     /// Explicitly upload one historical capture (requires upload consent).
     Upload { bundle: PathBuf },
+    /// List or revoke public-by-link access. IDs are management IDs, not capture IDs.
+    Shares {
+        #[command(subcommand)]
+        command: SharesCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SharesCommand {
+    /// List shared captures (read or upload login).
+    List,
+    /// Stop future access without deleting the private capture (upload login).
+    Revoke { id: String },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -92,6 +106,8 @@ struct Job {
     error: Option<String>,
     #[serde(default)]
     files: Vec<Asset>,
+    #[serde(default)]
+    shared: bool,
 }
 
 #[derive(Clone)]
@@ -121,6 +137,11 @@ fn hex_digest(s: &str) -> bool {
     s.len() == 64
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn validate_share_url(server: &str, url: &str) -> Result<()> {
+    ensure!(url.strip_prefix(&format!("{server}/s/")).is_some_and(hex_digest), "Invalid share URL");
+    Ok(())
 }
 
 // Exact allowlist: unknown files are not uploaded, and are rejected on download.
@@ -451,6 +472,68 @@ fn config_escape(value: &str) -> Result<String> {
 }
 
 impl Client {
+    fn shares(&self) -> Result<Value> {
+        let server = server_url(&self.settings().server)?;
+        let credential = self.credential("read", &server).or_else(|_| self.credential("upload", &server))?;
+        let reply = self.json_request(&server, Some(&credential.token), "GET", "/v1/shares", None,
+            Duration::from_secs(30), &|| true)?;
+        let shares = reply["shares"].as_array().context("Invalid shares response")?;
+        for share in shares {
+            ensure!(share["id"].as_str().is_some_and(valid_id)
+                && share["captureId"].as_str().is_some_and(valid_id), "Invalid share identity");
+            validate_share_url(&server, share["url"].as_str().context("Missing share URL")?)?;
+        }
+        Ok(reply)
+    }
+    fn revoke_share(&self, id: &str) -> Result<()> {
+        ensure!(valid_id(id), "Share management ID must be 32 lowercase hexadecimal characters (not the URL secret)");
+        let server = server_url(&self.settings().server)?;
+        let credential = self.credential("upload", &server)?;
+        let reply = self.json_request(&server, Some(&credential.token), "DELETE", &format!("/v1/shares/{id}"), None,
+            Duration::from_secs(30), &|| true)?;
+        ensure!(reply["ok"] == true, "Share revocation failed");
+        let remaining = self.json_request(&server, Some(&credential.token), "GET", "/v1/shares", None,
+            Duration::from_secs(30), &|| true)?;
+        ensure!(!remaining["shares"].as_array().context("Invalid shares response")?.iter()
+            .any(|share| share["id"].as_str() == Some(id) && !matches!(share["status"].as_str(), Some("revoked" | "expired"))), "Share is still active");
+        Ok(())
+    }
+    fn share(&self, bundle: &Path) -> Result<String> {
+        ensure!(crate::handoff::experiment(HOSTED_SHARING), "Hosted sharing is disabled");
+        let id = self.enqueue(bundle)?;
+        let mut job = self.jobs()?.into_iter().find(|j| j.id == id).context("Missing queued capture")?;
+        ensure!(self.active(&job), "Upload consent changed or capture was cancelled");
+        let credential = self.credential("upload", &job.server)?;
+        let scratch = Scratch::new(&self.state)?;
+        let files = snapshot(&job.bundle, &scratch.0)?;
+        {
+            let _lock = Lock::acquire(&self.state.join("queue.lock"), false)?;
+            ensure!(self.active_locked(&job), "cancelled");
+            // A concurrent uploader can have advanced the same job. Merge only the
+            // immutable manifest, never overwrite its progress/status/retry state.
+            let mut current = self.jobs()?.into_iter().find(|j| j.id == id).context("Missing queued capture")?;
+            ensure!(current.files.is_empty() || current.files == files, "Bundle changed after reservation");
+            current.files = files.clone();
+            // Retain the identity until retention expires, including after ready.
+            // The URL secret itself is never stored in status or application logs.
+            current.shared = true;
+            self.save_job(&current)?;
+            job = current;
+        }
+        let allowed = || self.active(&job);
+        let base = format!("/v1/captures/{id}");
+        let reserved = self.json_request(&job.server, Some(&credential.token), "POST", &base,
+            Some(json!({"files":files})), Duration::from_secs(30), &allowed)?;
+        ensure!(reserved["id"].as_str() == Some(&id), "Invalid reservation ID");
+        let reply = self.json_request(&job.server, Some(&credential.token), "POST", &format!("{base}/share"),
+            None, Duration::from_secs(30), &allowed)?;
+        let url = reply["url"].as_str().context("Missing share URL")?;
+        validate_share_url(&job.server, url)?;
+        ensure!(matches!(reply["status"].as_str(), Some("uploading" | "pending" | "ready" | "paused" | "failed"))
+            && (reply["expiresAt"].is_number() || reply["expiresAt"].is_string()), "Invalid share response");
+        ensure!(self.active(&job), "cancelled");
+        Ok(url.into())
+    }
     fn default() -> Self {
         Self::at(crate::handoff::default_config_path())
     }
@@ -533,7 +616,16 @@ impl Client {
         Ok(jobs)
     }
     fn save_job(&self, job: &Job) -> Result<()> {
-        atomic_json(&self.state.join(format!("{}.job", job.id)), job)
+        let path = self.state.join(format!("{}.job", job.id));
+        let mut job = job.clone();
+        // Share admission may race an uploader snapshot. This monotonic metadata
+        // must not be lost when that uploader publishes an acknowledgement.
+        if let Ok(bytes) = read_private(&path, JSON_LIMIT) {
+            if let Ok(current) = serde_json::from_slice::<Job>(&bytes) {
+                job.shared |= current.shared;
+            }
+        }
+        atomic_json(&path, &job)
     }
     fn enqueue(&self, bundle: &Path) -> Result<String> {
         self.enqueue_with_intent(bundle, false)
@@ -583,7 +675,7 @@ impl Client {
         // Reclaim only terminal/expired metadata; never drop a live job to make room.
         jobs.retain(|job| {
             if now().saturating_sub(job.created) > RETENTION
-                || matches!(job.status.as_str(), "ready" | "cancelled" | "expired")
+                || (!job.shared && matches!(job.status.as_str(), "ready" | "cancelled" | "expired"))
             {
                 let _ = fs::remove_file(self.state.join(format!("{}.job", job.id)));
                 false
@@ -606,6 +698,7 @@ impl Client {
             status: "pending".into(),
             error: None,
             files: Vec::new(),
+            shared: false,
         };
         self.save_job(&job)?;
         Ok(job.id)
@@ -1424,6 +1517,17 @@ fn publish_noreplace(from: &Path, to: &Path) -> Result<()> {
 pub fn command(command: CloudCommand) -> Result<()> {
     let client = Client::default();
     match command {
+        CloudCommand::Shares { command } => match command {
+            SharesCommand::List => {
+                println!("{}", serde_json::to_string_pretty(&client.shares()?)?);
+                Ok(())
+            }
+            SharesCommand::Revoke { id } => {
+                client.revoke_share(&id)?;
+                println!("Sharing stopped. Downloads and cached previews cannot be recalled.");
+                Ok(())
+            }
+        },
         CloudCommand::Login {
             server,
             scope,

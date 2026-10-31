@@ -2,13 +2,13 @@
 
 `apparent walkthrough` connects the real recorder, evidence inspection and a separate polished share copy. Ordinary captures and `apparent export` defaults are unchanged. Rendering is an off-by-default `agentWalkthrough` experiment: opt in per export with `--experiment agentWalkthrough`, or set `"experiments": {"agentWalkthrough": true}` in `~/.config/apparent/config.json` (read at invocation, no restart).
 
-For a normal product walkthrough, start the verified running GUI through its configured recording shortcut, retain the exact owned `capture_id` from `apparent capture state`, wait for `recording`, then finish only that capture with `apparent capture stop <capture_id>`. Inspect the exact completed bundle before rendering. Check the actual source and final crop retain the real recording pill whenever it is promised; never add a simulated pill. Timed `record --duration` is a separate recorder fallback with no normal GUI pill or click/Shift-ink telemetry, not equivalent product proof. Disclose it as such. See `docs/capture.md` for safe capture ownership and permissions.
+For a normal product walkthrough, verify the running GUI build, privately retain a 32-hex request ID, and use `apparent capture start --request-id <id> --wait --timeout 30`. Retain the reply's `capture_id`, including on timeout, and require its own `status: "recording"` before acting. Finish only that capture with `apparent capture stop <id> --wait --timeout 60`; require `status: "saved"` and its exact `bundle_path`. Inspect that bundle before rendering. Check the actual source and final crop retain the real recording pill whenever it is promised; never add a simulated pill. Timed `record --duration` is a separate recorder fallback with no normal GUI pill or click/Shift-ink telemetry, not equivalent product proof. Disclose it as such. See `docs/capture.md` for safe capture ownership, timeout recovery and permissions.
 
 ## Two passes
 
 ```sh
-# Start the verified running GUI with its recording shortcut.
-# Read capture state, retain your capture_id, act, then stop only that ID.
+# Start the verified running GUI with a retained request ID and capture start --wait.
+# Require its recording receipt, act, then capture stop <id> --wait.
 # Use the exact completed bundle path below, not a concurrent "latest" capture.
 apparent walkthrough inspect /private/take.apparent --template /private/cues.json
 # Inspect the entire movie, summary, contact sheet and frames. Edit cues.json.
@@ -19,7 +19,7 @@ apparent walkthrough export /private/take.apparent \
 
 The walkthrough commands print machine-readable JSON on stdout; recorder progress goes to stderr. If the GUI route is unavailable, the separately disclosed `apparent walkthrough record --duration 20 --out /private/fallback.apparent` delegates to the existing timed recorder, supports its unique `--window` selector, refuses an existing bundle, and waits through finalization. It records screen and microphone but **no normal GUI recording pill or click/Shift-ink telemetry**; a changing UI can still be visible in the movie. It does not perform your task for you. Arrange actions concurrently with recording. No wall clock is used for cues.
 
-For interaction-driven camera motion, use the running app's normal recording shortcut instead, retain its `capture_id` from `apparent capture state`, and finish only your capture with `apparent capture stop <capture_id>`. Do not toggle a shortcut to stop an unknown recording. See [capture control](capture.md#agent-control-of-the-running-gui). Then use `walkthrough inspect` on the exact completed bundle. The workflow does not introduce another recording engine or change input permissions.
+For interaction-driven camera motion, use the running GUI's owned `capture start --wait` path above instead. Do not infer ownership from global `capture state` or toggle a shortcut to stop an unknown recording. After timeout or disconnect, inspect the owned ID or retry the same request/Stop; an admitted capture is not cancelled by a readiness timeout. Rejected IDs remain rejected and receipts last only for that GUI process. See [capture control](capture.md#agent-control-of-the-running-gui). Then use `walkthrough inspect` on the exact saved bundle. Its saved-media readiness does not prove daemon first-frame readiness or finalizer completion. The workflow does not introduce another recording engine or change input permissions.
 
 `inspect` returns `ready` only after loading a manifest and probing a real movie. A directory without a manifest returns `finalizing_or_incomplete` with instructions; this is not a guarantee an abandoned capture will finish. Invalid manifests or missing media fail. JSON includes absolute evidence paths, raw events/marks, telemetry limits, frame paths and movie times. Bundle milliseconds become movie seconds by `(t - videoOffsetMs) / 1000`; negative values precede the movie. The editable template is a JSON array of `[start_seconds, end_seconds, text]`, initially `[[0, duration, ""]]`. Empty text is intentionally rejected: the agent must supply meaning after inspection. Existing templates are never overwritten.
 

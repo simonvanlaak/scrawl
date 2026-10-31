@@ -1,5 +1,9 @@
 # Public Apparent site on Clanker
 
+For checked main-branch delivery, activation gates, deployment credentials and
+guarded rollback, see [`../../docs/continuous-delivery.md`](../../docs/continuous-delivery.md).
+Manual publishers must share `.apparent-site-publish.lock` with CD.
+
 `https://app.tryapparent.com/` currently reaches Clanker's `presentations-caddy-1` through Cloudflare. The live Caddyfile is `/opt/presentations/Caddyfile`; the site root is the `apparent-site` symlink under `/opt/presentations/releases/`, mounted in Caddy as `/srv/apparent-site`. This is separate from the Worker described in `site/wrangler.jsonc`. Check the live origin before assuming either route owns the hostname.
 
 Build from the intended commit with `APPARENT_PUBLIC_SITE=1 npm run build`, then `node scripts/package-apparent.mjs` in `site/`. Run the focused Node tests in `site/scripts/`. Publish **only** `site/dist-apparent`, not `site/dist`: the latter has an appcast, feature map, and other files not meant for this public Caddy route. Make a new release directory under `/opt/presentations/releases/` by copying the active site directory first, then overlay `dist-apparent/`. This retains any existing release/update or demo assets absent from the new package. Do not alter `/appcast.xml` or `/releases/` routes as part of a homepage deploy.

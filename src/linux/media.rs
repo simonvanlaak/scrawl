@@ -540,6 +540,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         urgent,
         frames,
         real_frame_seen,
+        startup_failed,
         video_offset_ms,
         excluded_window_ids,
     } = sampler;
@@ -575,6 +576,7 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         Err(error) => {
             apparent_log(format!("Screen capture failed to start: {error:#}"));
+            startup_failed.store(true, Ordering::Release);
             None
         }
     };
@@ -605,6 +607,8 @@ pub fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         if let Some((r, _)) = recorder.as_ref() {
             if let Some(error) = r.error() {
                 apparent_log(format!("Recording failed: {error}"));
+                // Publish before native teardown, which need not end the sampler thread.
+                startup_failed.store(true, Ordering::Release);
                 if let Some((r, _)) = recorder.take() {
                     let _ = r.pipeline.set_state(gst::State::Null);
                 }

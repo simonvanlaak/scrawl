@@ -419,6 +419,39 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   push/build to bind its retry to the follow-up head, not bypass verification.
 
 
+### Approved pure UI preparation integration (2026-10-31)
+
+- Clean canonical base `5df862aae71e244ad12cf1fdd2fba13e815a3373` adopted
+  #208 commits `d543a8cd`, `d4d29bc8`, `550517ac` in order with `cherry-pick -x`
+  as `d82a005f`, `69fe55f4`, `b773d4ea`. Code checkpoint
+  `b773d4eab2f71f43bc562b467791fe734890d85b` has donor-identical whole tree
+  `3fa86d07fbac714feb4f6f6a4ce96b773c06beee`. Exactly eleven UI paths change:
+  `src/ui.rs` and `src/ui/{app,coordinator,hud,island,picker,recording,review,selection,tests,window_host}.rs`.
+  All other production/build/dependency/hook bytes and modes are unchanged;
+  this non-embedded ledger is the sole subsequent exception.
+- Coordinator-supplied independent review 27 **APPROVE**, no findings, is reused
+  for the exact approved bytes: function bodies, module assembly, cfg/Mac access,
+  font asset paths, macro/re-exports, callbacks and privacy guards preserved.
+  Fresh canonical characterization also matches all ten moved responsibility
+  blocks against base executable tokens. No nested agents or new review loop.
+- Donor final-head root build and **674 passed / 0 failed / 3 ignored** remain
+  evidence at `550517ac`, not relabelled as fresh integration proof. Whole-tree
+  equality includes all source/build/runtime inputs, so no discretionary full
+  suite or native rerun is required merely for the cherry-picked SHA.
+  Independently, mandatory unchanged checkpoint pre-push hooks freshly passed:
+  10 Python guard tests, `cargo build -j 3 --offline`, and
+  `cargo test -j 3 --offline -- --test-threads=2`, **674/0/3** (45.06 s).
+  `git diff --check` passes. Private logs: `~/.local/share/apparent/refactor-evidence/ui-prep-integration/`
+  (`checkpoint-push.log`, `exact-donor.log`; final docs push/readback in handoff).
+  Donor formatting drift remains recorded, not claimed green or reformatted.
+- Preparation only: no production Engine admission, lifecycle/terminal receipt
+  wiring or caller-containment acceptance. Publication-barrier work in isolated
+  pipeline/recover/speech-model ownership and private native-proof work remain
+  separate; neither is imported or certified. Mac compilation and both native
+  GUI/media acceptance gates remain unproved. No install, app launch, capture,
+  VM, live config, deployment, merge, release or outbound delivery. Existing
+  #199 and #208 remain draft review records; neither is GitHub-merged here.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

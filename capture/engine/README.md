@@ -126,10 +126,13 @@ cargo tree --manifest-path capture/engine/Cargo.toml --offline
 ```
 
 The package pins cached libc/serde/serde_json dependencies and has its own small,
-unmodified Cargo-generated lockfile. Root Cargo.toml/Cargo.lock and CI are
-unchanged: this is a staged package, not a final workspace/lock policy decision.
-There are no Agent, GPUI, recorder or product dependencies. Repository hooks and
-the 2,000-physical-line-per-file cap still apply. Native macOS compilation,
+unmodified Cargo-generated lockfile. Root Cargo.toml/Cargo.lock now declare and
+resolve this path dependency on macOS and Linux; CI is unchanged. This is package
+integration only, not production caller adoption or a standalone Agent.
+There are no Agent, GPUI, recorder or product dependencies inside the Engine.
+Repository hooks still apply: recognized dependency lockfile basenames are
+exempt from the 2,000-physical-line cap; other text remains capped. See
+`../../.githooks/README.md` for the exact names. Native macOS compilation,
 filesystem/crash tests and both products' real integration are outstanding gates.
 
 Tests that construct finalizer proofs need a synthetic `TMPDIR` with trusted

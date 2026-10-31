@@ -14,7 +14,14 @@ Git does not install hooks automatically when cloning or pulling.
 regular text files in the **index**, not unstaged working-tree contents. The
 maximum is **2,000 physical lines**, including comments and blank lines; an
 unterminated final line counts. Files at exactly 2,000 lines pass. There are no
-extension exemptions, including for documentation, generated text or lockfiles.
+extension exemptions for source, documentation or ordinary generated text.
+Recognized dependency lockfile **basenames** are exempt at any nesting depth:
+`Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`,
+`pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `uv.lock`, `poetry.lock`,
+`Pipfile.lock`, `composer.lock`, `Gemfile.lock` and `go.sum`.
+These generated dependency graphs are not human-maintained code; their contents
+may change without a line cap. Matching is exact and case-sensitive, not `*.lock`:
+runtime locks, manifests, config, backups and near-matches remain capped.
 Files containing a NUL byte in their first 8,000 bytes are treated as binary;
 symlinks and submodules are skipped. Unchanged oversized files do not block
 unrelated commits, but editing or renaming one requires bringing it within the

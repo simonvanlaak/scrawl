@@ -9,6 +9,11 @@ import unittest
 
 
 HOOK = Path(__file__).resolve().parents[1] / ".githooks" / "pre-commit"
+LOCKFILES = (
+    "Cargo.lock", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
+    "pnpm-lock.yaml", "bun.lock", "bun.lockb", "uv.lock", "poetry.lock",
+    "Pipfile.lock", "composer.lock", "Gemfile.lock", "go.sum",
+)
 
 
 class PreCommitLineLimitTests(unittest.TestCase):
@@ -55,6 +60,45 @@ class PreCommitLineLimitTests(unittest.TestCase):
     def test_accepts_exactly_2000_lines(self):
         self.stage("limit.rs", b"code\n" * 2000)
         self.assertEqual(self.commit().returncode, 0)
+
+    def test_dependency_lockfiles_allow_root_nested_and_changed_contents(self):
+        for prefix in ("", "nested/deep/"):
+            for name in LOCKFILES:
+                with self.subTest(path=prefix + name):
+                    path = prefix + name
+                    (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+                    self.stage(path, b"dependency\n" * 2001)
+                    result = self.commit()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.stage(path, b"updated dependency\n" * 2002)
+                    result = self.commit()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_lockfile_near_matches_and_ordinary_generated_text_stay_capped(self):
+        for name in ("app.lock", "runtime.lock", "cargo.lock", "Cargo.lock.rs",
+                     "not-Cargo.lock", "Cargo.lock.backup", "package.json",
+                     "config.json", "generated.rs", "go.mod"):
+            with self.subTest(name=name):
+                self.stage(name, b"text\n" * 2001)
+                result = self.commit()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(name, result.stderr)
+                self.git("rm", "-f", "--", name)
+
+    def test_lockfile_rename_to_source_is_checked(self):
+        self.stage("Cargo.lock", b"dependency\n" * 2001)
+        result = self.commit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.git("mv", "Cargo.lock", "source.rs")
+        self.assertNotEqual(self.commit().returncode, 0)
+
+    def test_lockfile_exception_does_not_hide_oversized_staged_source(self):
+        self.stage("Cargo.lock", b"dependency\n" * 2001)
+        self.stage("source.rs", b"source\n" * 2001)
+        (self.repo / "source.rs").write_bytes(b"small\n")
+        result = self.commit()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("source.rs", result.stderr)
 
     def test_counts_unterminated_final_line(self):
         self.stage("tail.txt", b"line\n" * 2000 + b"tail")

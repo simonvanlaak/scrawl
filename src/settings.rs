@@ -3162,7 +3162,9 @@ mod tests {
         );
         let row = panel.view(&host).command_line;
         assert_eq!(row.button, Some("uninstall"));
-        assert_eq!(row.path.as_deref(), Some(link.to_str().unwrap()));
+        // The row displays a home-relative path when TMPDIR is below HOME too.
+        // Verify the installed target above, and the presentation contract here.
+        assert_eq!(row.path, Some(crate::command_line::tilde(&link)));
         // Not Homebrew's or /usr/local's bin, so it may not be on PATH.
         assert!(row.caption.contains("to your PATH"), "{}", row.caption);
         assert!(!row.error);

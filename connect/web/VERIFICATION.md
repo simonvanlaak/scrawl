@@ -67,3 +67,44 @@ checked; no shared runtime delta needed reconciliation. Use the README's thin
 artifact contract for composition and route mapping. Remove legacy wiring only
 after the exact composed artifact passes. Deployment, feature-map changes,
 live OAuth/callback/cookie/CORS verification and release remain integration work.
+
+## Composed integration checkpoint (2026-10-31)
+
+The extraction record above is historical. Integration adopted `a5134f5e` as
+`303f5ccd` and `6123548ed5616683725a6723337fa147ab3418d9` as `b5f97635`, with
+cherry-pick attribution. `0af67331` then composed independent route SSR/assets
+into the allowlisted marketing package and removed `site/src/hosted` after
+comparison. Marketing and the service stay in their existing directories.
+
+- Frozen dependency installs retain marketing Bun 1.3.10 and Connect Bun 1.4.4;
+  no lock, Cargo, helper or Rust changes. Original independent `npm test` passed:
+  typecheck/build, 3 artifact cases and 32 synthetic browser scenarios.
+- The actual composed artifact passed the original site's 29 browser scenarios
+  and all 32 independent Connect browser scenarios against the loopback API.
+  All four SSR route files are byte-identical to independent Connect output.
+- Of 65 legacy/composed screenshot pairs, 64 are pixel-identical. The remaining
+  `upload-approval-pending.png` differs only in the generated expiry timestamp
+  region `[52, 664, 92, 674]`. Desktop/setup/approval screenshots and the composed
+  device page were inspected visually, including the T3 collaborative preview.
+- Genuine RED/GREEN covers composition, privacy/collisions, production-owner
+  removal and CD wiring. A follow-up RED found that identical parent module
+  bytes could conceal unequal transitive dependencies across the two builds;
+  the packager now traverses each source's dependency closure independently.
+- Full unchanged service suite: 52 pass. Hook Python suite: 22 pass. CD suite:
+  15 pass. Public/composition suites: 23 pass before the additional dependency
+  collision regression (four composition fixture cases now pass).
+- Both adoption and composition pushes ran the unchanged pre-push hook's own
+  offline Rust build/full tests: 664 pass, 3 ignored. These are Linux compile/
+  unit results, not Mac or native GUI acceptance.
+
+Evidence: `/srv/clanker-hermes/cache/scratch/connect-integration-evidence/`.
+Relevant logs: `extraction-3.log`, `legacy.log`, `composition-red.log`,
+`composition-green.log`, `boundary-red.log`, `cd-red.log`, `closure-red.log`,
+`closure-green.log`, `final-cross.log`, `final-32.log`, `service.log`, `hooks.log`,
+`delivery.log`, `push-adoption.log`, `push-composition.log`; browser receipts are
+under `extracted-browser/`, `legacy-browser/`, `final-composed-browser/` and
+`final-composed-32/`. `pixel-parity.json` records the complete comparison.
+
+Final independent auth/privacy review belongs to the parent coordinator on the
+frozen integrated SHA. No deployment, live OAuth, native transfer, live config
+change or release was performed or is required to prove folder byte equivalence.

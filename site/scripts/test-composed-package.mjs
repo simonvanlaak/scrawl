@@ -61,3 +61,12 @@ test('missing route, changed shared asset, or unsafe route dependencies fail clo
     assert.notEqual(f.run().status, 0, change)
   }
 })
+
+test('identical shared modules still validate each product dependency closure', t => {
+  const f = fixture(t)
+  for (const root of [f.dist, f.connect]) f.put(root, 'assets/marketing-123.js', 'import "/assets/child-123.js"')
+  f.put(f.dist, 'assets/child-123.js', 'marketing child')
+  f.put(f.connect, 'assets/child-123.js', 'different child')
+  f.put(f.connect, 'assets/connect-123.js', 'import "/assets/marketing-123.js"')
+  assert.notEqual(f.run().status, 0, 'equal parent bytes must not conceal unequal dependencies')
+})

@@ -4,13 +4,13 @@
 
 **Goal:** Deliver one recording engine used by independently installable Agent and Desktop clients, separate Connect and Public products, and thin native/UI adapters without changing existing identity or consent contracts.
 
-**Architecture:** `capture/engine` owns local recording, processing, bundles, recovery and retention. `capture/{desktop,agent}` own their workflows; `connect/` owns service/browser/client transfer; `public/` owns marketing/brand; `platform/` owns only OS mechanisms; `ui/` owns only shared primitives/tokens. Move working behavior in tested increments, not empty directory scaffolds.
+**Architecture:** `capture/engine` owns local recording, processing, bundles, recovery and retention. `capture/{desktop,agent}` own their workflows; `connect/` owns service/web/client transfer; `public/` is the later marketing/brand destination (marketing remains in `site/` now). `platform/ui` owns only shared UI primitives/tokens and their thin mechanisms. Capture OS adapters stay inside the relevant capture capability; a global platform directory must not absorb capture policy. Move working behavior in tested increments, not empty directory scaffolds.
 
 **Tech stack verified:** Root is one Rust 2024 binary crate (not a Cargo workspace), GPUI 0.2.2; macOS also uses Swift/AppKit/Metal. Linux uses X11/XWayland GPUI, GStreamer, portals and compositor adapters. `site/` is React 19.3/TypeScript/Vite 8, with no shadcn/Radix dependency today. `hosted/` is strict TypeScript, esbuild, Cloudflare Worker/D1/R2, Miniflare tests. React/TypeScript with shadcn/Radix is the proposed Desktop UI, not an existing implementation or chosen native host.
 
 ## 0. Frozen foundation and ownership
 
-- Foundation owner may edit **only this file**, plus branch setup. No product source migration, root AGENTS changes, merge, release, installation, issue comments, user config edits or native recording in this slice.
+- Historical foundation ownership was **only this file**, plus branch setup. Current integration ownership is web composition/CI/docs and the agreed seams below; no root AGENTS, merge, release, installation, issue comments, user config edits or native recording.
 - Starting branch `t3/pull-latest-main`, SHA `416320bdefcb004dc91f8bea64b445162eb48e6d`, clean. Draft #198 owns its hook work; do not push to that branch or edit that PR.
 - Fetched `origin/main`: `dd801e420e2a810b221ca0de8571a8a5ded4ead0`. Common ancestor `1bd17ae0979da0c1394f9a991c0727ab97dd3157`; start is 1 unique commit, main 5 unique commits. Main adds Connect naming/CLI compatibility (#196/#197).
 - Dedicated branch: `integration/capture-boundaries-plan`, created here, not in another worktree. Merge checkpoint `3b95d12430d4113394ea85155163a5f8173bf8d8` has both start and fetched main as ancestors. No conflict resolutions or manual product edits.
@@ -55,32 +55,39 @@ cargo build -j 3 --offline && cargo test -j 3 --offline -- --test-threads=2
 python3 -m unittest discover -s tests
 python3 -m unittest discover -s scripts/cd -p 'test_*.py'
 (cd hosted && npm ci && npm test)
-(cd site && bun install --frozen-lockfile && APPARENT_PUBLIC_SITE=1 npm run build && node scripts/package-apparent.mjs)
+(cd site && bun install --frozen-lockfile)
+(cd connect/web && npx --yes bun@1.4.4 install --frozen-lockfile)
+(cd site && VITE_HOSTED_API_ORIGIN=https://hosted.tryapparent.com node scripts/build-public.mjs)
 git diff --check
 ```
 
-Use Bun 1.3.10 and Node 22 (workflow pins 22.23.0); never substitute a different dependency lock. Retain complete command/exit/head/log records outside git. Browser acceptance uses `site/scripts/test-hosted-browser.mjs` against synthetic local accounts and cross-origin API, not live Google or private captures. See web workflow for the exact package build environment.
+Use marketing Bun 1.3.10, Connect Bun 1.4.4 and Node 22 (workflow pins 22.23.0); never substitute a different dependency lock. Connect's generated v2 lock cannot be read by 1.3.10. Retain complete command/exit/head/log records outside git. Browser acceptance uses `site/scripts/test-hosted-browser.mjs` against synthetic local accounts and cross-origin API, not live Google or private captures. See web workflow for the exact package build environment.
 
-### Phase A — next independent jobs (parallel; no shared-file writes)
+### Phase A — source mapping already established; implement measured slices
 
-| Lane | Exclusive files it may create | Concrete first deliverable / acceptance |
-|---|---|---|
-| A1 session contract | `capture/engine/contracts/session.md`, `capture/engine/contracts/session.schema.json`, `capture/engine/tests/session_contract.py` | Specify admission/deadline/ownership/readiness/terminal receipt envelopes from actual `agent_capture` behavior; executable schema vectors for start contention, wrong ID, expired retry, restart and crash. Run `python3 capture/engine/tests/session_contract.py`; vectors alone are contract proof, not runtime acceptance. No standalone worker scaffold. |
-| A2 native host discriminator | `capture/desktop/proofs/host-matrix.md`, `capture/desktop/proofs/verify-host-proof.py` | Inventory existing native/GPUI overlay semantics and candidate hosts; verifier must reject missing native evidence for either supported OS. Define instrumented safe fixtures and thresholds relative to measured current UI before choosing host. Run verifier on intentionally incomplete evidence (must fail). No framework install or shell scaffold yet. |
-| A3 Connect separation inventory | `connect/migration/transfer-boundary.md`, `connect/migration/check-transfer-inventory.py` | Trace all service/browser/native imports, routes, storage and consent callers; executable manifest requires every current production/test/build input, including outside-package consumers. Run inventory checker against committed source; propose exact old→new paths and preserved public URLs. No edits to `hosted/`, `site/` or `src/hosted.rs`. |
-| A4 archive compatibility inventory | `capture/engine/contracts/bundle-compatibility.md`, `capture/engine/tests/bundle_inventory.py` | Enumerate actual model/recovery/export/retention consumers and synthetic historical-format cases; script validates fixture inventory and required artifacts. Include cleaned media and saved device timeline cases. Do not copy personal bundles into fixtures or logs. |
+The source table in section 1 is the mapping evidence, not a proposal for four
+new investigation-only prerequisites. Use Team Topologies outcome ownership:
+keep each product's workflow together, reduce the context an owner must hold,
+share thin contracts rather than internal policy, and ship small reversible
+slices. Routine technical choices belong to the implementer; consent, publication
+and destructive-operation gates still require their actual authority.
 
-These four jobs can be assigned to separate Luna implementers without module/manifest collisions. Their tools must run against this candidate, not another checkout. No nested agents needed for this foundation slice. Coordinator integrates each committed artifact before authorizing Phase B.
+Session/retention mapping is already in `agent_capture.rs`/`retention.rs`; config
+mapping is the existing locked transaction in `handoff.rs`; bundle consumers are
+listed above; Connect mapping is `hosted/`, `src/hosted.rs` and the now-extracted
+`connect/web/`. Add executable regressions at each changed boundary while moving
+working behavior. Native host selection still needs measured native evidence,
+but does not block the independent Connect/config/main seam extractions.
 
 ### Phase B — behavior-preserving extraction (sequential integration of parallel-owned leaves)
 
 | Lane | Exclusive existing files / destination | Acceptance and dependency |
 |---|---|---|
-| B1 config transaction | Integrator alone splits `src/handoff.rs` into ≤2000-line siblings, then assigns `capture/engine/src/config_store.rs` and its dedicated test file to one owner | Relocate existing primitive, not policy. Multiprocess lost-update/refusal/atomic failure tests preserve full unknown nested object and secret sentinel; paused Settings write cannot resurrect Connect consent. Root facade remains compatible until all callers migrate. Requires A3 lock inventory. |
-| B2 session ownership and leases | `src/agent_capture.rs`, `src/retention.rs`, `capture/engine/src/session/*`, `capture/engine/src/storage/*`, dedicated subprocess tests | Replace process-local ownership/claims with common admission and lease implementation; two real processes, owner kill, PID reuse surrogate, concurrent cleanup, restart receipt recovery and wrong-ID requests. Keep recorder unchanged in this increment; wire root call sites only through integrator. Requires A1/A4 and B1. |
-| B3 artifact processing | `src/{model,audio,keyframes,transcribe,recover,inbox}.rs`, `src/export/*`, `capture/engine/src/{bundle,processing,export}/*` | Move pure model/processing/archive code with test and fixture paths; exact semantic summary/manifest/image equivalence on synthetic bundles, failed finalization cannot publish success. Integrator pre-splits oversized `src/{autocrop,render,sketch}.rs` before assigning those separate files. Requires A4. |
-| B4 Connect service/browser | `hosted/**`, `site/src/hosted/**`, `connect/{service,browser}/**` | One production Worker and browser implementation, strict TS negative-type regression, Miniflare full suite and canonical+legacy route/SSR cross-origin browser tests. Preserve auth, scopes, quotas, budgets, grants, tombstones and public assets. Requires A3 and integrator's manifest/route wiring checkpoint. |
-| B5 Public | Remaining `site/src/**` excluding `site/src/hosted/**`, `public/**`, `assets/brand/**` | Same marketing UI/downloads, allowlisted publish package, no private pitch or capture assets. No ownership of `site/src/features.json`, `site/src/{main,entry-server}.tsx`, `site/scripts/**` during parallel work: integrator wires these. Requires A3 route map; cannot race B4's build wiring. |
+| B1 config transaction | Isolated config owner splits `src/handoff.rs` into ≤2000-line siblings under `src/handoff/**`; integration adopts the committed seam | Relocate existing primitive, not policy. Multiprocess lost-update/refusal/atomic failure tests preserve full unknown nested object and secret sentinel; paused Settings write cannot resurrect Connect consent. Root facade remains compatible until all callers migrate. Use the mapped queue → config lock order. |
+| B2 session ownership and leases | `src/agent_capture.rs`, `src/retention.rs`, `capture/engine/src/session/*`, `capture/engine/src/storage/*`, dedicated subprocess tests | Replace process-local ownership/claims with common admission and lease implementation; two real processes, owner kill, PID reuse surrogate, concurrent cleanup, restart receipt recovery and wrong-ID requests. Keep recorder unchanged in this increment; wire root call sites only through integrator. Use the existing session/archive mapping and B1 transaction seam. |
+| B3 artifact processing | `src/{model,audio,keyframes,transcribe,recover,inbox}.rs`, `src/export/*`, `capture/engine/src/{bundle,processing,export}/*` | Move pure model/processing/archive code with test and fixture paths; exact semantic summary/manifest/image equivalence on synthetic bundles, failed finalization cannot publish success. Integrator pre-splits oversized `src/{autocrop,render,sketch}.rs` before assigning those separate files. Use the mapped archive consumers, adding fixture regressions with each moved behavior. |
+| B4 Connect service/browser | `connect/web/**`, `site/src/{main,entry-server}.tsx`, `site/scripts/**`, `scripts/cd/**`, web workflow/docs; service remains `hosted/**` | Browser extraction integrated from #200 with attribution, then composed and legacy implementation removed after same-path SSR/browser/pixel parity. One production browser owner; no service move yet. Strict TS/service and synthetic canonical/legacy auth/consent checks remain required. See current integration evidence below. |
+| B5 Public | Later migration of remaining `site/src/**` to `public/**`, plus `assets/brand/**` only after assignment | Deferred: marketing stays in `site/` in this slice. Preserve UI/downloads, allowlisting and private-artifact exclusion. Integrator owns feature map, entrypoints and scripts; do not race B4 build wiring. Existing route map is in section 1 and web docs. |
 
 B2/B3 are different file sets but shared runtime integration is serialized. Do not let two workers edit `handoff`, `main`, `ui`, manifests or the same tests under different lane labels.
 
@@ -88,10 +95,10 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 
 1. Integrator owns `src/{main,ui,capture,handoff,settings,onboarding,settings_window}.rs`, `src/native/pill/model.rs`, all root manifests/module wiring, `build.rs`, feature map, `site/scripts/**`, `.github/**`, `scripts/**`, packaging and docs references. First extract each touched oversized file into cohesive ≤2000-line siblings with unchanged behavior and owning tests; publish these as small preparatory commits. Preserve inherited hook bytes. No single giant move commit.
 2. Engine owner migrates recorder orchestration into `capture/engine/src/{runtime,recording}/*`; integration owner routes existing GUI and timed record commands through it. Keep native implementation shared; compare interaction coverage rather than silently inheriting timed recorder's telemetry gap. Side-effect spies prove Engine never touches clipboard/network/onboarding; terminal bundle receipt survives a newer UI session.
-3. Native mechanics owner owns `src/capture/{macos,linux}.rs`, `src/linux/**`, relevant `helper/**` and `platform/**` only after each exact helper file is allocated. Separate recording/permission probes from UI/login/paste. Shared policy consumes capabilities. Preserve all supported Linux compositor differences; never add Windows work.
+3. Native mechanics owner owns `src/capture/{macos,linux}.rs`, `src/linux/**` and relevant `helper/**` only after each exact file is allocated. Capture adapters move within the relevant capture capability, not a global platform-policy owner. Separate recording/permission probes from UI/login/paste. Shared policy consumes capabilities. Preserve all supported Linux compositor differences; never add Windows work.
 4. Agent owner creates `capture/agent/**` only after common runtime/leases land; integrator creates package targets and dependency gates. Install Agent in an isolated home with Desktop absent, check dynamic dependency closure excludes GPUI/webview, and exercise capabilities/readiness/start/status/stop/cancel/receipt plus contention with Desktop. No automatic permission or model download, no fake ready response. CLI compatibility wrapper can remain at root.
-5. Host proof owner executes A2 matrix on native macOS and disposable Linux environments. Require transparent overlay, selective click-through, ink hit-testing, no focus theft, shortcut parity, multi-display/fractional coordinates, startup/first-frame/input latency, recording inclusion/exclusion matching current controls and privacy policy, accessibility and compositor teardown. Measure p50/p95 against current build and freeze explicit limits before comparing candidates. A host fails if any hard behavior cannot be proven; retain native overlay surface if webview cannot meet it. Do not choose Tauri/Electron/etc. from a feature list.
-6. Only after host acceptance, Desktop owner implements `capture/desktop/**` over narrow versioned native commands/events, keeping workflow there and tokens/primitives under `ui/**`. Integrator allocates remaining native UI files and removes superseded production paths only when same-path tests and native acceptance pass. Validate bounded events/backpressure, stale command rejection, reconnect and teardown. Experiments remain off by default.
+5. Host proof owner executes the native host matrix on macOS and disposable Linux environments. Require transparent overlay, selective click-through, ink hit-testing, no focus theft, shortcut parity, multi-display/fractional coordinates, startup/first-frame/input latency, recording inclusion/exclusion matching current controls and privacy policy, accessibility and compositor teardown. Measure p50/p95 against current build and freeze explicit limits before comparing candidates. A host fails if any hard behavior cannot be proven; retain native overlay surface if webview cannot meet it. Do not choose Tauri/Electron/etc. from a feature list.
+6. Only after host acceptance, Desktop owner implements `capture/desktop/**` over narrow versioned native commands/events, keeping workflow there and tokens/primitives under `platform/ui/**`. Integrator allocates remaining native UI files and removes superseded production paths only when same-path tests and native acceptance pass. Validate bounded events/backpressure, stale command rejection, reconnect and teardown. Experiments remain off by default.
 7. Integrator consolidates Connect native transfer into `connect/client/**`; Capture calls explicit authorized adapter, never owns transfer consent. Complete old→new dependency/import/CI/release/docs-reference audit, clean fresh-checkout builds, root wrapper tests and install/update compatibility. Remove dead duplicate recorders and old imports; directory shape alone is not completion.
 
 ## 4. Acceptance ledger (unchecked means NOT proved)
@@ -106,8 +113,8 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 | A1 | Fresh standalone Agent installation, no Desktop GUI runtime dependency; real lifecycle | Unrun |
 | D1 | Host discriminator native matrix and measured latency on both supported OSes | Unrun; no host chosen |
 | D2 | Complete Desktop UX, keyboard/accessibility, error/cancel/reconnect/focus/overlay behavior | Unrun |
-| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Existing service and synthetic browser baseline passed; migration unrun |
-| P1 | Public build/package/browser visual parity, URL/download compatibility, privacy-clean output | Existing build/package/public tests passed; migration unrun |
+| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Browser extraction/composition passed synthetic gates; service unchanged and full 52 pass. Final independent auth/privacy review pending; live OAuth/native transfer unrun |
+| P1 | Public build/package/browser visual parity, URL/download compatibility, privacy-clean output | Independent marketing/Connect production builds and composed public tests passed; 65 screenshot pairs compared (64 exact, one expiry timestamp). No public directory move or deployment |
 | X1 | Linux x86_64/aarch64 build/package + CPU/decoder/encoder checks; native X11 and Wayland (Hyprland/GNOME/KDE) capability/limitations accurate | Unrun platform matrix |
 | X2 | macOS supported architectures/minimum OS; Swift helper/Metal, signed identity/TCC persistence, virtual-display native flows and export | Unrun; Linux build cannot prove this |
 | R1 | Thin root wrappers, fresh dependency installs, feature map, moved CI paths, signed/install/update assets and docs references | Unrun; no merge/release authorized |
@@ -133,6 +140,37 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
 - VM launcher and platform skills inspected; no guest started or worker app replaced. Native baseline is explicitly unrun, not unavailable. This docs-only slice does not require new GUI proof.
 - Draft plan PR: https://github.com/tryapparent/apparent/pull/199, base `main`. Existing #198 remains untouched; main stayed at `dd801e42` through foundation fetch/readback. No issue comments, merge, release, app install, user preference writes or outbound messages to people.
 
+### Connect integration evidence (2026-10-31)
+
+- Source commits `a5134f5e` and `6123548ed5616683725a6723337fa147ab3418d9`
+  adopted with attribution as `303f5ccd` and `b5f97635`; composition checkpoint
+  `0af67331`. PRs #199 (integration) and #200 (source) remain separate review
+  records; neither was merged or deployed by this worker.
+- `connect/web` is the sole production browser implementation. Marketing no
+  longer imports or renders it. Existing canonical/legacy URLs and query strings
+  are retained by composing independent SSR and referenced hashed assets into
+  the existing public allowlist. Different bytes at the same asset path fail
+  before replacing the previous output; equal parent bytes must also have equal
+  transitive dependencies. Private pitch/capture/docs/feature-map output is not
+  admitted wholesale.
+- Independent Connect 3 artifact/32 browser cases; composed original 29 and
+  independent 32 browser cases; service 52; Python hook 22/CD 15; initial public
+  tests 23 passed, with the later dependency collision regression now GREEN.
+  65 visual pairs compared: 64 identical, one dynamic expiry timestamp only.
+  Full evidence and exact scope limits are in `connect/web/VERIFICATION.md`.
+- Both published checkpoints ran unmodified pre-push build/full Rust suites
+  (664 passed, 3 ignored). Auth/API code, Cargo/locks, native sources and helper
+  files are unchanged. Independent frozen-SHA auth/privacy review is the parent
+  coordinator's remaining gate. Live OAuth, native transfer and external
+  deployment remain unrun, not fabricated prerequisites for byte equivalence.
+
 ### Coordinator handoff / next dispatch
 
-Dispatch **A1–A4** from the final published checkpoint with the exact file boundaries above. Gate B1 on the inspected config primitive rather than creating another settings abstraction; gate Desktop implementation on the native host discriminator. Outstanding blockers are acceptance dependencies, not failed baselines: unchosen host, no standalone Agent runtime, process-local current ownership/leases, native platform matrix still unrun, and oversized lock/source files constraining dependency edits. Before integration of concurrent PRs (#181/#185/#191/#192 and capture fixes), inspect their actual changed behavior and refresh affected proof; their open status is not permission to fold them into this plan.
+Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration
+writer owns this shared branch. Isolated main seam ownership is `src/main.rs`,
+`src/bundle_pipeline/**`, `src/cli_dispatch/**`; isolated config seam ownership is
+`src/handoff.rs`, `src/handoff/**`. Do not edit across those boundaries. Adopt
+their committed, tested slices serially; no Cargo/build/helper churn. Outstanding
+acceptance dependencies remain: unchosen native host, no standalone Agent runtime,
+process-local ownership/leases, native platform matrix and oversized source/lock
+constraints. Other open PRs are not permission to fold unrelated features here.

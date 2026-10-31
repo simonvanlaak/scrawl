@@ -20,6 +20,7 @@ if (html.includes("https://apparent.kitlangton.com/") || html.includes("kitlangt
 // Validate the entire selected file set before replacing the previous package.
 // Never copy either build wholesale, including its unreferenced hashed assets.
 const files = new Map()
+const visited = new Set()
 function add(root, name) {
   const parts = name.split("/")
   if (parts.some(p => !p || p === "." || p === ".." || !/^[\w.-]+$/.test(p))) throw new Error(`Unsafe package path: ${name}`)
@@ -35,8 +36,10 @@ function add(root, name) {
   const bytes = readFileSync(path)
   if (files.has(name)) {
     if (!files.get(name).equals(bytes)) throw new Error(`Asset name collision: ${name}`)
-    return
   }
+  const key = `${root}:${name}`
+  if (visited.has(key)) return
+  visited.add(key)
   files.set(name, bytes)
   if (/\.(html|js|css)$/.test(name)) {
     const source = bytes.toString("utf8")

@@ -2,6 +2,8 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, join, relative } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 const [baselineArg, candidateArg, manifestArg] = process.argv.slice(2)
 if (!baselineArg || !candidateArg || !manifestArg) throw Error('Usage: node scripts/package-feature-grid.mjs BASELINE NEW_CANDIDATE PRIVATE_MANIFEST')
 const baseline = resolve(baselineArg), candidate = resolve(candidateArg), manifest = resolve(manifestArg)
@@ -18,7 +20,14 @@ function inventory(root) {
   walk(root); return files
 }
 const original = readFileSync(join(baseline, 'index.html'), 'utf8')
-if (!original.includes('pond-demo') || !original.includes('app.tryapparent.com')) throw Error('Unexpected or already-overlaid baseline')
+// Python 3 supplies a standard-library HTML parser; never infer identity from
+// arbitrary text, comments, scripts, or an unparsed URL substring.
+const parsed = spawnSync('python3', [fileURLToPath(new URL('./feature-grid-baseline.py', import.meta.url))], { input: original, encoding: 'utf8' })
+if (parsed.error || parsed.status !== 0) throw Error('Baseline HTML parsing requires Python 3', { cause: parsed.error })
+const { canonicals, demo } = JSON.parse(parsed.stdout)
+let homepage
+try { if (canonicals.length === 1 && typeof canonicals[0] === 'string') homepage = new URL(canonicals[0]) } catch {}
+if (!demo || !homepage || homepage.protocol !== 'https:' || homepage.hostname !== 'app.tryapparent.com' || homepage.port !== '' || homepage.username !== '' || homepage.password !== '' || homepage.pathname !== '/' || homepage.search !== '' || homepage.hash !== '') throw Error('Unexpected or already-overlaid baseline')
 const before = inventory(baseline)
 cpSync(baseline, candidate, { recursive: true })
 let html = original.replace(/<script type="module" src="\/assets\/feature-grid-overlay-[a-f0-9]+\.js"><\/script>/g, '').replace(/<link rel="stylesheet" href="\/assets\/feature-grid-overlay-[a-f0-9]+\.css">/g, '')

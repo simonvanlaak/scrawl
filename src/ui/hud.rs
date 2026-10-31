@@ -1148,4 +1148,3 @@ pub(super) fn camera_cursor_badge(x: f32, y: f32) -> Div {
                 ),
         )
 }
-

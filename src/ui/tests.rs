@@ -767,4 +767,3 @@ pub(super) fn clock_template_is_width_stable() {
         "Saved · review · No audio"
     );
 }
-

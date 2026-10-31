@@ -1079,38 +1079,23 @@ mod tests;
 pub use hud::HudPillWindow;
 #[cfg(target_os = "linux")]
 use hud::InputEqualizer;
+#[cfg(test)]
 use hud::SwitchLayout;
-use hud::island_lead;
-use hud::island_lead_base;
-use hud::island_divider;
-use hud::hud_chip;
-use hud::pill_chip;
-use hud::primary_chip;
-use hud::icon_circle_chip;
-use hud::mode_segment;
-use hud::mix_rgb;
-use hud::mode_segment_level;
 use hud::camera_cursor_badge;
 pub use picker::TargetPickerWindow;
+#[cfg(test)]
 use picker::BADGE_H;
-use picker::BADGE_PX;
-use picker::BADGE_TEXT;
 use picker::BADGE_GAP;
 use picker::BADGE_MARGIN;
 use picker::BadgeAnchor;
 use picker::MIN_AREA_SIDE;
 pub use review::BundleReviewWindow;
-use review::sidebar_heading;
+#[cfg(test)]
 use review::split_timeline_line;
-use review::timeline_row;
-use review::tab_chip;
-use review::button_base;
-use review::action_button;
-use review::hint_button;
 #[cfg(any(test, target_os = "macos"))]
 use window_host::restore_picker_exclusion;
 use window_host::open_picker_windows;
-use window_host::restack_soon;
+
 use window_host::ensure_hud_pill_open;
 use window_host::close_picker_window;
 use window_host::close_capture_windows;

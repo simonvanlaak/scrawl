@@ -187,4 +187,3 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ApparentBu
         SourceExtras::default(),
     )
 }
-

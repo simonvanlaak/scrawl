@@ -108,8 +108,8 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 | F0 | Ancestry, isolated branch, hook unchanged, owned plan, committed/pushed/read-back PR | Plan checkpoint published as draft #199; final evidence commit readback belongs to handoff |
 | E1 | One recorder/finalizer used by GUI and Agent; no engine caller effects | Unrun |
 | E2 | Real multiprocess contention, restart receipts, crash recovery, retention leases | Unrun |
-| E3 | One policy-free config transaction; nested/secret preservation and consent races | Existing primitive found; extraction unrun |
-| E4 | Synthetic old bundles, cleaned media, device timelines, export/reprocess/read/zoom parity | Unrun |
+| E3 | One policy-free config transaction; nested/secret preservation and consent races | In-crate policy-free storage seam integrated; donor storage/subprocess and inherited consent tests pass on combined Linux candidate. Config donor independently approved; combined review and macOS proof pending. Not a separate package |
+| E4 | Synthetic old bundles, cleaned media, device timelines, export/reprocess/read/zoom parity | Shared in-crate bundle production seam integrated with root aliases preserved; 10 focused pipeline tests and synthetic demo pass. Donor artifact equivalence retained; complete archive/export/native matrix unrun |
 | A1 | Fresh standalone Agent installation, no Desktop GUI runtime dependency; real lifecycle | Unrun |
 | D1 | Host discriminator native matrix and measured latency on both supported OSes | Unrun; no host chosen |
 | D2 | Complete Desktop UX, keyboard/accessibility, error/cancel/reconnect/focus/overlay behavior | Unrun |
@@ -163,6 +163,57 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   files are unchanged. Independent frozen-SHA auth/privacy review is the parent
   coordinator's remaining gate. Live OAuth, native transfer and external
   deployment remain unrun, not fabricated prerequisites for byte equivalence.
+
+### Config and bundle pipeline integration evidence (2026-10-31)
+
+- Starting identity: clean `integration/capture-boundaries-plan` at
+  `cd5aa9ec315b10d3ec02e65b39c750d9d6b916e9`. Adopted config commits
+  `8b623318`, `cc345856`, `552e9e87`, `43bececa`, then pipeline commits
+  `3239708b`, `fd4681d9`, `8262e72e`, all serially with `cherry-pick -x`.
+  The older foundation document commit `415c43fe` was not imported.
+- Combined code checkpoint: `7ccf30ed6fbc0cbc46123e62c037dbc6d0ad79ce`, tree
+  `030289ffa93725ef7261853cb07599094582e9d1`. All eight `handoff` files match
+  config donor `43bececabc8d31551a72df7ca8cdb7de0d7f7189` exactly; `main.rs`
+  and all three pipeline files match donor `8262e72e09100a9be14ac348efa05c0ab22088f9`
+  exactly. No semantic reconciliation was needed. Every other baseline tracked
+  path was byte-identical before this ledger update, including all Connect/web,
+  hook, manifest/lock, build, helper and CI artifacts. This document is the sole
+  intentional exception afterward. Changed text files remain below 2000 lines.
+- Private combined evidence: `/srv/clanker-hermes/cache/scratch/capture-seams-integration/`.
+  `01-checkpoint-push.log` records the unmodified pre-push hook's fresh
+  `cargo build -j 3 --offline` and full
+  `cargo test -j 3 --offline -- --test-threads=2`: **671 passed, 3 ignored**,
+  zero failures, plus 10 passing hook-guard tests. Linux has no `taskpolicy`.
+  `02-focused.log` records nonempty filters: `handoff::` **40/1 ignored**,
+  `config` **36**, `hosted::` **31**, `feature_map` **2**, `bundle_pipeline::`
+  **10** passed. Nested child summaries are not added to the parent totals.
+  Receipts retain commands, exits, source tree identities and log SHA-256 hashes.
+- Source-based feature audit reviewed: it still finds `handoff::Config` in the
+  facade and literal experiment constants; both compiled scanner tests pass.
+  `git diff --check` passes. Scoped file-based rustfmt checks pass on all eight
+  config files and pipeline demo; `main.rs`, pipeline `mod.rs` and `tests.rs`
+  retain donor formatting drift. Exact donor/candidate formatter diagnostics
+  match for each file (`format-baseline-file-checks.json`). The failing scoped
+  invocation remains recorded, not presented as green. No formatting repair was
+  mixed into the reviewed bytes. An initial stdin-only rustfmt probe did not
+  diagnose file drift and was superseded by the actual file-based comparison.
+- Fresh synthetic `apparent demo --out <private-evidence>/synthetic.apparent`
+  succeeds with the rebuilt binary; summary, manifest, contact sheet and both
+  frames were inspected. Number chips, click mark and red ink are present. This
+  fixture contains authored transcript and no recorded audio/movie, so its
+  no-microphone warning is expected; it is not real capture or native proof.
+  Existing config donor evidence (full 671/3, standalone storage harness 8) and
+  pipeline donor artifact comparisons retain their original identities and are
+  not claimed as freshly rerun independent/native acceptance here.
+- Config donor's independent Luna review was APPROVED without blockers. Its
+  nonblocking follow-up is to bound the child `.status()` wait in
+  `config_path_override_is_process_local`; reviewed bytes are unchanged here.
+  No nested reviewer was spawned. Coordinator still owns independent review of
+  this combined candidate and the frozen Connect changes, macOS/native proof,
+  standalone Engine/Agent, cross-process admission/receipts/leases and web
+  Desktop host selection/implementation. These in-crate seams do not complete
+  the refactor. Draft #199 stays draft; no merge, deployment, installation,
+  live config change, real-screen capture or outbound delivery was performed.
 
 ### Coordinator handoff / next dispatch
 

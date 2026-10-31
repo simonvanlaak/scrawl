@@ -19,6 +19,11 @@ use crate::model::{
     Stroke, TargetFrame, TargetInfo,
 };
 
+mod reader;
+#[cfg(test)]
+#[path = "phone/tests.rs"]
+pub(crate) mod teardown_tests;
+
 /// Keyframes are decoded from the native video and fit to this long edge (736×1600 for a
 /// 1320×2868 phone): every UI point stays resolvable, and agents downsample anything larger.
 pub const PHONE_FRAME_EDGE: u32 = 1600;
@@ -47,6 +52,7 @@ pub struct PhoneSession {
     reader: Option<JoinHandle<()>>,
     state: Arc<Mutex<MirrorState>>,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    end_identity: Arc<()>,
     started_at: Instant,
     session_epoch_ms: u64,
     /// Held while the mirror records (not while it only previews).
@@ -167,88 +173,11 @@ impl PhoneSession {
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let reader_state = Arc::clone(&state);
         let reader_cancelled = Arc::clone(&cancelled);
+        let end_identity = Arc::new(());
+        let reader_identity = Arc::clone(&end_identity);
         let reader = std::thread::Builder::new()
             .name("apparent-phone".into())
-            .spawn(move || {
-                for line in BufReader::new(stdout).lines() {
-                    let Ok(line) = line else { break };
-                    let Ok(event) = serde_json::from_str::<MirrorEvent>(&line) else {
-                        continue;
-                    };
-                    let mut state = reader_state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    match event {
-                        MirrorEvent::Device(device) => {
-                            state.device = Some(device);
-                        }
-                        MirrorEvent::Rect {
-                            x,
-                            y,
-                            width,
-                            height,
-                        } => {
-                            let rect = [x as f32, y as f32, width as f32, height as f32];
-                            state.rect = Some(rect);
-                            if let Some(telemetry) = &telemetry {
-                                *telemetry
-                                    .target_frame
-                                    .lock()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                                    TargetFrame {
-                                        x,
-                                        y,
-                                        width,
-                                        height,
-                                        scale: 2.0,
-                                    };
-                                if telemetry
-                                    .selecting
-                                    .load(std::sync::atomic::Ordering::Acquire)
-                                {
-                                    telemetry.set_picker_rect(Some((rect, 3)));
-                                }
-                            }
-                        }
-                        MirrorEvent::Recording { started_at } => {
-                            state.recording_epoch_ms = Some(started_at);
-                            state.recording_instant = Some(Instant::now());
-                            if let Some(telemetry) = &telemetry {
-                                telemetry
-                                    .active
-                                    .store(true, std::sync::atomic::Ordering::Release);
-                            }
-                        }
-                        MirrorEvent::Marker { at } => state.markers_epoch_ms.push(at),
-                        MirrorEvent::Finished { path, duration_ms } => {
-                            state.finished = Some((path, duration_ms));
-                            state.ended = true;
-                        }
-                        MirrorEvent::Cancelled => {
-                            state.ended = true;
-                        }
-                        MirrorEvent::Warning { message } => {
-                            apparent_log(format!("iPhone mirror: {message}"));
-                        }
-                        MirrorEvent::Error { message } => {
-                            apparent_log(format!("iPhone mirror: {message}"));
-                            state.error = Some(message);
-                            state.ended = true;
-                        }
-                    }
-                }
-                reader_state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .ended = true;
-                // The helper ended; if Apparent didn't ask (phone unplugged, no phone, denied),
-                // let the app finish or cancel the capture.
-                if !reader_cancelled.load(std::sync::atomic::Ordering::Acquire)
-                    && let Some(telemetry) = &telemetry
-                {
-                    let _ = telemetry.ui_sender.try_send(LiveOverlayEvent::PhoneEnded);
-                }
-            })
+            .spawn(move || reader::read_events(BufReader::new(stdout), reader_state, reader_cancelled, reader_identity, telemetry))
             .context("Could not watch the iPhone mirror")?;
         Ok(Self {
             child: Some(child),
@@ -256,6 +185,7 @@ impl PhoneSession {
             reader: Some(reader),
             state,
             cancelled,
+            end_identity,
             started_at: Instant::now(),
             session_epoch_ms,
             busy: recording,
@@ -303,6 +233,11 @@ impl PhoneSession {
     pub fn has_recording(&self) -> bool {
         let state = self.lock();
         state.recording_epoch_ms.is_some() || state.finished.is_some()
+    }
+
+    /// Match a queued notification to this mirror, not whichever capture is current.
+    pub(crate) fn matches_end(&self, identity: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.end_identity, identity)
     }
 
     /// Whether the helper process has finished, cancelled, or exited with an error.
@@ -370,10 +305,23 @@ impl PhoneSession {
     }
 
     /// Stops recording and waits for the helper to finalize the movie.
-    pub fn stop(mut self) -> Result<PhoneRecording> {
+    pub fn stop(self) -> Result<PhoneRecording> {
+        self.stop_with_readiness().0
+    }
+
+    /// Returns the producer's real acknowledgement alongside its teardown result.
+    pub fn stop_with_readiness(mut self) -> (Result<PhoneRecording>, bool) {
+        // Suppress before issuing stop: EOF can otherwise enqueue an unsolicited
+        // notification while this synchronous shutdown is joining the reader.
+        self.cancelled.store(true, std::sync::atomic::Ordering::Release);
         self.send("stop");
         self.wait(Duration::from_secs(15));
+        let frame_seen = self.has_recording();
         let state = std::mem::take(&mut *self.lock());
+        (Self::recording_from_state(state, self.session_epoch_ms), frame_seen)
+    }
+
+    fn recording_from_state(state: MirrorState, session_epoch_ms: u64) -> Result<PhoneRecording> {
         let Some((movie, _)) = state.finished else {
             bail!(
                 "{}",
@@ -383,11 +331,11 @@ impl PhoneSession {
             );
         };
         let device = state.device.context("No iPhone was attached")?;
-        let started = state.recording_epoch_ms.unwrap_or(self.session_epoch_ms);
+        let started = state.recording_epoch_ms.unwrap_or(session_epoch_ms);
         Ok(PhoneRecording {
             movie,
             device,
-            offset_ms: started.saturating_sub(self.session_epoch_ms),
+            offset_ms: started.saturating_sub(session_epoch_ms),
             flags: state
                 .markers_epoch_ms
                 .iter()

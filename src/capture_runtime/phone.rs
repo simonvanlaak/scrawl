@@ -12,6 +12,12 @@ impl Phone {
     pub fn stop(mut self) -> Result<PhoneRecording> {
         self.0.take().expect("live phone session").stop()
     }
+    pub fn stop_with_readiness(mut self) -> (Result<PhoneRecording>, bool) {
+        self.0
+            .take()
+            .expect("live phone session")
+            .stop_with_readiness()
+    }
 }
 impl Deref for Phone {
     type Target = PhoneSession;

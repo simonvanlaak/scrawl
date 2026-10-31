@@ -274,7 +274,12 @@ impl ScreenCaptureSession {
                     .is_none_or(JoinHandle::is_finished))
     }
 
-    pub fn stop(mut self) -> ScreenRecording {
+    pub fn stop(self) -> ScreenRecording {
+        self.stop_with_readiness().0
+    }
+
+    /// Readiness is distinct from candidates, which can be synthetic fallbacks.
+    pub fn stop_with_readiness(mut self) -> (ScreenRecording, bool) {
         let duration_ms = self.elapsed_ms();
         self.stopping.store(true, Ordering::Release);
         let video_path = self
@@ -285,6 +290,9 @@ impl ScreenCaptureSession {
                 handle.join().ok()
             })
             .flatten();
+        // The first real sample may have been in flight when Stop was requested.
+        // Both OS samplers update this flag before exiting; only join seals it.
+        let frame_seen = self.has_frames();
         let buffer = std::mem::replace(
             &mut *self
                 .frames
@@ -295,12 +303,15 @@ impl ScreenCaptureSession {
         let collected = buffer.into_frames();
         let valid_video =
             video_path.filter(|path| path.exists() && path.metadata().is_ok_and(|m| m.len() > 0));
-        ScreenRecording {
-            frames: collected,
-            video: valid_video,
-            duration_ms: duration_ms.max(100),
-            video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
-        }
+        (
+            ScreenRecording {
+                frames: collected,
+                video: valid_video,
+                duration_ms: duration_ms.max(100),
+                video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
+            },
+            frame_seen,
+        )
     }
 }
 

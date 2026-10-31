@@ -870,7 +870,9 @@ fn main() -> Result<()> {
             }
             if session.has_recording() { ownership.observed_frame()?; }
             drop(playback);
-            let recording = session.stop()?;
+            let (recording, frame_seen) = session.stop_with_readiness();
+            let recording = recording?;
+            if frame_seen { ownership.observed_frame()?; }
             ownership.processing()?;
             let (_dir, _bundle, summary) =
                 ownership.publish(|| phone::finalize_live_capture(&bundle_dir, recording, Vec::new(), Vec::new(), note))?;
@@ -921,11 +923,12 @@ fn main() -> Result<()> {
             }
             if session.has_frames() { ownership.observed_frame()?; }
             drop(playback);
-            let recording = session.stop();
+            let (recording, frame_seen) = session.stop_with_readiness();
             let activity = window_log
                 .map(windows::WindowLogger::stop)
                 .unwrap_or_default();
             let recorded_audio = audio.and_then(|a| a.stop().ok());
+            if frame_seen { ownership.observed_frame()?; }
             ownership.processing()?;
             let (_dir, _bundle, summary) = ownership.publish(|| finalize_capture_bundle(
                 &bundle_dir,

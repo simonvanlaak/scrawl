@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn review40_queued_phone_end_is_bound_to_original_preview_or_recording() {
+    use crate::phone::teardown_tests::{end_unexpectedly, session_after_command};
+    for recording_b in [false, true] {
+        let (sender, receiver) = flume::unbounded();
+        // A ended before cancellation could suppress its already queued event.
+        let a = end_unexpectedly(session_after_command(sender.clone(), false));
+        a.cancel();
+        let mut coord = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender.clone()), None);
+        let b = end_unexpectedly(session_after_command(sender, false));
+        if recording_b {
+            coord.active_recording = Some(ActiveRecording {
+                started: Instant::now(),
+                target: crate::phone::phone_target("Synthetic B", None, None, 16, 16),
+                bundle_dir: PathBuf::new(),
+                source: CaptureSource::Phone(crate::capture_runtime::Phone::new(b)),
+                ownership: None, _metal_overlay: None,
+            });
+        } else {
+            coord.iphone_preview = Some(b);
+        }
+        let LiveOverlayEvent::PhoneEnded(a_identity) = receiver.try_recv().unwrap() else { panic!("missing real A notification") };
+        let LiveOverlayEvent::PhoneEnded(b_identity) = receiver.try_recv().unwrap() else { panic!("missing real B notification") };
+        assert!(!coord.accepts_phone_end(&a_identity), "A must not terminate B (recording={recording_b})");
+        assert!(coord.accepts_phone_end(&b_identity), "B's genuine unexpected end still works");
+    }
+}
+
+#[test]
 fn real_owned_finalizer_checks_whiteboard_before_engine_and_legacy_success() {
     use apparent_capture_engine::Status;
     for corrupt in [false, true] {

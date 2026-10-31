@@ -201,22 +201,32 @@ impl Store {
         // Refuse a symlink, unsafe file or hardlink instead of replacing it silently.
         let _ = self.read(key)?;
         let tmp = format!("tmp-{}", crate::identity::random_hex(16)?);
-        let mut f = self.file(&tmp, true)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
         let (from, to) = (name(&tmp)?, name(key)?);
-        // SAFETY: leaf names in the same pinned directory. Never moves lock files.
-        let rc = unsafe {
-            libc::renameat(
-                self.dir.as_raw_fd(),
-                from.as_ptr(),
-                self.dir.as_raw_fd(),
-                to.as_ptr(),
-            )
-        };
-        if rc != 0 {
-            return Err(io::Error::last_os_error());
+        let mut f = self.file(&tmp, true)?;
+        let result = (|| {
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            // SAFETY: leaf names in the same pinned directory. Never moves lock files.
+            let rc = unsafe {
+                libc::renameat(
+                    self.dir.as_raw_fd(),
+                    from.as_ptr(),
+                    self.dir.as_raw_fd(),
+                    to.as_ptr(),
+                )
+            };
+            if rc != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            self.dir.sync_all()
+        })();
+        if result.is_err() {
+            // Best-effort cleanup of our exclusive temporary leaf. After rename
+            // it is absent: never unlink the published record or any lock anchor.
+            // Preserve the original publication error even if cleanup also fails.
+            unsafe { libc::unlinkat(self.dir.as_raw_fd(), from.as_ptr(), 0) };
+            let _ = self.dir.sync_all();
         }
-        self.dir.sync_all()
+        result
     }
 }

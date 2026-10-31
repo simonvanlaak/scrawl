@@ -16,6 +16,15 @@ function documentBase(element) {
   return !url || ["data:", "javascript:"].includes(url.protocol) ? new URL(publicSite) : url
 }
 
+function firstDocumentBase(node) {
+  if (node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) return node
+  // Only document children: template content is a separate inert fragment.
+  for (const child of node.childNodes ?? []) {
+    const base = firstDocumentBase(child)
+    if (base) return base
+  }
+}
+
 function isUpstream(url) {
   if (!url || !["http:", "https:"].includes(url.protocol)) return false
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "")
@@ -57,14 +66,14 @@ function refreshDestination(content) {
 export function hasUpstreamLinks(html) {
   const document = parse(html, { sourceCodeLocationInfo: true })
   const elements = []
-  const activeElements = []
+  const inertElements = new Set()
   let baseElement
   let visibleText = ""
   function visit(node, inert = false) {
     if (["script", "style"].includes(node.tagName)) return
     if (node.attrs) {
       elements.push(node)
-      if (!inert) activeElements.push(node)
+      if (inert) inertElements.add(node)
     }
     if (!inert && !baseElement && node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) baseElement = node
     if (node.nodeName === "#text") visibleText += node.value
@@ -76,22 +85,21 @@ export function hasUpstreamLinks(html) {
   }
   visit(document)
   const base = documentBase(baseElement)
-  const refreshBases = new Map()
-  let insertedBase
-  // Refresh URLs are resolved when their tags are processed, unlike links
-  // which use the final document base. Source order also survives tree repair.
-  activeElements.sort((a, b) => (a.sourceCodeLocation?.startOffset ?? Infinity) - (b.sourceCodeLocation?.startOffset ?? Infinity))
-  for (const node of activeElements) {
-    if (!insertedBase && node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) insertedBase = node
-    if (node.namespaceURI === htmlNamespace && node.tagName === "meta") refreshBases.set(node, documentBase(insertedBase))
-  }
   for (const node of elements) {
     if (node.namespaceURI === htmlNamespace && node.tagName === "meta" && node.attrs.some((attr) => attr.name === "http-equiv" && attr.value.toLowerCase() === "refresh")) {
       const content = node.attrs.find((attr) => attr.name === "content")?.value ?? ""
       const destination = refreshDestination(content)
       // Inert template refreshes are checked conservatively against the final
       // base, as they have no active parser-processing point yet.
-      if (destination !== null && isUpstream(parsedURL(destination, refreshBases.get(node) ?? base))) return true
+      if (destination !== null) {
+        // Parse just the document available when this tag is processed. Let
+        // HTML tree repair select its first base; source order is insufficient
+        // under table foster parenting, and later bases must not affect it.
+        const refreshBase = inertElements.has(node) ? base : documentBase(firstDocumentBase(
+          parse(html.slice(0, node.sourceCodeLocation.startTag.endOffset)),
+        ))
+        if (isUpstream(parsedURL(destination, refreshBase))) return true
+      }
     }
     for (const attr of node.attrs) {
       const metaURL = node.tagName === "meta" && attr.name === "content" && node.attrs.some((attribute) =>

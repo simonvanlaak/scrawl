@@ -11,10 +11,21 @@ fn hosted_upload_logging_child() {
         return;
     };
     crate::handoff::enable_experiment(HOSTED_SYNC);
+    let bundle = PathBuf::from(bundle);
+    // Establish fixture sensitivity at the unchanged, pre-redaction boundary.
+    // A generic earlier trust failure must not make the output test pass.
+    let raw = crate::handoff::resolve_bundle_dir(&bundle)
+        .and_then(|bundle| Client::default().enqueue_explicit(&bundle));
+    let error = match raw {
+        Err(error) => error,
+        Ok(_) => panic!("logging fixture unexpectedly admitted a capture"),
+    };
+    assert!(
+        format!("{error:?}").contains(SENTINEL),
+        "logging fixture did not reach a sensitive failure"
+    );
     // Match main's anyhow error reporting, including the entire source chain.
-    if let Err(error) = command(ConnectCommand::Upload {
-        bundle: PathBuf::from(bundle),
-    }) {
+    if let Err(error) = command(ConnectCommand::Upload { bundle }) {
         eprintln!("Error: {error:?}");
     }
 }

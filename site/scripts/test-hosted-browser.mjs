@@ -32,7 +32,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' || req.method === 'DELETE') {
       const chunks = []; for await (const chunk of req) chunks.push(chunk)
       const body = JSON.parse(Buffer.concat(chunks).toString() || '{}')
-      writes.push({ path: url.pathname, body, csrf: req.headers['x-csrf-token'], cookie: req.headers.cookie, origin: req.headers.origin })
+      writes.push({ method: req.method, path: url.pathname, body, csrf: req.headers['x-csrf-token'], cookie: req.headers.cookie, origin: req.headers.origin })
       if (req.headers['x-csrf-token'] !== 'synthetic-csrf' || !req.headers.cookie?.includes('fixture=1') || req.headers.origin !== `http://127.0.0.1:${server.address().port}` || scenario.forbidden) return res.writeHead(403).end('{}')
       await new Promise(r => setTimeout(r, 180))
       if (url.pathname === '/v1/device/approve') approved = true
@@ -121,7 +121,7 @@ try {
       assert.equal(await page.getByRole('link',{name:'Open shared recording'}).getAttribute('href'),'https://share.example/s/synthetic')
       await page.getByRole('button',{name:'Stop sharing'}).evaluate(e=>{e.click();e.click()})
       await page.waitForFunction(()=>document.querySelector('.hosted-panel')?.getAttribute('aria-busy')==='false')
-      assert.equal(writes.length,1);assert.equal(writes[0].path,'/v1/shares/share-1');assert.equal(writes[0].csrf,'synthetic-csrf')
+      assert.equal(writes.length,1);assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].path,'/v1/shares/share-1');assert.equal(writes[0].csrf,'synthetic-csrf')
       if(test.forbidden||test.unconfirmed) assert.equal(await page.getByRole('alert').count(),1)
       else {assert.equal(await page.getByRole('link',{name:'Open shared recording'}).count(),0);assert.match(await page.locator('main').innerText(),/revoked/)}
     }

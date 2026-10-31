@@ -11,6 +11,7 @@ mod autocrop;
 mod ax;
 mod autocrop_lab;
 mod capture;
+mod capture_runtime;
 mod bundle_pipeline;
 #[cfg_attr(target_os = "windows", path = "win/command_line.rs")]
 mod command_line;
@@ -652,6 +653,16 @@ pub fn make_bundle_id() -> String {
     }
 }
 
+fn stage_replay_movie(video: &std::path::Path, iter_out: &std::path::Path) -> Result<PathBuf> {
+    let _ = std::fs::remove_dir_all(iter_out);
+    std::fs::create_dir_all(iter_out)?;
+    let staged = iter_out.join(video.file_name().context("Bad video name")?);
+    // Publication requires sole ownership. A successful hard link is NOT a safe
+    // optimization: it also lets writes in a replay mutate the source recording.
+    std::fs::copy(video, &staged)?;
+    Ok(staged)
+}
+
 // Compatibility facade for existing UI, phone, recovery and archive callers.
 pub use bundle_pipeline::{
     FullFrames, PreparedVisuals, SourceExtras, StageTimings, build_bundle_from_parts,
@@ -832,18 +843,18 @@ fn main() -> Result<()> {
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
+            let (mut ownership, playback) = capture_runtime::Capture::start(&bundle_dir, playback::Guard::start)?;
             std::fs::create_dir_all(&bundle_dir)?;
             let dev_id = window.or_else(|| {
                 helper::devices()
                     .ok()
                     .and_then(|mut d| d.drain(..).next().map(|p| p.id))
             });
-            let playback = playback::Guard::start();
-            let session = phone::PhoneSession::start(
+            let session = capture_runtime::Phone::new(phone::PhoneSession::start(
                 &bundle_dir.join("recording.mov"),
                 dev_id.as_deref(),
                 None,
-            )?;
+            )?);
             let started = std::time::Instant::now();
             while !session.has_recording()
                 && !session.has_ended()
@@ -852,14 +863,19 @@ fn main() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(50));
             }
             let record_started = std::time::Instant::now();
+            if session.has_recording() { ownership.observed_frame()?; }
             let target_dur = Duration::from_secs(duration.max(1));
             while !session.has_ended() && record_started.elapsed() < target_dur {
                 std::thread::sleep(Duration::from_millis(50));
             }
+            if session.has_recording() { ownership.observed_frame()?; }
             drop(playback);
-            let recording = session.stop()?;
+            let (recording, frame_seen) = session.stop_with_readiness();
+            let recording = recording?;
+            if frame_seen { ownership.observed_frame()?; }
+            ownership.processing()?;
             let (_dir, _bundle, summary) =
-                phone::finalize_live_capture(&bundle_dir, recording, Vec::new(), Vec::new(), note)?;
+                ownership.publish(|| phone::finalize_live_capture(&bundle_dir, recording, Vec::new(), Vec::new(), note))?;
             print!("{summary}");
             Ok(())
         }
@@ -875,17 +891,17 @@ fn main() -> Result<()> {
                 capture::screen_capture_usable(false),
                 "Screen Recording is not available to this process. Grant Apparent Screen Recording in System Settings, then quit and reopen the app."
             );
-            #[cfg(target_os = "linux")]
-            if let Some(warning) = linux::media::encoder_warning() {
-                anyhow::bail!("{warning}");
-            }
             let target = record_target(window.as_deref())?;
             let bundle_dir = out.unwrap_or_else(|| {
                 handoff::default_captures_dir().join(format!("{}.apparent", make_bundle_id()))
             });
+            let (mut ownership, playback) = capture_runtime::Capture::start(&bundle_dir, playback::Guard::start)?;
+            #[cfg(target_os = "linux")]
+            if let Some(warning) = linux::media::encoder_warning() {
+                anyhow::bail!("{warning}");
+            }
             recover::begin_screen_capture(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
-            let playback = playback::Guard::start();
             let audio = AudioRecorder::start().ok();
             let session = ScreenCaptureSession::start(
                 target.clone(),
@@ -899,14 +915,22 @@ fn main() -> Result<()> {
                     std::sync::Arc::default(),
                 )
             });
-            std::thread::sleep(Duration::from_secs(duration.max(1)));
+            let until = std::time::Instant::now() + Duration::from_secs(duration.max(1));
+            while std::time::Instant::now() < until {
+                if session.failed_to_start() { break; }
+                if session.has_frames() { ownership.observed_frame()?; }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            if session.has_frames() { ownership.observed_frame()?; }
             drop(playback);
-            let recording = session.stop();
+            let (recording, frame_seen) = session.stop_with_readiness();
             let activity = window_log
                 .map(windows::WindowLogger::stop)
                 .unwrap_or_default();
             let recorded_audio = audio.and_then(|a| a.stop().ok());
-            let (_dir, _bundle, summary) = finalize_capture_bundle(
+            if frame_seen { ownership.observed_frame()?; }
+            ownership.processing()?;
+            let (_dir, _bundle, summary) = ownership.publish(|| finalize_capture_bundle(
                 &bundle_dir,
                 target,
                 recording,
@@ -916,7 +940,7 @@ fn main() -> Result<()> {
                 note,
                 activity,
                 Some(model::InteractionTelemetry::VideoOnly),
-            )?;
+            ))?;
             print!("{summary}");
             Ok(())
         }
@@ -961,18 +985,13 @@ fn main() -> Result<()> {
                 .collect();
             if let Some(iters) = bench {
                 let iters = iters.max(1);
-                let video_name = video.file_name().context("Bad video name")?.to_owned();
                 let prep_iter = |i: u32| -> Result<(PathBuf, PathBuf)> {
                     let iter_out = if i + 1 == iters {
                         out.clone()
                     } else {
                         out.with_file_name(format!("bench-{i}.apparent"))
                     };
-                    let _ = std::fs::remove_dir_all(&iter_out);
-                    std::fs::create_dir_all(&iter_out)?;
-                    let linked = iter_out.join(&video_name);
-                    std::fs::hard_link(&video, &linked)
-                        .or_else(|_| std::fs::copy(&video, &linked).map(|_| ()))?;
+                    let linked = stage_replay_movie(&video, &iter_out)?;
                     Ok((iter_out, linked))
                 };
                 let mut runs_ms = Vec::with_capacity(iters as usize);

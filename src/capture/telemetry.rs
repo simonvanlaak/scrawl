@@ -19,7 +19,7 @@ pub enum LiveOverlayEvent {
     UndoStroke,
     RequestSnapshot,
     /// The iPhone mirror ended on its own (unplugged, never found, or access denied).
-    PhoneEnded,
+    PhoneEnded(Arc<()>),
     /// The welcome window: a button, fresh permission states, or the helper exiting.
     Onboarding(crate::onboarding::Event),
     /// The initial permission check is finished, including when grants are unavailable.

@@ -1,6 +1,68 @@
 use super::*;
 use crate::model::{CaptureMode, TargetFrame};
 
+#[test]
+fn review40_screen_stop_reads_real_readiness_after_inflight_sample_join() {
+    // macOS feeds sample_real_candidate; Linux feeds push_candidate from its
+    // appsink. Exercise both actual acknowledgement owners without native I/O.
+    for adapter in ["macos", "linux", "synthetic-fallback"] {
+        let stopping = Arc::new(AtomicBool::new(false));
+        let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
+        let seen = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stopping);
+        let worker_frames = Arc::clone(&frames);
+        let worker_seen = Arc::clone(&seen);
+        let (entered, ready) = std::sync::mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            entered.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !worker_stop.load(Ordering::Acquire) && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            assert!(worker_stop.load(Ordering::Acquire));
+            let sample = || Ok(RgbaFrame::new(42, 1, 1, vec![1, 2, 3, 255]));
+            if adapter == "macos" {
+                sample_real_candidate(
+                    &worker_frames,
+                    &worker_seen,
+                    &AtomicBool::new(false),
+                    false,
+                    sample,
+                );
+            } else {
+                push_candidate(
+                    &worker_frames,
+                    &worker_seen,
+                    sample().unwrap(),
+                    false,
+                    adapter == "linux",
+                );
+            }
+            None
+        });
+        let session = ScreenCaptureSession {
+            started_at: Instant::now(),
+            stopping,
+            urgent_snapshot: Arc::new(AtomicBool::new(false)),
+            frames,
+            real_frame_seen: seen,
+            startup_failed: Arc::new(AtomicBool::new(false)),
+            video_offset_ms: Arc::new(AtomicU64::new(0)),
+            sampler_thread: Some(worker),
+            _recording: crate::retention::Recording::start(),
+        };
+        ready.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(!session.has_frames(), "first sample is still in flight");
+        let (recording, frame_seen) = session.stop_with_readiness();
+        assert_eq!(recording.frames.len(), 1);
+        assert_eq!(
+            frame_seen,
+            adapter != "synthetic-fallback",
+            "{adapter}: wrong post-join readiness"
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn producer_terminal_source_error_is_not_pending_consent() {

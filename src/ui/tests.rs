@@ -1,5 +1,118 @@
 use super::*;
 
+#[test]
+fn review40_queued_phone_end_is_bound_to_original_preview_or_recording() {
+    use crate::phone::teardown_tests::{end_unexpectedly, session_after_command};
+    for recording_b in [false, true] {
+        let (sender, receiver) = flume::unbounded();
+        // A ended before cancellation could suppress its already queued event.
+        let a = end_unexpectedly(session_after_command(sender.clone(), false));
+        a.cancel();
+        let mut coord = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender.clone()), None);
+        let b = end_unexpectedly(session_after_command(sender, false));
+        if recording_b {
+            coord.active_recording = Some(ActiveRecording {
+                started: Instant::now(),
+                target: crate::phone::phone_target("Synthetic B", None, None, 16, 16),
+                bundle_dir: PathBuf::new(),
+                source: CaptureSource::Phone(crate::capture_runtime::Phone::new(b)),
+                ownership: None, _metal_overlay: None,
+            });
+        } else {
+            coord.iphone_preview = Some(b);
+        }
+        let LiveOverlayEvent::PhoneEnded(a_identity) = receiver.try_recv().unwrap() else { panic!("missing real A notification") };
+        let LiveOverlayEvent::PhoneEnded(b_identity) = receiver.try_recv().unwrap() else { panic!("missing real B notification") };
+        assert!(!coord.accepts_phone_end(&a_identity), "A must not terminate B (recording={recording_b})");
+        assert!(coord.accepts_phone_end(&b_identity), "B's genuine unexpected end still works");
+    }
+}
+
+#[test]
+fn real_owned_finalizer_checks_whiteboard_before_engine_and_legacy_success() {
+    use apparent_capture_engine::Status;
+    for corrupt in [false, true] {
+        let fixture = crate::capture_runtime::tests::Fixture::new();
+        let (capture, request) = fixture.start();
+        let mut board = whiteboard::Board::default();
+        board.start([40.0, 40.0]);
+        board.extend([420.0, 310.0]);
+        board.finish();
+        let finalized = recording::finalize_owned_capture(Some(capture), true, &board, || {
+            let built = crate::generate_demo_bundle(Some(fixture.output()))?;
+            if corrupt {
+                // The real whiteboard read fails; its legacy optional fallback
+                // must not disguise damaged post-build bytes as a saved capture.
+                std::fs::write(built.0.join(&built.1.keyframes[0].file), b"invalid png")?;
+            }
+            Ok(built)
+        });
+        let receipt = fixture.runtime().inspect(&request).unwrap().unwrap();
+        assert_eq!(receipt.status, if corrupt { Status::Failed } else { Status::Saved });
+        if let Ok((dir, bundle, summary)) = &finalized {
+            assert_eq!(bundle.keyframes.last().unwrap().reason, crate::model::KeyframeReason::Whiteboard);
+            assert_eq!(std::fs::read_to_string(dir.join("summary.md")).unwrap(), *summary);
+        }
+        let (sender, _receiver) = flume::unbounded();
+        let mut coord = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+        coord.set_island_phase(IslandPhase::Processing);
+        let generation = coord.capture_generation;
+        let legacy_id = "unchanged-legacy-wire-identity";
+        assert_ne!(request, legacy_id);
+        coord.agent_captures.begin(legacy_id);
+        let upload = std::cell::Cell::new(0);
+        let success_ui = std::cell::Cell::new(0);
+        coord.receive_capture_result(generation, Some(legacy_id), false, finalized,
+            |_| upload.set(upload.get() + 1),
+            |_, result| if result.is_ok() { success_ui.set(success_ui.get() + 1); });
+        assert_eq!(coord.agent_captures.inspect(legacy_id)["status"], if corrupt { "failed" } else { "saved" });
+        assert_eq!(upload.get(), usize::from(!corrupt));
+        assert_eq!(success_ui.get(), usize::from(!corrupt));
+    }
+}
+
+#[test]
+fn real_background_finalizer_keeps_engine_owner_after_coordinator_is_gone() {
+    use apparent_capture_engine::Status;
+    let fixture = crate::capture_runtime::tests::Fixture::new();
+    let (capture, request) = fixture.start();
+    let (sender, _receiver) = flume::unbounded();
+    let coord = ApparentCoordinator::new(SharedCaptureTelemetry::new(sender), None);
+    let output = fixture.output();
+    let (ready_tx, ready) = std::sync::mpsc::sync_channel(0);
+    let (release, release_rx) = std::sync::mpsc::sync_channel(0);
+    let worker = std::thread::spawn(move || recording::finalize_owned_capture(
+        Some(capture), true, &whiteboard::Board::default(), || {
+            ready_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            crate::generate_demo_bundle(Some(output))
+        }));
+    ready.recv_timeout(Duration::from_secs(30)).unwrap();
+    drop(coord);
+    assert_eq!(fixture.runtime().inspect(&request).unwrap().unwrap().status, Status::Processing);
+    fixture.assert_busy_in_child();
+    release.send(()).unwrap();
+    assert!(worker.join().unwrap().is_ok());
+    assert_eq!(fixture.runtime().inspect(&request).unwrap().unwrap().status, Status::Saved);
+}
+
+#[test]
+fn owned_start_failure_releases_admission_without_running_finalizer() {
+    let fixture = crate::capture_runtime::tests::Fixture::new();
+    let (capture, request) = fixture.start();
+    let built = std::cell::Cell::new(false);
+    let result = recording::finalize_owned_capture(Some(capture), false, &whiteboard::Board::default(), || {
+        built.set(true);
+        crate::generate_demo_bundle(Some(fixture.output()))
+    });
+    assert!(result.is_err());
+    assert!(!built.get());
+    assert!(!fixture.output().exists());
+    assert_eq!(fixture.runtime().inspect(&request).unwrap().unwrap().status, apparent_capture_engine::Status::Failed);
+    let (_next, next_request) = fixture.start();
+    assert_ne!(request, next_request);
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 pub(super) fn deferred_finalizer_success_survives_dismissal_and_new_capture() {

@@ -310,7 +310,7 @@ pub fn run_app(
                                 coord.request_immediate_frame();
                                 cx.notify();
                             }
-                            LiveOverlayEvent::PhoneEnded => coord.phone_ended(cx),
+                            LiveOverlayEvent::PhoneEnded(identity) => coord.phone_ended(&identity, cx),
                             LiveOverlayEvent::Onboarding(event) => {
                                 coord.onboarding_event(event, cx)
                             }
@@ -321,6 +321,12 @@ pub fn run_app(
                         });
                     }
 
+                    loop_coord.update(cx, |coord, cx| {
+                        if let Err(error) = coord.sync_capture_ownership() {
+                            apparent_log(format!("Capture ownership failed: {error:#}"));
+                            coord.finish_recording(cx);
+                        }
+                    });
                     motion::poll_tune();
                     if loop_coord.read(cx).shortcut.is_pending() {
                         loop_coord.update(cx, |coord, cx| coord.tick_shortcut(cx));

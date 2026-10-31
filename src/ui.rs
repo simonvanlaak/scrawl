@@ -795,7 +795,7 @@ enum CaptureSource {
         windows: Option<crate::windows::WindowLogger>,
     },
     /// The helper's mirror window records the phone's native video and the narration.
-    Phone(PhoneSession),
+    Phone(crate::capture_runtime::Phone),
     /// `apparent lab pill`: nothing is captured.
     Lab,
 }
@@ -805,6 +805,7 @@ struct ActiveRecording {
     target: TargetInfo,
     bundle_dir: PathBuf,
     source: CaptureSource,
+    ownership: Option<crate::capture_runtime::Capture>,
     _metal_overlay: Option<LaserOverlay>,
 }
 

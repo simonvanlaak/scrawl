@@ -569,10 +569,15 @@ fn start_video_export() {
     say(Some("Choosing export destination…".into()));
     #[cfg(not(target_os = "linux"))]
     say(Some("Exporting…".into()));
+    // Pin the input before another capture can replace latest during a chooser or worker.
+    let resolved = crate::handoff::resolve_bundle_dir(std::path::Path::new("latest"));
+    let recovery_capture = Some(resolved.as_ref().ok().cloned().unwrap_or_else(|| PathBuf::from("latest")));
+    let loaded = resolved.and_then(|directory| crate::handoff::load_bundle(&directory));
+    let worker_capture = recovery_capture.clone();
     let spawned = std::thread::Builder::new()
         .name("apparent-export".into())
         .spawn(move || {
-            let result = crate::handoff::load_bundle(std::path::Path::new("latest")).and_then(
+            let result = loaded.and_then(
                 |(dir, bundle)| {
                     #[cfg(target_os = "linux")]
                     let out = match platform::choose_export_destination(
@@ -609,14 +614,11 @@ fn start_video_export() {
                 Ok(None) => say(Some("Export cancelled".into())),
                 Err(error) => {
                     apparent_log(format!("Video export failed: {error:#}"));
+                    crate::error_recovery::report("Video export failed", format!("{error:#}"), worker_capture);
                     #[cfg(target_os = "linux")]
                     {
-                        let detail = format!("{error:#}");
-                        say(Some(format!(
-                            "Export failed: {}",
-                            detail.chars().take(120).collect::<String>()
-                        )));
-                        crate::linux::shell::notify("Video export failed", &detail);
+                        say(Some("Export failed — see recovery window".into()));
+                        crate::linux::shell::notify("Video export failed", "Open Apparent for recovery options. Details are in the app log.");
                     }
                     #[cfg(not(target_os = "linux"))]
                     say(Some("Export failed".into()));
@@ -630,12 +632,17 @@ fn start_video_export() {
             EXPORTING.store(false, Ordering::SeqCst);
         });
     if let Err(error) = spawned {
+        crate::error_recovery::report(
+            "Video export failed",
+            format!("Could not start export worker: {error}"),
+            recovery_capture,
+        );
         #[cfg(target_os = "linux")]
         {
             say(Some("Export failed: could not start worker; retry".into()));
             crate::linux::shell::notify(
                 "Video export failed",
-                &format!("Could not start export worker: {error}"),
+                "Could not start export. Open Apparent for recovery options.",
             );
         }
         #[cfg(not(target_os = "linux"))]
@@ -1066,20 +1073,20 @@ impl ApparentCoordinator {
                 .defer(vec![crate::onboarding::Permission::Accessibility]);
             return;
         }
-        let dir = self.take_paste_target();
+        let Some(dir) = crate::error_recovery::resolve_target("Paste failed", &self.take_paste_target()) else {
+            return;
+        };
         if matches!(self.island_phase, IslandPhase::Completed { .. }) {
             self.dismiss_island(cx);
         }
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_image_and_text(&dir) {
                 apparent_log(format!("paste_bundle_image_and_text error: {err}"));
+                crate::error_recovery::report("Paste failed", format!("{err:#}"), Some(dir.clone()));
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
-                    &format!(
-                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
-                        dir.display()
-                    ),
+                    "Open Apparent to review the saved capture and retry. Details are in the app log.",
                 );
             }
         });
@@ -1907,6 +1914,9 @@ impl ApparentCoordinator {
                 }
                 Err(error) => {
                     apparent_log(format!("iPhone preview could not start: {error:#}"));
+                    crate::error_recovery::report(
+                        "Could not start iPhone capture preview", format!("{error:#}"), None,
+                    );
                     self.set_selection_mode(SelectionMode::Area, cx);
                     return;
                 }
@@ -2475,13 +2485,11 @@ impl ApparentCoordinator {
         std::thread::spawn(move || {
             if let Err(err) = crate::handoff::paste_bundle_at_target(&dir, click_target) {
                 apparent_log(format!("paste_bundle_at_target error: {err}"));
+                crate::error_recovery::report("Paste failed", format!("{err:#}"), Some(dir.clone()));
                 #[cfg(target_os = "linux")]
                 crate::linux::shell::notify(
                     "Paste stopped",
-                    &format!(
-                        "{err:#}. Manually attach the contact sheet and paste summary.md from {}",
-                        dir.display()
-                    ),
+                    "Open Apparent to review the saved capture and retry. Details are in the app log.",
                 );
             }
         });
@@ -2830,6 +2838,7 @@ impl ApparentCoordinator {
         if let Some(warning) = crate::linux::media::encoder_warning() {
             apparent_log(&warning);
             crate::linux::shell::notify("Apparent setup: H.264 encoder missing", &warning);
+            crate::error_recovery::report("Could not start capture", warning, None);
             self.cancel_recording(cx);
             return;
         }
@@ -2838,6 +2847,7 @@ impl ApparentCoordinator {
         {
             let Ok(id) = self.agent_capture_id.clone().map_or_else(crate::agent_capture::new_id, Ok) else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
+                crate::error_recovery::report("Could not start capture", "Could not create capture identity", None);
                 self.cancel_recording(cx);
                 return;
             };
@@ -2874,6 +2884,7 @@ impl ApparentCoordinator {
         let bundle_dir = root.join(format!("{id}.apparent"));
         if let Err(error) = crate::recover::begin_screen_capture(&bundle_dir) {
             apparent_log(format!("Capture could not protect raw video: {error:#}"));
+            crate::error_recovery::report("Could not start capture", format!("{error:#}"), None);
             self.cancel_recording(cx);
             if let Ok(mut status) = CAPTURE_STATUS.lock() {
                 *status = Some("Capture failed — could not protect raw video".into());
@@ -3051,6 +3062,7 @@ impl ApparentCoordinator {
         {
             let Ok(id) = crate::agent_capture::new_id() else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
+                crate::error_recovery::report("Could not start iPhone capture", "Could not create capture identity", None);
                 self.cancel_recording(cx);
                 return;
             };
@@ -3109,6 +3121,11 @@ impl ApparentCoordinator {
                 Ok(session) => session,
                 Err(error) => {
                     apparent_log(format!("iPhone capture could not start: {error:#}"));
+                    crate::error_recovery::report(
+                        "Could not start iPhone capture",
+                        format!("{error:#}"),
+                        None,
+                    );
                     #[cfg(any(target_os = "macos", target_os = "linux"))]
                     {
                         if let Some(id) = self.agent_capture_id.take() {
@@ -3319,6 +3336,10 @@ impl ApparentCoordinator {
                 })
                 .await;
 
+            // Artifact failures stay visible even when a newer capture owns the capsule.
+            if let Err(error) = &result.0 {
+                crate::error_recovery::report("Could not save capture", format!("{error:#}"), None);
+            }
             let _ = entity
                 .update(cx, |coord, cx| {
                     let (finalized, duration_ms) = result;
@@ -3339,7 +3360,7 @@ impl ApparentCoordinator {
                                 Err(error) => {
                                     apparent_log(format!("Capture failed: {error:#}"));
                                     #[cfg(target_os = "linux")]
-                                    crate::linux::shell::notify("Capture failed", &error.to_string());
+                                    crate::linux::shell::notify("Capture failed", "Open Apparent for recovery options. Details are in the app log.");
                                     if let Ok(mut status) = CAPTURE_STATUS.lock() {
                                         *status = Some(if error.to_string().starts_with("No screen frames were captured") {
                                             "Capture failed — no screen frames".into()
@@ -3377,7 +3398,14 @@ impl ApparentCoordinator {
                                 } else {
                                     crate::handoff::copy_bundle_to_clipboard(&dir)
                                 })
-                                .map_err(|error| apparent_log(format!("Copy handoff failed: {error:#}")))
+                                .map_err(|error| {
+                                    apparent_log(format!("Copy handoff failed: {error:#}"));
+                                    crate::error_recovery::report(
+                                        "Copy failed",
+                                        format!("{error:#}"),
+                                        Some(dir.clone()),
+                                    );
+                                })
                                 .is_ok();
                             #[cfg(target_os = "linux")]
                             if auto_active && clipboard_ready {
@@ -5448,7 +5476,14 @@ impl Render for BundleReviewWindow {
                                         }
                                         coord.review_status = Some(match res {
                                             Ok(()) => "Copied ✓".into(),
-                                            Err(e) => format!("Copy failed: {e}"),
+                                            Err(e) => {
+                                                crate::error_recovery::report(
+                                                    "Copy failed",
+                                                    format!("{e:#}"),
+                                                    Some(copy_dir.clone()),
+                                                );
+                                                "Copy failed — see recovery window".into()
+                                            }
                                         });
                                         cx.notify();
                                     });
@@ -6148,6 +6183,10 @@ fn close_capture_windows(cx: &mut App) {
     }
 }
 
+pub(crate) fn take_recovery_keys(cx: &mut App) {
+    platform::take_keys(cx);
+}
+
 fn close_review_window(cx: &mut App) {
     for handle in cx.windows() {
         if handle.downcast::<BundleReviewWindow>().is_some() {
@@ -6156,20 +6195,30 @@ fn close_review_window(cx: &mut App) {
     }
 }
 
-fn open_review_capture(coord: &Entity<ApparentCoordinator>, path: &std::path::Path, cx: &mut App) {
-    match crate::handoff::load_bundle(path) {
+fn open_review_capture(
+    coord: &Entity<ApparentCoordinator>,
+    path: &std::path::Path,
+    cx: &mut App,
+) -> bool {
+    let Some(directory) = crate::error_recovery::resolve_target("Could not open capture", path) else {
+        return false;
+    };
+    match crate::handoff::load_bundle(&directory) {
         Ok(bundle) => {
             coord.update(cx, |coord, cx| {
                 coord.mark_handled(path);
                 coord.set_review_bundle(bundle, None);
                 cx.notify();
             });
+            true
         }
         Err(error) => {
             coord.update(cx, |coord, cx| {
-                coord.review_status = Some(format!("Could not open capture: {error}"));
+                coord.review_status = Some("Could not open capture — see recovery window".into());
+                crate::error_recovery::report("Could not open capture", format!("{error:#}"), Some(directory));
                 cx.notify();
             });
+            false
         }
     }
 }
@@ -6190,7 +6239,7 @@ fn open_review_window(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) 
     }
     let bounds = Bounds::centered(None, size(px(1120.0), px(740.0)), cx);
     let coord_clone = coord_entity.clone();
-    let _ = cx.open_window(
+    let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
@@ -6237,7 +6286,12 @@ fn open_review_window(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) 
             })
         },
     );
-    platform::take_keys(cx);
+    if let Err(error) = opened {
+        let capture = coord_entity.read(cx).review_bundle.as_ref().map(|(dir, _)| dir.clone());
+        crate::error_recovery::report("Could not open capture", format!("{error:#}"), capture);
+    } else {
+        platform::take_keys(cx);
+    }
 }
 
 pub(crate) fn start_metric(name: &str, started: Instant) {
@@ -6505,28 +6559,16 @@ pub fn run_app(
                                     });
                                 }
                                 MenuAction::OpenLatest => {
-                                    if let Ok((dir, bundle)) =
-                                        crate::handoff::load_bundle(std::path::Path::new("latest"))
-                                    {
-                                        loop_coord.update(cx, |coord, cx| {
-                                            coord.mark_handled(&dir);
-                                            coord.set_review_bundle((dir, bundle), None);
-                                            cx.notify();
-                                        });
+                                    if open_review_capture(
+                                        &loop_coord,
+                                        std::path::Path::new("latest"),
+                                        cx,
+                                    ) {
                                         open_review_window(&loop_coord, cx);
                                     }
                                 }
                                 MenuAction::OpenInbox(path) => {
-                                    let loaded = crate::handoff::load_bundle(&path).ok();
-                                    let opened = loaded.is_some();
-                                    loop_coord.update(cx, |coord, cx| {
-                                        coord.mark_handled(&path);
-                                        if let Some(bundle) = loaded {
-                                            coord.set_review_bundle(bundle, None);
-                                        }
-                                        cx.notify();
-                                    });
-                                    if opened {
+                                    if open_review_capture(&loop_coord, &path, cx) {
                                         open_review_window(&loop_coord, cx);
                                     }
                                 }
@@ -6570,6 +6612,12 @@ pub fn run_app(
                         });
                     }
 
+                    let recovery_coord = loop_coord.clone();
+                    crate::error_recovery::poll(cx, move |path, cx| {
+                        if open_review_capture(&recovery_coord, path, cx) {
+                            open_review_window(&recovery_coord, cx);
+                        }
+                    });
                     motion::poll_tune();
                     if loop_coord.read(cx).shortcut.is_pending() {
                         loop_coord.update(cx, |coord, cx| coord.tick_shortcut(cx));

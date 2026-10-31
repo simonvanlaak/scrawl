@@ -51,7 +51,11 @@ static WAYLAND_DISPLAY: OnceLock<Option<OsString>> = OnceLock::new();
 /// Called first thing in `main`, before any thread starts: remembers the Wayland display (for
 /// the clipboard and the portals) and hides it from GPUI, so its windows go through XWayland.
 pub fn prepare_process() {
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").filter(|v| !v.is_empty());
+    // A child relaunched by the updater inherits the saved name, not the
+    // WAYLAND_DISPLAY hidden from GPUI in its parent. Resolve it before caching.
+    let wayland = std::env::var_os("WAYLAND_DISPLAY")
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var_os("APPARENT_WAYLAND_DISPLAY").filter(|v| !v.is_empty()));
     let _ = WAYLAND_DISPLAY.set(wayland.clone());
     if wayland.is_some() && std::env::var_os("APPARENT_NATIVE_WAYLAND").is_none() {
         // SAFETY: called from `main` before any other thread exists.
@@ -231,6 +235,63 @@ fn pretty_app_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_preserves_wayland_display_across_relaunch() {
+        for (direct, saved, expected) in [
+            (Some("wayland-1"), None, "wayland-1"),
+            (None, Some("wayland-1"), "wayland-1"),
+            (Some(""), Some("wayland-1"), "wayland-1"),
+            (Some("wayland-2"), Some("wayland-1"), "wayland-2"),
+            (None, None, ""),
+        ] {
+            // Each launch gets its own environment and OnceLock. Never mutate the
+            // multi-threaded test runner's environment or read its desktop config.
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "linux::tests::wayland_startup_child",
+                    "--nocapture",
+                ])
+                .env_remove("WAYLAND_DISPLAY")
+                .env_remove("APPARENT_WAYLAND_DISPLAY")
+                .env_remove("APPARENT_NATIVE_WAYLAND")
+                .env("APPARENT_TEST_DISPLAY_EXPECTED", expected);
+            if let Some(value) = direct {
+                child.env("WAYLAND_DISPLAY", value);
+            }
+            if let Some(value) = saved {
+                child.env("APPARENT_WAYLAND_DISPLAY", value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "direct={direct:?}, saved={saved:?}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn wayland_startup_child() {
+        let Ok(expected) = std::env::var("APPARENT_TEST_DISPLAY_EXPECTED") else {
+            return;
+        };
+        prepare_process();
+        assert_eq!(
+            wayland_display(),
+            (!expected.is_empty()).then(|| OsString::from(&expected))
+        );
+        if !expected.is_empty() {
+            assert!(std::env::var_os("WAYLAND_DISPLAY").is_none());
+            assert_eq!(
+                std::env::var_os("APPARENT_WAYLAND_DISPLAY"),
+                Some(OsString::from(expected))
+            );
+        }
+    }
 
     #[test]
     fn app_names_read_like_names() {

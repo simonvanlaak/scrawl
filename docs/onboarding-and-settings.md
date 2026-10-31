@@ -2,6 +2,27 @@
 
 Read this before changing `src/onboarding.rs`, `src/settings.rs`, `src/command_line.rs` or the helper's `Onboarding.swift`, `PermissionPanel.swift` and `Settings.swift`.
 
+## Error recovery
+
+Capture setup/finalization, copy, explicit paste, Review-open and video-export
+failures use a shared GPUI recovery popup on macOS and Linux. It tells the user to
+restart Apparent and open the last completed capture to retry. Restarting is
+guidance, not a guarantee that an underlying permissions or setup problem is fixed.
+The popup never restarts, deletes, pastes or shares anything automatically.
+
+**Open Last Capture** opens local Review for the failed handoff's exact completed
+capture, or the latest completed capture when the failed operation has no saved
+result. An unfinished or unreadable bundle is never presented as saved. Without a
+completed capture, the popup says so and offers only Dismiss. Enter opens the
+available capture; Escape dismisses. After restarting, use **Open Last Capture** in
+the tray menu. Finish any ongoing recording before restarting.
+
+`src/error_recovery.rs` accepts reports from workers and the UI loop presents one
+window, coalescing concurrent failures. Raw diagnostics stay in the app log rather
+than exposing file paths, transcripts or credentials in the popup. CLI errors stay
+in the terminal; crashes or errors before GPUI starts cannot show an in-app popup.
+Permission/setup flows and expected cancellations keep their existing UI.
+
 ## Onboarding (`src/onboarding.rs`, `helper/Onboarding.swift`)
 
 Rust decides what shows (`Flow`, `launch_plan`, `Gate`, tested) and stores progress under `"onboarding"` in `~/.config/apparent/config.json`, including the tour's current step (`resume`), so any quit (macOS's "Quit & Reopen" too) picks up there; the SwiftUI window in `apparent-helper onboarding` only renders the state it's sent and reports buttons (`grant:<permission>` for a row).

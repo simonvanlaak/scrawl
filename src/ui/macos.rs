@@ -266,6 +266,7 @@ pub(super) fn hand_back_keys(cx: &mut App) {
     if cx.windows().iter().any(|handle| {
         handle.downcast::<super::TargetPickerWindow>().is_some()
             || handle.downcast::<super::BundleReviewWindow>().is_some()
+            || handle.downcast::<crate::error_recovery::RecoveryWindow>().is_some()
     }) {
         return;
     }

@@ -1,6 +1,7 @@
 import { parse } from "parse5"
 
 const publicSite = "https://app.tryapparent.com/"
+const htmlNamespace = "http://www.w3.org/1999/xhtml"
 
 function parsedURL(value, base) {
   try {
@@ -24,25 +25,55 @@ function isUpstream(url) {
   return parts[1] === "kitlangton" && ["tap", "homebrew-tap"].includes(parts[2]?.replace(/\.git$/, ""))
 }
 
+// The URL-bearing portion of HTML's shared declarative refresh steps. This
+// does not run timers or scripts; delay-only refreshes reload the current page.
+function refreshDestination(content) {
+  const delay = /^[\t\n\f\r ]*[0-9.]+/.exec(content)
+  if (!delay) return null
+  let rest = content.slice(delay[0].length)
+  if (!rest || !/^[;,\t\n\f\r ]/.test(rest)) return null
+  rest = rest.replace(/^[\t\n\f\r ]*/, "")
+  if (/^[;,]/.test(rest)) rest = rest.slice(1)
+  rest = rest.replace(/^[\t\n\f\r ]*/, "")
+  // URL= is optional. An incomplete prefix remains part of the URL, not a
+  // reason to search later in the string for something that looks like a URL.
+  rest = rest.replace(/^url[\t\n\f\r ]*=[\t\n\f\r ]*/i, "")
+  if (rest[0] === "'" || rest[0] === '"') {
+    const quote = rest[0]
+    rest = rest.slice(1)
+    const end = rest.indexOf(quote)
+    if (end !== -1) rest = rest.slice(0, end)
+  }
+  return rest || null
+}
+
 // Parse HTML attributes (including character references) before interpreting URLs.
 // Only destinations count: prose, comments, query strings and lookalike hosts do not.
 export function hasUpstreamLinks(html) {
   const document = parse(html)
   const elements = []
+  let baseElement
   let visibleText = ""
-  function visit(node) {
+  function visit(node, inert = false) {
     if (["script", "style"].includes(node.tagName)) return
     if (node.attrs) elements.push(node)
+    if (!inert && !baseElement && node.namespaceURI === htmlNamespace && node.tagName === "base" && node.attrs.some((attr) => attr.name === "href")) baseElement = node
     if (node.nodeName === "#text") visibleText += node.value
-    for (const child of node.childNodes ?? []) visit(child)
+    for (const child of node.childNodes ?? []) visit(child, inert)
     // Template links can become active later, so inspect their inert contents too.
-    if (node.content) visit(node.content)
+    // Their base elements must never change the active document's URL base.
+    if (node.content) visit(node.content, true)
     if (node.tagName) visibleText += " "
   }
   visit(document)
-  const baseElement = elements.find((node) => node.tagName === "base" && node.attrs.some((attr) => attr.name === "href"))
-  const base = parsedURL(baseElement?.attrs.find((attr) => attr.name === "href").value ?? publicSite, publicSite) ?? new URL(publicSite)
+  let base = parsedURL(baseElement?.attrs.find((attr) => attr.name === "href").value ?? publicSite, publicSite)
+  if (!base || ["data:", "javascript:"].includes(base.protocol)) base = new URL(publicSite)
   for (const node of elements) {
+    if (node.namespaceURI === htmlNamespace && node.tagName === "meta" && node.attrs.some((attr) => attr.name === "http-equiv" && attr.value.toLowerCase() === "refresh")) {
+      const content = node.attrs.find((attr) => attr.name === "content")?.value ?? ""
+      const destination = refreshDestination(content)
+      if (destination !== null && isUpstream(parsedURL(destination, base))) return true
+    }
     for (const attr of node.attrs) {
       const metaURL = node.tagName === "meta" && attr.name === "content" && node.attrs.some((attribute) =>
         ["property", "name"].includes(attribute.name) && ["og:url", "og:image", "twitter:url", "twitter:image"].includes(attribute.value.toLowerCase()))
@@ -53,5 +84,5 @@ export function hasUpstreamLinks(html) {
   }
   // The old guard also prevented upstream Homebrew install instructions. These
   // are formula tokens, not URLs; keep that protection with token boundaries.
-  return /(?:^|[\s'"`])kitlangton\/tap(?:\/[a-z0-9@+_.-]+)?(?=$|[\s'"`])/i.test(visibleText)
+  return /(?:^|[\s'"`;|&()<>])kitlangton\/tap(?:\/[a-z0-9@+_.-]+)?(?=$|[\s'"`;|&()<>])/i.test(visibleText)
 }

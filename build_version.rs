@@ -11,6 +11,8 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
+        // Reading status must not rewrite the index we watch for invalidation.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)
         .output()
         .ok()?;
@@ -46,6 +48,7 @@ pub fn emit() {
     }
     if let Some(reference) = git(&root, &["symbolic-ref", "-q", "HEAD"])
         && let Some(path) = git(&root, &["rev-parse", "--git-path", &reference])
+        && root.join(&path).exists()
     {
         println!("cargo:rerun-if-changed={}", root.join(path).display());
     }

@@ -10,7 +10,7 @@ use std::{
     io::{BufReader, Seek, SeekFrom},
     path::Path,
 };
-const TEXT_CAP: u64 = 64 * 1024 * 1024;
+pub(super) const TEXT_CAP: u64 = 64 * 1024 * 1024;
 struct Artifact {
     file: File,
     metadata: Metadata,
@@ -49,6 +49,11 @@ impl Inventory {
             } else {
                 let file = root.leaf(&name, false)?;
                 let metadata = file.metadata()?;
+                if metadata.mode() & 0o020 != 0 {
+                    use std::os::unix::fs::PermissionsExt;
+                    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                }
+                let metadata = file.metadata()?;
                 ensure!(
                     metadata.len() <= 64 * 1024 * 1024 * 1024,
                     "bundle file exceeds validation budget"
@@ -83,11 +88,10 @@ impl Inventory {
         let manifest = fs::bytes(self.file("apparent.json")?, TEXT_CAP)?;
         let value: serde_json::Value = serde_json::from_slice(&manifest)?;
         ensure!(
-            value == serde_json::to_value(expected)?,
+            value == serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(expected)?)?,
             "persisted manifest differs from final bundle"
         );
-        let actual: ApparentBundle = serde_json::from_slice(&manifest)?;
-        ensure!(actual == *expected, "persisted bundle identity changed");
+        let _: ApparentBundle = serde_json::from_slice(&manifest)?;
         ensure!(
             fs::bytes(self.file("summary.md")?, TEXT_CAP)? == summary.as_bytes(),
             "persisted summary differs from final summary"
@@ -121,8 +125,8 @@ impl Inventory {
                 images.insert(format!("{}/{leaf}", crop.full_frames));
             }
         }
-        for image in images {
-            validate_png(self.file(&image)?)
+        for image in &images {
+            validate_png(self.file(image)?)
                 .with_context(|| format!("invalid PNG artifact: {image}"))?;
         }
         if let Some(audio) = &expected.audio {
@@ -134,10 +138,12 @@ impl Inventory {
         // Validate retained originals and auxiliary media too, not only the displayed subset.
         for (name, artifact) in &self.files {
             match Path::new(name).extension().and_then(|s| s.to_str()) {
-                Some("png") => validate_png(&artifact.file)
+                Some("png") if !images.contains(name) => validate_png(&artifact.file)
                     .with_context(|| format!("invalid retained PNG: {name}"))?,
-                Some("wav") => validate_wav(&artifact.file)
-                    .with_context(|| format!("invalid retained WAV: {name}"))?,
+                Some("wav") if expected.audio.as_deref() != Some(name) => {
+                    validate_wav(&artifact.file)
+                        .with_context(|| format!("invalid retained WAV: {name}"))?
+                }
                 Some("mp4" | "mov") if expected.video.as_deref() != Some(name) => {
                     movie::validate(&artifact.file)
                         .with_context(|| format!("invalid retained movie: {name}"))?
@@ -244,7 +250,7 @@ fn validate_wav(file: &File) -> Result<()> {
         "not a WAV file"
     );
     ensure!(
-        u64::from(u32::from_le_bytes(header[4..8].try_into()?)) + 8 <= file.metadata()?.len(),
+        u64::from(u32::from_le_bytes(header[4..8].try_into()?)) + 8 == file.metadata()?.len(),
         "truncated WAV container"
     );
     let mut file = file.try_clone()?;

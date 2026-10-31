@@ -108,7 +108,6 @@
     },
     {
       "id": "site-belief-pond",
-      "added": "2026-10-30",
       "group": "install",
       "name": "Interactive homepage belief",
       "says": "Scroll directly draws and reverses the work circle and enjoyable highlight. Me too sends one frog into a group hug; reduced motion skips travel. Mobile keeps text and controls inset with a compact text-to-frog gap.",
@@ -297,7 +296,6 @@
     },
     {
       "id": "agent-capture-control",
-      "added": "2026-10-28",
       "group": "record",
       "name": "Owned GUI capture start, inspection and stop/wait",
       "says": "A same-user CLI atomically starts the normal interaction-aware GUI capture, waits for real frames, and stops by the request's opaque ID. Stop can wait for that capture's exact saved bundle. Retries and inspection use process-lifetime receipts, never global latest state; cancel can discard an owned pending capture. No toggle, app auto-launch or session sending.",
@@ -977,7 +975,6 @@
 
     {
       "id": "export-cli",
-      "added": "2026-10-29",
       "group": "export",
       "name": "apparent export",
       "says": "One .mp4 with ink, pins, clicks and aligned recorded audio. Missing audio requires an explicit --narration script or --no-audio choice. Opens on the whole capture for 0.5 s, then smoothly zooms toward activity; --no-zoom opts out.",
@@ -1111,7 +1108,6 @@
     },
     {
       "id": "onboarding",
-      "added": "2026-10-29",
       "group": "install",
       "name": "Welcome tour",
       "says": "A welcome, an 11 s demo, one permissions checklist, an optional inline Record shortcut editor, and a first capture; it resumes where any quit left it.",

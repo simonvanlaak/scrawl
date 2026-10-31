@@ -1,0 +1,39 @@
+name: Apple speech capability probe
+
+# Diagnostic only. No secrets, audio, app installation or model downloads.
+on:
+  push:
+    branches: [t3/issue-37-mac-pause-transcription]
+    paths:
+      - .github/workflows/apple-speech-probe.yml
+      - scripts/probe-apple-speech.swift
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'tryapparent/apparent'
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Record platform and compiler
+        run: |
+          sw_vers
+          uname -m
+          xcrun swiftc --version
+      - name: Compile and run the capability probe
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse-as-library scripts/probe-apple-speech.swift -o "$RUNNER_TEMP/apple-speech-probe"
+          "$RUNNER_TEMP/apple-speech-probe" | tee "$RUNNER_TEMP/apple-speech-capabilities.json"
+          {
+            echo '## Apple speech capabilities (not product acceptance)'
+            echo '```json'
+            cat "$RUNNER_TEMP/apple-speech-capabilities.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

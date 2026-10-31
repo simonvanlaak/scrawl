@@ -1266,7 +1266,11 @@ fn hosted_automatic_dedup_ends_when_terminal_record_is_pruned() {
         fs::rename(f.bundle(), &a).unwrap();
         let b = f.bundle();
         let first = f.client.enqueue(&a).unwrap();
-        let mut job = f.client.jobs().unwrap().remove(0);
+        let mut job = f
+            .client
+            .jobs()
+            .unwrap_or_else(|_| panic!("Could not read hosted jobs for terminal-record dedup test"))
+            .remove(0);
         job.status = terminal.into();
         f.client.save_job(&job).unwrap();
         assert_eq!(f.client.enqueue(&a).unwrap(), first);

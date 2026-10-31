@@ -123,6 +123,17 @@ No physical desk capture/audio; use synthetic media, virtual displays or owned d
 
 ## 5. Large-file policy and baseline record
 
+**Approved policy amendment (2026-10-31):** Simon explicitly approved root
+Engine dependency integration, then superseded the proposed exact-blob lock
+exception with a general recognized dependency-lockfile exemption. Generated
+dependency graphs are not human-maintained source modules. The current hook
+uses the exact, case-sensitive basenames documented in `.githooks/README.md`,
+at any nesting depth; arbitrary `*.lock`, runtime locks, manifests, config and
+other generated text remain capped. This explicitly supersedes the inherited
+hook-byte stability requirement for this hook change only. Pre-push checks stay
+unchanged; no bypass or hidden file is authorized. The paragraphs below record
+the historical baseline policy, not the amended lockfile rule.
+
 The effective `.githooks` path is active. `pre-commit` reads staged blobs, rejects added/changed text over 2000 physical lines (including rename destinations, comments and final unterminated line), and leaves unchanged oversized files alone. No extension exemptions; ordinary Cargo lock updates are also subject to the cap. `pre-push` independently requires clean exact HEAD, builds and runs full Rust tests. Do not bypass/disable either hook.
 
 At merged checkpoint, oversized migration inputs include `src/ui.rs` 7372, `src/handoff.rs` 3388, `src/settings.rs` 3185, `src/main.rs` 3110, `src/render.rs` 2522, `src/autocrop.rs` 2469, `src/capture.rs` 2446, `src/sketch.rs` 2448, `src/settings_window.rs` 2330, `src/native/pill/model.rs` 2308, `src/onboarding.rs` 2201, `src/capture/macos.rs` 2070, `site/src/styles.css` 4096 and `Cargo.lock` 8226. A fixture is also oversized. A pure rename of one fails; split it coherently in the same commit before changing its path. Do not churn Cargo.lock; any necessary dependency change needs a policy-compatible lock strategy explicitly resolved with coordinator, never an exemption smuggled into this migration.
@@ -364,6 +375,40 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   native candidate; Linux GUI/acquisition, Mac/native/media acceptance, runtime
   wiring and platform matrix remain outstanding. No install, VM, live config,
   media capture, merge, deployment or outbound delivery. Existing #199 stays draft.
+
+### Engine package edge and dependency-lock policy checkpoint (2026-10-31)
+
+- Isolated implementation starts from clean `8d6b8c75189b57699b2c36371a214fe55ad21d02`
+  on `t3/capture-engine-package-hook`, not the coordinator checkout. All Engine
+  files still match approved donor `057f7a24` exactly. The recorder split is
+  already present in this base; no other worker changes were cherry-picked.
+- Root Cargo now declares a normal `capture/engine` path dependency on macOS
+  and Linux, without a workspace or production lifecycle calls. Cargo's offline
+  reconciliation adds exactly ten lines to the root lock (8236 total): Engine's
+  package record and root dependency edge. A parsed comparison confirms every
+  existing package record, version, checksum and dependency list is preserved
+  except that edge. The nested Engine lock is unchanged, not copied.
+- Hook tests exercised real disposable Git repositories and commits. Before the
+  hook edit, the new lockfile acceptance cases failed for the intended 2000-line
+  rejection (16 tests, 27 subtest/test failures). After the minimal basename
+  exception, all 26 Python hook tests pass, including unchanged pre-push tests.
+  Root/nested locks with changed bytes pass; near-matches, source/config/generated
+  files and renamed source destinations fail; staged-index semantics remain.
+- Linux-filtered `cargo metadata --offline --locked --filter-platform
+  x86_64-unknown-linux-gnu --format-version 1` and `cargo tree --offline --locked
+  --target x86_64-unknown-linux-gnu -i apparent-capture-engine` confirm the actual
+  root graph edge. Unfiltered metadata reconciled the lock but failed while
+  fetching uncached `anstyle-wincon v3.0.11` offline; it is not a successful
+  all-platform graph probe. Logs are retained privately under
+  `~/.local/share/apparent/refactor-evidence/engine-package-hook/`.
+- At this checkpoint root build/full tests and standalone Engine tests still
+  await resource admission and publication's unchanged pre-push gate. Another
+  worker was compiling; no competing high-memory build was launched. Final
+  results and independent policy review belong to the handoff, not a claim here.
+- Production lifecycle/lease/receipt wiring, native artifact/durability barriers,
+  macOS build and native acceptance remain separate gates. No install, live
+  config, GUI/capture, VM, rental, merge, deployment or release is included.
+
 
 ### Coordinator handoff / next dispatch
 

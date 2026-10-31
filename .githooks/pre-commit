@@ -6,6 +6,13 @@ import sys
 
 
 MAX_LINES = 2000
+# Generated dependency graphs are not human-maintained source modules. Match
+# exact basenames at any depth, not arbitrary *.lock files or runtime locks.
+DEPENDENCY_LOCKFILES = frozenset({
+    b"Cargo.lock", b"package-lock.json", b"npm-shrinkwrap.json", b"yarn.lock",
+    b"pnpm-lock.yaml", b"bun.lock", b"bun.lockb", b"uv.lock", b"poetry.lock",
+    b"Pipfile.lock", b"composer.lock", b"Gemfile.lock", b"go.sum",
+})
 
 
 def git(*args):
@@ -24,6 +31,8 @@ def main():
         _, mode, _, blob, _ = metadata.split()
         if mode not in (b"100644", b"100755"):
             continue  # Symlinks and submodules are not source text.
+        if path.rsplit(b"/", 1)[-1] in DEPENDENCY_LOCKFILES:
+            continue
         content = git("cat-file", "blob", blob.decode("ascii"))
         if b"\0" in content[:8000]:
             continue  # Git-style binary detection; no extension allowlist.

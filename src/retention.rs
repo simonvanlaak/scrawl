@@ -477,12 +477,30 @@ fn trash_media(bundle: &Path, items: &[PathBuf], days: u32, trasher: Trasher) ->
 /// Runs a plan. Each step is checked again just before it runs, in case a capture or a copy
 /// started meanwhile.
 pub fn apply(actions: &[Action], policy: &Policy, trasher: Trasher, shrink: bool) -> Report {
+    apply_with_maintenance(actions, policy, trasher, shrink, crate::capture_runtime::maintenance)
+}
+
+pub(crate) fn apply_with_maintenance(
+    actions: &[Action], policy: &Policy, trasher: Trasher, shrink: bool,
+    maintenance: impl Fn(&Path) -> Result<Option<apparent_capture_engine::BundleLease>>,
+) -> Report {
     let mut report = Report::default();
     for action in actions {
         let bundle = match action {
             Action::TrashMedia { bundle, .. }
             | Action::TrashBundle(bundle)
             | Action::Shrink { bundle, .. } => bundle,
+        };
+        // Engine lease first, then the existing process-local claim. Hold both
+        // over trash/rename/encode, including when capture UI has disappeared.
+        let _maintenance = match maintenance(bundle) {
+            Ok(Some(lease)) => lease,
+            Ok(None) => continue,
+            Err(error) => {
+                report.errors += 1;
+                apparent_log(format!("retention: ownership unavailable: {error:#}"));
+                continue;
+            }
         };
         let Some(_claim) = claim(bundle) else {
             continue;
@@ -804,6 +822,9 @@ fn shrink_now(dir: &Path) -> std::result::Result<(), ()> {
     {
         return Err(());
     }
+    let Ok(Some(_maintenance)) = crate::capture_runtime::maintenance(dir) else {
+        return Err(());
+    };
     let Some(_claim) = claim(dir) else {
         return Err(());
     };

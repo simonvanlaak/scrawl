@@ -107,7 +107,7 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 |---|---|---|
 | F0 | Ancestry, isolated branch, hook unchanged, owned plan, committed/pushed/read-back PR | Plan checkpoint published as draft #199; final evidence commit readback belongs to handoff |
 | E1 | One recorder/finalizer used by GUI and Agent; no engine caller effects | Unrun |
-| E2 | Real multiprocess contention, restart receipts, crash recovery, retention leases | Unrun |
+| E2 | Real multiprocess contention, restart receipts, crash recovery, retention leases | Approved staged Engine package integrated byte-for-byte; Linux package process tests pass. Production callers still use existing ownership/leases; wiring and macOS proof pending |
 | E3 | One policy-free config transaction; nested/secret preservation and consent races | In-crate policy-free storage seam integrated; donor storage/subprocess and inherited consent tests pass on combined Linux candidate. Config donor `43bececa` and combined extraction `68b64d86` independently source-approved without blockers; macOS proof pending. Not a separate package |
 | E4 | Synthetic old bundles, cleaned media, device timelines, export/reprocess/read/zoom parity | Shared in-crate bundle production seam integrated with root aliases preserved; 10 focused pipeline tests and synthetic demo pass. Combined extraction `68b64d86` independently source-approved: exact 12 donor blobs and pipeline functions preserved. Donor artifact equivalence retained; complete archive/export/native matrix unrun |
 | A1 | Fresh standalone Agent installation, no Desktop GUI runtime dependency; real lifecycle | Unrun |
@@ -223,7 +223,7 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   the refactor. Draft #199 stays draft; no merge, deployment, installation,
   live config change, real-screen capture or outbound delivery was performed.
 
-### Docs-only integration and outstanding Engine repair (2026-10-31)
+### Docs-only integration and historical Engine repair gate (2026-10-31)
 
 - Docs integration starts from clean `68b64d86e317ee1eb85f194e4ecf28a1bf5ad30b`,
   tree `c9cd3941c0f019a6546e80b40235976a8a27b4e2`. Repair
@@ -245,12 +245,65 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   `/srv/clanker-hermes/cache/scratch/capture-docs-integration-20261031/`;
   final head/tree and remote/draft readback belong to the handoff.
 - Standalone Engine draft #202 at `46922056d6b9381a359a3408329cd1d6ea4c6b1a`
-  has a bounded source-review verdict of **REQUEST_CHANGES** for unsafe trust of
+  had a bounded source-review verdict of **REQUEST_CHANGES** for unsafe trust of
   the final bundle directory and incompatible legacy IDs. Repair is actively
-  running in a separate worktree; this records no repaired or approved candidate.
+  running in a separate worktree at that checkpoint; superseded by the approved
+  package integration below, not retroactively relabelled as passing evidence.
   That package is not production-wired. Standalone Agent/Engine wiring and web
   Desktop remain unfinished. #199 remains draft; this is docs integration only,
   not refactor completion, native acceptance or permission to merge.
+
+### Approved staged Engine integration (2026-10-31)
+
+- Starting identity: clean `integration/capture-boundaries-plan` at
+  `3cf6aba7392954e9ad29cc63bc4100cb99db08de`. Adopted `ec1bc589`, `46922056`,
+  `33fe4714`, `057f7a24` in order with `cherry-pick -x`, yielding code checkpoint
+  `c571a1bb912d835a9096fdc9c9d8b14d554b7259`, tree
+  `e2fb51604add6ffad17ea947e10d8963fae7856a`. All 16 Engine blobs and modes
+  equal frozen donor `057f7a246f8655e1e96fd72c95b8f34d3adbeaad` (donor tree
+  `44050931c94d05420d7fec02fa12eb94b50560d8`). All 517 starting tracked paths
+  were identical at code checkpoint; this ledger is the sole later exception.
+  Root Rust/config/pipeline/web/UI/scripts/hooks/build/helper/manifests and
+  `Cargo.lock` are unchanged. No root dependency, workspace or duplicated
+  `#[path]` implementation was introduced; recorder worker WIP was not adopted.
+- Independent exact-donor source re-review **APPROVED**, no blocking security or
+  correctness findings: private evidence
+  `/srv/clanker-hermes/cache/scratch/independent-engine-057f7a24-msfho612/review.md`.
+  Unsafe writable output-directory Saved and legacy bundle identity blockers
+  are resolved. Manifest reads are bounded at 64 MiB; failed temporary-record
+  cleanup, crash-before-terminal-publication and first-bootstrap races have
+  regressions. This is staged-library source approval, not Mac/media acceptance.
+- Fresh combined Linux evidence is retained outside git at
+  `/srv/clanker-hermes/cache/scratch/engine-integration-5kgo29g0/` with per-command
+  source head/tree, exits, complete logs and SHA-256 receipts. Unmodified
+  checkpoint pre-push hooks built root offline with `-j 3`, passed 10 Python
+  guard tests, and ran full root Rust **671 passed / 0 failed / 3 ignored**.
+  Donor root **664/3** remains older-base evidence, not combined proof.
+- Package offline build/test use `--manifest-path capture/engine/Cargo.toml`
+  and `-j 3`; full package **22 passed / 0 failed / 0 ignored** (including two
+  no-op subprocess entrypoints), focused `review_regressions` **7 passed**.
+  Package `cargo fmt -- --check` and `cargo tree --offline` pass. Package tests
+  use an owned private HOME-rooted synthetic TMPDIR because the real scratch
+  cache has an unsafe writable ancestor; actual HOME/config and ancestor modes
+  were not changed. Root tests use normal scratch, not the trusted-output fixture.
+- Initial root hook with HOME-rooted TMPDIR failed one Settings path-display
+  assertion: expected absolute fixture path versus intentional `~/` rendering
+  (**670 passed / 1 failed / 3 ignored**). Complete unchanged root rerun with
+  normal scratch passed. Initial package build was interrupted by terminal's
+  420-second timeout without an exit receipt; no pass is credited. Retry with
+  explicit empty `RUSTC_WRAPPER` passed; no source/config changes or claimed
+  compiler diagnosis. Failed/interrupted logs are retained, not overwritten.
+- **Not production wired.** All Desktop/timed/Agent/retention/export/reprocess
+  callers still need one persistent shared runtime, persisted bundle identities,
+  real lifecycle guard ownership and leases. Complete media/artifact validation
+  and durability barriers remain the caller's responsibility; the Engine proof
+  does not certify a complete bundle. Root manifest/lock stability still blocks
+  an unapproved wiring shortcut. No standalone Agent or chosen Desktop host.
+- macOS compilation/filesystem/process/crash proof, native GUI/media matrix and
+  production wiring remain open. Native harness work frozen at `3cf6aba7` is
+  older evidence, not integrated-package proof. No install, live capture,
+  real-config edit, deployment, merge or outbound delivery. Existing #199 stays
+  draft; final head/tree and exact remote/PR readback are in the handoff.
 
 ### Coordinator handoff / next dispatch
 
@@ -260,5 +313,5 @@ writer owns this shared branch. Isolated main seam ownership is `src/main.rs`,
 `src/handoff.rs`, `src/handoff/**`. Do not edit across those boundaries. Adopt
 their committed, tested slices serially; no Cargo/build/helper churn. Outstanding
 acceptance dependencies remain: unchosen native host, no standalone Agent runtime,
-process-local ownership/leases, native platform matrix and oversized source/lock
+production adoption of the staged Engine's ownership/leases, native platform matrix and oversized source/lock
 constraints. Other open PRs are not permission to fold unrelated features here.

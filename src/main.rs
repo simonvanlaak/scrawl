@@ -657,8 +657,9 @@ fn stage_replay_movie(video: &std::path::Path, iter_out: &std::path::Path) -> Re
     let _ = std::fs::remove_dir_all(iter_out);
     std::fs::create_dir_all(iter_out)?;
     let staged = iter_out.join(video.file_name().context("Bad video name")?);
-    std::fs::hard_link(video, &staged)
-        .or_else(|_| std::fs::copy(video, &staged).map(|_| ()))?;
+    // Publication requires sole ownership. A successful hard link is NOT a safe
+    // optimization: it also lets writes in a replay mutate the source recording.
+    std::fs::copy(video, &staged)?;
     Ok(staged)
 }
 

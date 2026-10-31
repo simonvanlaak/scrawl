@@ -1,4 +1,4 @@
-name: Website and Connect delivery
+name: Website and Connect — checks & deploy
 
 on:
   pull_request:

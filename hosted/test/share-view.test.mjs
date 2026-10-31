@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
-import { renderShare, shareViewScript } from '../src/share-view.js'
+import { renderShare, shareViewScript } from '../src/share-view.ts'
 const model = { url: 'https://share.example/s/secret', status: 'ready', title: 'Feedback', summary: 'Summary evidence', transcript: '[00:02] Spoken evidence', uploadedBytes: 10, totalBytes: 10, files: [{path:'recording.mp4',url:'https://share.example/s/secret/files/recording.mp4',size:10,sha256:'a'.repeat(64)},{path:'frames/frame-01.png',url:'https://share.example/s/secret/files/frames/frame-01.png',size:0,sha256:'b'.repeat(64)}] }
 test('ready evidence is readable without JavaScript and consumption comes first', () => {
  const html = renderShare(model)

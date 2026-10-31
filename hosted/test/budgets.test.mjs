@@ -6,7 +6,7 @@ import {fixture,id,file} from './helpers.mjs';
 // Count SQL statements, NOT merely batch RPCs. This is an audit seam around
 // real D1/R2, not an emulation of Cloudflare's remote CPU or billing enforcement.
 const instrumented=await build({stdin:{resolveDir:process.cwd(),contents:`
- import worker from './src/worker.js';
+ import worker from './src/worker.ts';
  let failedDelete=false,failedStamp=false,deletePages=0,stampPages=0;
  function counted(env,counts){
   const DB={prepare(sql){const wrap=s=>({bind(...args){if(args.length>100)throw new Error('D1 parameter budget exceeded');return wrap(s.bind(...args));},

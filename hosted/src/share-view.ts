@@ -1,14 +1,16 @@
-const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-function safeUrl(value) {
+import type {ShareModel, ShareState} from './types.ts';
+const entities: Record<string,string> = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}
+const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => entities[c])
+function safeUrl(value: string) {
   try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password ? u.href : '' } catch { return '' }
 }
-export function renderShare(model) {
+export function renderShare(model: ShareModel) {
   const candidate = safeUrl(model.url)
   const base = candidate && !new URL(candidate).search && !new URL(candidate).hash ? candidate.replace(/\/$/, '') : ''
   const complete = Number.isSafeInteger(model.totalBytes) && model.totalBytes >= 0 && model.uploadedBytes === model.totalBytes
   const status = model.status === 'ready' && !complete ? 'pending' : model.status
   const ready = status === 'ready'
-  const messages = {pending:['Uploading','The sender is still uploading this recording. It is not ready to view.'],paused:['Paused','The upload is paused. Ask the sender to resume it.'],failed:['Failed','The upload failed. Ask the sender to retry.'],expired:['Expired','This recording has expired. Ask the sender for a new recording.'],revoked:['Revoked','The sender stopped sharing this recording.'],deleted:['Deleted','This recording was deleted.']}
+  const messages: Partial<Record<ShareState,[string,string]>> = {pending:['Uploading','The sender is still uploading this recording. It is not ready to view.'],paused:['Paused','The upload is paused. Ask the sender to resume it.'],failed:['Failed','The upload failed. Ask the sender to retry.'],expired:['Expired','This recording has expired. Ask the sender for a new recording.'],revoked:['Revoked','The sender stopped sharing this recording.'],deleted:['Deleted','This recording was deleted.']}
   const [heading, detail] = messages[status] || ['Unavailable','This recording is unavailable.']
   const files = ready && base && Array.isArray(model.files) ? model.files.map(file => ({...file,url:safeUrl(file.url)})).filter(file => file.url && new URL(file.url).origin === new URL(base).origin) : []
   const video = files.find(file => /recording\.(mp4|mov)$/.test(file.path))

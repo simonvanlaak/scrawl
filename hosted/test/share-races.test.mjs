@@ -6,7 +6,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {fixture,id,file} from './helpers.mjs';
 
 const instrumented=await build({stdin:{resolveDir:process.cwd(),contents:`
- import worker from './src/worker.js';
+ import worker from './src/worker.ts';
  export default {async fetch(request,env){
   let calls=0;
   const BUCKET=new Proxy(env.BUCKET,{get(target,key){const value=target[key];return typeof value==='function'?async(...args)=>{

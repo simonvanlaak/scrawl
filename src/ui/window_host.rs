@@ -320,5 +320,3 @@ pub(crate) fn start_metric(name: &str, started: Instant) {
         );
     }
 }
-
-

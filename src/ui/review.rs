@@ -884,4 +884,3 @@ pub(super) fn hint_button(
             )
         })
 }
-

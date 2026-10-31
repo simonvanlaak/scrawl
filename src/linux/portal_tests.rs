@@ -12,6 +12,7 @@ impl DiagnosticSession {
 struct DiagnosticPortal {
     closed: flume::Sender<()>,
     peers: flume::Sender<std::os::unix::net::UnixStream>,
+    next: AtomicU32,
 }
 
 async fn diagnostic_response(connection: &zbus::Connection, header: zbus::message::Header<'_>,
@@ -49,8 +50,9 @@ impl DiagnosticPortal {
     async fn start(&self, _session: OwnedObjectPath, _parent: &str, options: HashMap<String, OwnedValue>,
         #[zbus(connection)] connection: &zbus::Connection,
         #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<OwnedObjectPath> {
-        let streams = vec![(71u32, HashMap::from([("source_type", Value::from(1u32)), ("mapping_id", Value::from("SYNTHETIC-A"))])),
-            (72u32, HashMap::from([("source_type", Value::from(1u32)), ("mapping_id", Value::from("SYNTHETIC-B"))]))];
+        let node = self.next.fetch_add(1, Ordering::Relaxed);
+        let streams = vec![(node, HashMap::from([("source_type", Value::from(1u32)),
+            ("mapping_id", Value::from(if node == 71 { "SYNTHETIC-A" } else { "SYNTHETIC-B" }))]))];
         diagnostic_response(connection, header, &options, HashMap::from([
             ("streams", Value::from(streams)), ("restore_token", Value::from("PRIVATE-CANARY-NEVER-LOG"))])).await
     }
@@ -77,7 +79,7 @@ fn diagnostic_authorization_runs_on_private_bus() {
     let records: Vec<serde_json::Value> = stderr.lines().filter_map(|line| line.split_once("portal-resource "))
         .map(|(_, json)| serde_json::from_str(json).unwrap()).collect();
     let streams: Vec<_> = records.iter().filter(|r| r["event"] == "held_fd" && r["role"] == "stream").collect();
-    assert_eq!(streams.len(), 4);
+    assert_eq!(streams.len(), 2);
     let generations: std::collections::HashSet<_> = streams.iter().map(|r| r["generation"].as_u64().unwrap()).collect();
     assert_eq!(generations.len(), 2);
     for held in streams {
@@ -90,7 +92,9 @@ fn diagnostic_authorization_runs_on_private_bus() {
             && r["fd"] == held["parent_fd"] && r["socket_cookie"] == held["socket_cookie"] && r["target"] == held["target"]));
     }
     if let Ok(path) = std::env::var("APPARENT_DIAGNOSTIC_TEST_OUTPUT") {
-        std::fs::write(path, serde_json::to_vec_pretty(&records).unwrap()).unwrap();
+        let observations: Vec<serde_json::Value> = stderr.lines().filter_map(|line| line.strip_prefix("portal-test-observation "))
+            .map(|json| serde_json::from_str(json).unwrap()).collect();
+        std::fs::write(path, serde_json::to_vec_pretty(&serde_json::json!({"records": records, "observations": observations})).unwrap()).unwrap();
     }
 }
 
@@ -102,23 +106,52 @@ fn diagnostic_authorization_private_bus_fixture() {
         let (closed, closes) = flume::bounded(4);
         let (peers, remote_peers) = flume::bounded(4);
         let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
-            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers }).unwrap().build().await.unwrap();
-        for _ in 0..2 {
-            let worker = std::thread::spawn(|| {
+            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71) }).unwrap().build().await.unwrap();
+        let (release, released) = flume::bounded(1);
+        let (ready, is_ready) = flume::bounded(1);
+        let worker = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for _ in 0..2 {
                 let (streams, token) = portal_screencasts_until(false, true, "synthetic-test-only", &AtomicBool::new(false),
                     std::time::Instant::now() + Duration::from_secs(3)).unwrap();
                 assert_eq!(token.as_deref(), Some("PRIVATE-CANARY-NEVER-LOG"));
-                assert_eq!(streams.len(), 2);
+                assert_eq!(streams.len(), 1);
                 for stream in &streams { stream.diagnostic_media_binding(); }
-                drop(streams);
-            });
-            let mut peer = remote_peers.recv_async().await.unwrap();
-            worker.join().unwrap();
+                held.extend(streams);
+            }
+            ready.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(3)).unwrap();
+            drop(held);
+        });
+        let mut peers = Vec::new();
+        for _ in 0..2 { peers.push(remote_peers.recv_async().await.unwrap()); }
+        is_ready.recv_async().await.unwrap();
+        fn observe(label: &str) {
+            let fds: HashMap<_, _> = std::fs::read_dir("/proc/self/fd").unwrap().filter_map(|entry| {
+                let p = entry.unwrap().path();
+                Some((p.file_name()?.to_str()?.to_owned(), std::fs::read_link(&p).ok()?.to_str()?.to_owned()))
+            }).collect();
+            let cookies: HashMap<_, _> = fds.iter().filter_map(|(fd, target)| {
+                if !target.starts_with("socket:[") { return None; }
+                let mut cookie = 0u64;
+                let mut len = std::mem::size_of_val(&cookie) as libc::socklen_t;
+                // Independent observer read while the producer's handles remain held.
+                let result = unsafe { libc::getsockopt(fd.parse().unwrap(), libc::SOL_SOCKET,
+                    libc::SO_COOKIE, &mut cookie as *mut _ as *mut _, &mut len) };
+                (result == 0).then(|| (fd.clone(), cookie.to_string()))
+            }).collect();
+            eprintln!("portal-test-observation {}", serde_json::json!({"label": label, "fd": fds, "fd_cookie": cookies}));
+        }
+        observe("active");
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        for mut peer in peers {
             peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             use std::io::Read;
             assert_eq!(peer.read(&mut [0]).unwrap(), 0, "actual last descriptor release must produce EOF");
             assert!(closes.recv_timeout(Duration::from_secs(2)).is_ok());
         }
+        observe("completed");
     });
 }
 

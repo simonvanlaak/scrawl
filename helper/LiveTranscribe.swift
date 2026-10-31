@@ -127,6 +127,7 @@ private enum LiveProgress { case samples(Int), resultsDrained, terminalFinished 
 /// Input success, terminal success AND complete result consumption are independent.
 /// Any failure bypasses a blocked reader/preparation without awaiting either task.
 private func finishLiveInput(_ events: AsyncThrowingStream<LiveProgress, Error>) async throws -> Int {
+  try Task.checkCancellation()
   var total: Int?
   var drained = false; var finished = false
   for try await event in events {
@@ -138,6 +139,7 @@ private func finishLiveInput(_ events: AsyncThrowingStream<LiveProgress, Error>)
     }
     if let total, drained && finished { return total }
   }
+  try Task.checkCancellation()
   throw HelperError("live transcription ended without input, terminal and results drain")
 }
 

@@ -408,6 +408,15 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
 - Production lifecycle/lease/receipt wiring, native artifact/durability barriers,
   macOS build and native acceptance remain separate gates. No install, live
   config, GUI/capture, VM, rental, merge, deployment or release is included.
+- Parent-owned independent source review approved frozen `142b495d` with no
+  blockers and independently repeated all 26 hook tests plus parsed lock/graph
+  preservation. A separate documentation-only follow-up corrects the Engine
+  README's stale root-manifest and line-cap claims. Searches found no compile-time
+  embedding/build reference to that README. Engine production source, manifests,
+  standalone lock and all reviewed policy/test/dependency bytes remain unchanged;
+  the source verdict still applies. This does not satisfy pending execution or
+  native gates. The admission-only publication waiter was stopped before any
+  push/build to bind its retry to the follow-up head, not bypass verification.
 
 
 ### Coordinator handoff / next dispatch

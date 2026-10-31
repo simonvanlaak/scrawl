@@ -74,8 +74,12 @@ impl Directory {
         );
         if create {
             use std::os::unix::fs::PermissionsExt;
-            ensure!(m.uid() == unsafe { libc::geteuid() }, "bundle is not owned by this user");
-            dir.0.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+            ensure!(
+                m.uid() == unsafe { libc::geteuid() },
+                "bundle is not owned by this user"
+            );
+            dir.0
+                .set_permissions(std::fs::Permissions::from_mode(0o700))?;
         }
         Ok(dir)
     }
@@ -116,10 +120,7 @@ impl Directory {
             m.is_file() && m.uid() == unsafe { libc::geteuid() } && m.mode() & 0o002 == 0,
             "unsafe artifact type, owner or permissions: {leaf}"
         );
-        ensure!(
-            m.nlink() == 1,
-            "refusing a hard-linked artifact"
-        );
+        ensure!(m.nlink() == 1, "refusing a hard-linked artifact");
         Ok(file)
     }
 
@@ -139,6 +140,8 @@ impl Directory {
             dir = dir.child(part, true)?;
         }
         let mut file = dir.leaf(parts[parts.len() - 1], true)?;
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         file.set_len(0)?;
         file.write_all(bytes)?;
         file.sync_all()?;

@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { readFile, mkdir } from 'node:fs/promises'
 import { resolve, extname } from 'node:path'
 import { chromium } from 'playwright-core'
-import { renderShare, shareViewScript, shareViewStyles } from '../../hosted/src/share-view.js'
+import { renderShare, shareViewScript, shareViewStyles } from '../../hosted/src/share-view.ts'
 const root = resolve(process.env.SITE_ARTIFACT || 'dist-apparent')
 const evidence = resolve(process.env.SITE_EVIDENCE || `${process.env.TMPDIR}/hosted-web-evidence`)
 await mkdir(evidence, { recursive: true })
@@ -16,12 +16,12 @@ for (const route of ['hosted', 'hosted/device', 'hosted/shares']) {
 assert(!(await readFile(`${root}/index.html`, 'utf8')).includes('href="/hosted'))
 assert(!(await readFile(`${root}/sitemap.xml`, 'utf8')).includes('/hosted'))
 const sharesCursor = '1793437200000:' + 'b'.repeat(32)
-let scenario = {}, writes = [], shareReads = [], approved = false, signedOut = false, interest = false, revoked = false, recipientStatus = 'ready'
+let scenario = {}, writes = [], shareReads = [], approved = false, signedOut = false, interest = false, revoked = false, recipientStatus = 'ready', recipientUploadedBytes = 5
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (url.pathname === '/share-view.js') { res.setHeader('Content-Type','text/javascript'); return res.end(shareViewScript) }
   if (url.pathname === '/share-view.css') { res.setHeader('Content-Type','text/css'); return res.end(shareViewStyles) }
-  if (url.pathname === '/s/synthetic/manifest.json') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({status:recipientStatus})) }
+  if (url.pathname === '/s/synthetic/manifest.json') { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({status:recipientStatus,uploadedBytes:recipientUploadedBytes,totalBytes:10})) }
   if (url.pathname === '/s/synthetic') {
     res.setHeader('Content-Type','text/html');res.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
     return res.end(renderShare({url:`http://127.0.0.1:${server.address().port}/s/synthetic`,status:recipientStatus,title:'Feedback <script>window.injected=true</script>',summary:'Synthetic summary <img src=x onerror=evil()>',transcript:'[00:02] Move this button.',uploadedBytes:recipientStatus==='ready'?10:5,totalBytes:10,files:[{path:'recording.mp4',size:10,sha256:'a'.repeat(64),url:`http://127.0.0.1:${server.address().port}/s/synthetic/files/recording.mp4`}]}))
@@ -156,9 +156,15 @@ try {
   const errors=[];page.on('pageerror',e=>errors.push(String(e)))
   await page.goto(`http://127.0.0.1:${server.address().port}/s/synthetic`)
   await page.getByRole('heading',{name:'Uploading',exact:true}).first().waitFor()
+  recipientUploadedBytes=8
+  await page.getByText('8 of 10 bytes uploaded.',{exact:true}).waitFor({timeout:10000})
+  recipientUploadedBytes=11
+  await page.waitForResponse(response=>response.url().endsWith('/manifest.json'))
+  await page.waitForTimeout(100)
+  assert.equal(await page.getByText('8 of 10 bytes uploaded.',{exact:true}).count(),1,'invalid counters must not replace confirmed progress')
   recipientStatus='ready'
   await page.getByRole('heading',{name:'Summary',exact:true}).waitFor({timeout:10000})
   assert.equal(await page.evaluate(()=>window.injected),undefined);assert.deepEqual(errors,[])
-  await page.close();results.push('recipient-pending-ready-csp')
+  await page.close();results.push('recipient-progress-validation-pending-ready-csp')
   console.log(JSON.stringify({ synthetic: true, passed: results, screenshots: evidence }, null, 2))
 } finally { await browser.close(); await new Promise(r => server.close(r)) }

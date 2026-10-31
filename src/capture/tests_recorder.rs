@@ -52,7 +52,7 @@ fn producer_terminal_source_error_is_not_pending_consent() {
             scale: 1.0,
         },
     };
-    let session = ScreenCaptureSession::start(target, None, Arc::new(Mutex::new(vec![])));
+    let session = ScreenCaptureSession::start(target.clone(), None, Arc::new(Mutex::new(vec![])));
     let deadline = Instant::now() + Duration::from_secs(2);
     while !session.failed_to_start() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
@@ -66,6 +66,36 @@ fn producer_terminal_source_error_is_not_pending_consent() {
     assert!(
         failed,
         "the source resolver returned a terminal error, not pending consent"
+    );
+
+    // Preserve the native live-worker contract without exposing Engine's private handle.
+    // The marker observes return from the actual runner, not a replacement producer.
+    let returned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_returned = Arc::clone(&returned);
+    let session = ScreenCaptureSession::start_with_runner(
+        target,
+        None,
+        Arc::new(Mutex::new(vec![])),
+        move |sampler| {
+            let result = platform::run_sampler(sampler);
+            worker_returned.store(true, Ordering::Release);
+            result
+        },
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !session.failed_to_start() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(session.failed_to_start());
+    assert!(
+        !returned.load(Ordering::Acquire),
+        "terminal failure must be visible while the native worker is alive"
+    );
+    assert!(!session.has_frames());
+    assert!(session.stop().frames.is_empty());
+    assert!(
+        returned.load(Ordering::Acquire),
+        "Stop must join the actual native runner"
     );
 }
 

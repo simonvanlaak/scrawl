@@ -12,8 +12,8 @@
 //! from the GlobalShortcuts portal (or runtime binds on Hyprland), and clicks and ⇧ from the input devices when the user may
 //! read them (`input`). See `docs/linux.md`.
 
-pub mod atspi;
 pub mod appearance;
+pub mod atspi;
 pub mod auto_paste;
 pub mod clipboard;
 pub mod hyprland;
@@ -36,8 +36,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 pub use x11::{
-    Monitor, WindowInfo, active_window as foreground_window, monitor_at, monitors,
-    primary_monitor, top_level_windows, window_info,
+    Monitor, WindowInfo, active_window as foreground_window, monitor_at, monitors, primary_monitor,
+    top_level_windows, window_info,
 };
 
 /// RandR's name atom identifies an output while this X server is running. A list index does
@@ -51,7 +51,11 @@ static WAYLAND_DISPLAY: OnceLock<Option<OsString>> = OnceLock::new();
 /// Called first thing in `main`, before any thread starts: remembers the Wayland display (for
 /// the clipboard and the portals) and hides it from GPUI, so its windows go through XWayland.
 pub fn prepare_process() {
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").filter(|v| !v.is_empty());
+    // A child relaunched by the updater inherits the saved name, not the
+    // WAYLAND_DISPLAY hidden from GPUI in its parent. Resolve it before caching.
+    let wayland = std::env::var_os("WAYLAND_DISPLAY")
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var_os("APPARENT_WAYLAND_DISPLAY").filter(|v| !v.is_empty()));
     let _ = WAYLAND_DISPLAY.set(wayland.clone());
     if wayland.is_some() && std::env::var_os("APPARENT_NATIVE_WAYLAND").is_none() {
         // SAFETY: called from `main` before any other thread exists.
@@ -131,8 +135,14 @@ fn desktop_rect() -> Option<[f64; 4]> {
     let monitors = monitors();
     let x0 = monitors.iter().map(|m| m.rect[0]).reduce(f64::min)?;
     let y0 = monitors.iter().map(|m| m.rect[1]).reduce(f64::min)?;
-    let x1 = monitors.iter().map(|m| m.rect[0] + m.rect[2]).reduce(f64::max)?;
-    let y1 = monitors.iter().map(|m| m.rect[1] + m.rect[3]).reduce(f64::max)?;
+    let x1 = monitors
+        .iter()
+        .map(|m| m.rect[0] + m.rect[2])
+        .reduce(f64::max)?;
+    let y1 = monitors
+        .iter()
+        .map(|m| m.rect[1] + m.rect[3])
+        .reduce(f64::max)?;
     let rect = Some([x0, y0, x1 - x0, y1 - y0]);
     *cache = Some((std::time::Instant::now(), rect));
     rect
@@ -233,9 +243,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn startup_preserves_wayland_display_across_relaunch() {
+        for (direct, saved, expected) in [
+            (Some("wayland-1"), None, "wayland-1"),
+            (None, Some("wayland-1"), "wayland-1"),
+            (Some(""), Some("wayland-1"), "wayland-1"),
+            (Some("wayland-2"), Some("wayland-1"), "wayland-2"),
+            (None, None, ""),
+        ] {
+            // Each launch gets its own environment and OnceLock. Never mutate the
+            // multi-threaded test runner's environment or read its desktop config.
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "linux::tests::wayland_startup_child",
+                    "--nocapture",
+                ])
+                .env_remove("WAYLAND_DISPLAY")
+                .env_remove("APPARENT_WAYLAND_DISPLAY")
+                .env_remove("APPARENT_NATIVE_WAYLAND")
+                .env("APPARENT_TEST_DISPLAY_EXPECTED", expected);
+            if let Some(value) = direct {
+                child.env("WAYLAND_DISPLAY", value);
+            }
+            if let Some(value) = saved {
+                child.env("APPARENT_WAYLAND_DISPLAY", value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "direct={direct:?}, saved={saved:?}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn wayland_startup_child() {
+        let Ok(expected) = std::env::var("APPARENT_TEST_DISPLAY_EXPECTED") else {
+            return;
+        };
+        prepare_process();
+        assert_eq!(
+            wayland_display(),
+            (!expected.is_empty()).then(|| OsString::from(&expected))
+        );
+        if !expected.is_empty() {
+            assert!(std::env::var_os("WAYLAND_DISPLAY").is_none());
+            assert_eq!(
+                std::env::var_os("APPARENT_WAYLAND_DISPLAY"),
+                Some(OsString::from(expected))
+            );
+        }
+    }
+
+    #[test]
     fn app_names_read_like_names() {
         assert_eq!(pretty_app_name("firefox"), "Firefox");
-        assert_eq!(pretty_app_name("gnome-terminal-server"), "Gnome Terminal Server");
+        assert_eq!(
+            pretty_app_name("gnome-terminal-server"),
+            "Gnome Terminal Server"
+        );
         assert_eq!(pretty_app_name("org.gnome.Nautilus"), "Nautilus");
         assert_eq!(pretty_app_name("Google-chrome"), "Google Chrome");
     }

@@ -22,6 +22,16 @@
   ],
   "features": [
     {
+      "id": "operation-error-recovery",
+      "group": "record",
+      "name": "Error recovery popup",
+      "says": "Capture, copy, paste, review-open and video-export failures offer restart guidance and Open Last Capture when a completed capture is available. Nothing is restarted, pasted or shared automatically.",
+      "status": "branch:t3/investigate-x1-copy-paste",
+      "platforms": ["mac", "linux"],
+      "note": "One popup coalesces concurrent errors. Open Last Capture opens the failed handoff's saved capture in local Review, or the latest completed capture for failures without a saved result. Process crashes before the UI starts cannot show this popup.",
+      "docs": ["docs/onboarding-and-settings.md#error-recovery"]
+    },
+    {
       "id": "site-feature-grid",
       "group": "install",
       "name": "Animated homepage feature explanations",

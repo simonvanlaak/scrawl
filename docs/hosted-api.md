@@ -1,10 +1,10 @@
 # Hosted Apparent API (v1)
 
-Implementation candidate; no deployment or live Google verification is implied. The Worker owns API/auth only; the site owns `/hosted` and `/hosted/device`.
+Implementation candidate; no deployment or live Google verification is implied. The Worker owns API/auth only; Connect's canonical browser routes are `/connect` and `/connect/device`. The site retains `/hosted` and `/hosted/device` rendering aliases.
 
 ## Browser integration contract
 
-Set `SITE_ORIGIN` to the exact trusted site origin and `API_ORIGIN` to the exact Worker origin. Browser fetches use `credentials: 'include'`. Only SITE_ORIGIN receives credentialed CORS. Prefer same-origin routing for reliable cookies. Cookies are Secure, HttpOnly, SameSite=Lax, Path=/, host-only. Cross-site (rather than same-site) deployments are not supported.
+Production topology: `SITE_ORIGIN=https://app.tryapparent.com`, `API_ORIGIN=https://hosted.tryapparent.com`, and optional transition `LEGACY_SITE_ORIGIN=https://hosted.tryapparent.com`. The API and registered Google callback stay on the existing hosted origin; existing host-only sessions and device credentials do not migrate. Browser fetches use `credentials: 'include'` across these same-site origins. CORS and CSRF share one exact-origin allowlist: only SITE_ORIGIN and the explicitly configured LEGACY_SITE_ORIGIN are trusted. No wildcards, foreign origins, `null`, or missing Origin are accepted for preflight or cookie-authenticated mutations. Omit LEGACY_SITE_ORIGIN to disable old browser-origin access. Cookies remain Secure, HttpOnly, SameSite=Lax, Path=/, host-only. Cross-site (rather than same-site) deployments are not supported. No schema, storage, quota, scope or consent change is needed.
 
 `GET /v1/session` always returns 200:
 
@@ -16,7 +16,7 @@ Anonymous shape: `{"authenticated":false,"csrfToken":null,"account":null,"slots"
 
 Cookie-authenticated mutations require **`X-CSRF-Token`** from session plus an exact trusted `Origin` header. Missing/wrong values return `csrf_failed`. This applies to `POST /auth/logout`, `POST /v1/waitlist`, `POST /v1/device/approve`, and `POST /v1/device/reject`. Bearer endpoints do not accept cookies as authorization.
 
-- `GET /auth/google/start?returnTo=/hosted` redirects to Google with state, nonce and PKCE. Only `/hosted` and `/hosted/device` (optional `code` query) are permitted return destinations.
+- `GET /auth/google/start?returnTo=/connect` redirects to Google with state, nonce and PKCE. Only fixed `/connect`, `/connect/device`, `/hosted` and `/hosted/device` paths (optional single `code` query, optional trailing slash) are permitted. Legacy paths normalize to `/connect` paths; arbitrary URLs, other query keys and fragments are rejected. Callback revalidates and normalizes already-stored legacy destinations too, preserving only the code.
 - `GET /auth/google/callback` validates state cookie and stored one-time state, exchanges code, verifies signed ID token against configured provider JWKS, issuer, audience, expiry, nonce and verified email. Never accepts email supplied by the browser as identity.
 - `POST /auth/logout` revokes the browser session, not separately approved device tokens; response `{ok:true}`.
 - `POST /v1/waitlist` JSON `{interestedAtFiveDollars:boolean}` -> `{ok:true}`. Authentication required; no billing.
@@ -28,7 +28,7 @@ Cookie-authenticated mutations require **`X-CSRF-Token`** from session plus an e
 
 Errors always JSON `{error:{code,message}}`; secrets/provider responses are never included. Authorization is `Bearer <random token>`, SHA-256 hashed at rest. Read and upload grants are separate; upload also reads own captures. Tokens expire in 30 days. `POST /v1/token/revoke` revokes the presented bearer token.
 
-`POST /v1/device/start` `{scope:'upload'|'read'}` -> `{deviceCode,userCode,verificationUri,expiresIn:600,interval:5}`. URI is SITE_ORIGIN `/hosted/device?code=...`. `POST /v1/device/poll` `{deviceCode}` -> `{status:'pending'}`, `{status:'approved',accessToken,scope}`, or `{status:'expired'|'rejected'}`. Poll interval is enforced (429 `slow_down`). Approved poll retries return the same token until device expiry using a server-key encrypted token envelope; only token hashes authorize requests.
+`POST /v1/device/start` `{scope:'upload'|'read'}` -> `{deviceCode,userCode,verificationUri,expiresIn:600,interval:5}`. URI is SITE_ORIGIN `/connect/device?code=...`. `POST /v1/device/poll` `{deviceCode}` -> `{status:'pending'}`, `{status:'approved',accessToken,scope}`, or `{status:'expired'|'rejected'}`. Poll interval is enforced (429 `slow_down`). Approved poll retries return the same token until device expiry using a server-key encrypted token envelope; only token hashes authorize requests.
 
 Capture IDs are lowercase 32-hex. `POST /v1/captures/:id` `{files:[{path,size,sha256}]}` atomically reserves the full manifest; identical order-independent retries succeed, differing manifests return `manifest_conflict`. Response `{id,status:'pending'|'ready',expiresAt}` (ISO UTC). Expiry is seven days from reservation; incomplete uploads expire after 24 hours to reclaim reservations. IDs remain tombstoned and cannot be reused after deletion/expiry. Quota 500,000,000 bytes, including pending. Maximum 512 files, JSON request 128 KiB, file 90,000,000 bytes (below Cloudflare Free/Pro 100MB request ceiling). Files larger than this are rejected at reservation with `file_too_large`; **no multipart extension is implemented in v1**. Clients must report this limitation, not split or silently omit assets. A full account can contain multiple bounded files; the 500MB quota is not a request-body limit.
 

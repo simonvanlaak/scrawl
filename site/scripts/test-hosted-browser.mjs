@@ -8,21 +8,29 @@ import { chromium } from 'playwright-core'
 const root = resolve(process.env.SITE_ARTIFACT || 'dist-apparent')
 const evidence = resolve(process.env.SITE_EVIDENCE || `${process.env.TMPDIR}/hosted-web-evidence`)
 await mkdir(evidence, { recursive: true })
-for (const route of ['hosted', 'hosted/device']) {
+for (const route of ['connect', 'connect/device', 'hosted', 'hosted/device']) {
   const html = await readFile(`${root}/${route}/index.html`, 'utf8')
   assert.match(html, /noindex, nofollow/); assert.match(html, /Checking your account/)
+  assert.match(html, /<title>Connect(?: a device)? — Apparent<\/title>/)
   assert(!html.includes('verified@example.com'))
 }
 assert(!(await readFile(`${root}/index.html`, 'utf8')).includes('href="/hosted'))
 assert(!(await readFile(`${root}/sitemap.xml`, 'utf8')).includes('/hosted'))
+assert(!(await readFile(`${root}/index.html`, 'utf8')).includes('href="/connect'))
+assert(!(await readFile(`${root}/sitemap.xml`, 'utf8')).includes('/connect'))
 // The packaged artifact must retain the exact approved art and original brand assets.
 for (const asset of ['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg']) {
   assert.deepEqual(await readFile(`${root}/${asset}`), await readFile(`public/${asset}`), `packaged ${asset}`)
 }
-let scenario = {}, writes = [], approved = false, signedOut = false, interest = false
+let scenario = {}, writes = [], calls = [], approved = false, signedOut = false, interest = false
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (url.pathname.startsWith('/v1/') || url.pathname === '/auth/logout') {
+    res.setHeader('Access-Control-Allow-Origin', `http://127.0.0.1:${server.address().port}`)
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token')
+    if (req.method === 'OPTIONS') return res.writeHead(204).end()
+    calls.push({ host: req.headers.host, cookie: req.headers.cookie })
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store')
     if (scenario.loading && url.pathname === '/v1/session') await new Promise(r => setTimeout(r, 650))
     if (scenario.unavailable) return res.writeHead(503).end('{}')
@@ -42,8 +50,7 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ authenticated: true, csrfToken: 'synthetic-csrf', account: { email: 'verified@example.com', beta: scenario.waitlist ? 'waitlist' : 'active', quotaBytes: 500000000, usedBytes: 0, waitlist: { interestedAtFiveDollars: interest } }, slots: { used: scenario.full ? 20 : 0, limit: scenario.invalid ? 50 : 20, remaining: scenario.full ? 0 : 20 }, accessToken: 'must-not-render' }))
   }
   let path = url.pathname
-  if (path === '/hosted' || path === '/hosted/') path = '/hosted/index.html'
-  if (path === '/hosted/device' || path === '/hosted/device/') path = '/hosted/device/index.html'
+  if (/^\/(connect|hosted)(\/device)?\/?$/.test(path)) path = path.replace(/\/$/, '') + '/index.html'
   if (path === '/') path = '/index.html'
   const file = resolve(root, '.' + path)
   if (!file.startsWith(root + '/')) return res.writeHead(403).end()
@@ -51,6 +58,9 @@ const server = createServer(async (req, res) => {
   catch { res.writeHead(404).end() }
 })
 await new Promise(r => server.listen(Number(process.env.HOSTED_FIXTURE_PORT || 0), '127.0.0.1', r))
+const apiOrigin = process.env.HOSTED_TEST_API_ORIGIN || ''
+const apiServer = apiOrigin ? createServer(server.listeners('request')[0]) : null
+if (apiServer) await new Promise(r => apiServer.listen(Number(new URL(apiOrigin).port), '127.0.0.1', r))
 console.log(`Synthetic hosted fixture at http://127.0.0.1:${server.address().port}/hosted/`)
 if (process.env.HOSTED_FIXTURE_ONLY) await new Promise(() => {})
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/home/simon/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome', headless: true, args: ['--no-sandbox'] })
@@ -67,20 +77,23 @@ try {
     { name: 'approved-read', device: true, status: 'approved' }, { name: 'approved-upload', device: true, scope: 'upload', status: 'approved', width: 320 },
     { name: 'unconfirmed-approval', device: true, unconfirmed: true }, { name: 'changed-scope-readback', device: true, changedScope: true },
     { name: 'clock-expiry', device: true, clockExpiry: true },
+    { name: 'legacy-account', legacy: true }, { name: 'legacy-anonymous', legacy: true, anonymous: true },
+    { name: 'legacy-device', legacy: true, device: true }, { name: 'legacy-anonymous-device', legacy: true, device: true, anonymous: true },
+    { name: 'canonical-no-slash', noSlash: true }, { name: 'canonical-device-slash', device: true, deviceSlash: true },
   ]) {
-    scenario = test; writes = []; approved = false; signedOut = false; interest = false
+    scenario = test; writes = []; calls = []; approved = false; signedOut = false; interest = false
     scenario.expiresAt = Date.now() + 2500
     const page = await browser.newPage({ viewport: { width: test.width || 1100, height: test.height || 900 } })
     const errors = []; page.on('pageerror', e => errors.push(String(e)))
     await page.context().addCookies([{ name: 'fixture', value: '1', url: `http://127.0.0.1:${server.address().port}` }])
-    await page.goto(`http://127.0.0.1:${server.address().port}/hosted/${test.device ? `device${test.noCode ? '' : '?code=SYNTHETIC'}` : '?returnTo=https://evil.example'}`)
+    await page.goto(`http://127.0.0.1:${server.address().port}/${test.legacy ? 'hosted' : 'connect'}${test.device ? `/device${test.deviceSlash ? '/' : ''}${test.noCode ? '' : '?code=SYNTHETIC'}` : `${test.noSlash ? '' : '/'}?returnTo=https://evil.example`}`)
     if (test.loading) { await page.getByRole('status').filter({ hasText: 'Checking your account' }).waitFor(); await page.screenshot({ path: `${evidence}/loading-pending.png` }) }
     await page.waitForFunction(() => document.querySelector('.hosted-panel')?.getAttribute('aria-busy') === 'false')
     assert.equal(writes.length, 0, 'never auto approve or mutate on load')
     if (!test.device && !test.waitlist && !test.unavailable && !test.invalid) {
       const computer = page.getByRole('tab', { name: 'This computer', exact: true })
       const agent = page.getByRole('tab', { name: 'Your agent', exact: true })
-      assert.equal(await page.getByRole('heading', { name: 'Host new captures', exact: true }).count(), 1)
+      assert.equal(await page.getByRole('heading', { name: 'Upload new captures', exact: true }).count(), 1)
       await page.evaluate(() => document.fonts.ready)
       const geometry = await page.evaluate(() => {
         const sheet = document.querySelector('.hosted-main'), title = document.querySelector('h1'), cta = document.querySelector('.hosted-main-action')
@@ -92,7 +105,7 @@ try {
       await page.screenshot({ path: `${evidence}/${test.name}-computer.png`, fullPage: true })
       await computer.focus(); await page.keyboard.press('ArrowRight')
       assert.equal(await agent.getAttribute('aria-selected'), 'true'); assert.equal(await agent.evaluate(e => e === document.activeElement), true)
-      assert.equal(await page.getByRole('heading', { name: 'Read hosted captures', exact: true }).count(), 1)
+      assert.equal(await page.getByRole('heading', { name: 'Read your captures', exact: true }).count(), 1)
       assert.equal(await page.locator('.hosted-agent').count(), 0)
       assert.match(await page.locator('.hosted-source').getAttribute('src'), /agent-reading-v4/)
       await page.waitForFunction(() => [...document.querySelectorAll('.hosted-scene img, .hosted-header img')].every(e => e.complete && e.naturalWidth > 0))
@@ -100,7 +113,7 @@ try {
       assert.equal(await lock.evaluate(e => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === e || e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }), true)
       await page.screenshot({ path: `${evidence}/${test.name}-agent.png`, fullPage: true })
       await lock.click(); await page.getByRole('dialog').waitFor()
-      assert.match(await page.getByRole('dialog').innerText(), /all current and future hosted captures/)
+      assert.match(await page.getByRole('dialog').innerText(), /all current and future uploads/)
       await page.keyboard.press('Escape'); assert.equal(await lock.evaluate(e => e === document.activeElement), true)
       const details = page.locator('.hosted-details > summary')
       await details.focus(); await page.keyboard.press('Enter')
@@ -121,7 +134,7 @@ try {
       assert.equal(writes.length, 0, 'tabs, details and setup never mutate')
       if (!test.anonymous) { await page.screenshot({ path: `${evidence}/${test.name}-setup.png`, fullPage: true }); await page.keyboard.press('Escape'); assert.equal(await connect.evaluate(e => e === document.activeElement), true) }
     }
-    if (test.anonymous) { const href = await page.getByRole('link', { name: 'Continue with Google' }).getAttribute('href'); assert.equal(href, test.device ? '/auth/google/start?returnTo=%2Fhosted%2Fdevice%3Fcode%3DSYNTHETIC' : '/auth/google/start?returnTo=%2Fhosted') }
+    if (test.anonymous) { const href = await page.getByRole('link', { name: 'Continue with Google' }).getAttribute('href'); assert.equal(href, apiOrigin + (test.device ? '/auth/google/start?returnTo=%2Fconnect%2Fdevice%3Fcode%3DSYNTHETIC' : '/auth/google/start?returnTo=%2Fconnect')) }
     if (test.waitlist) {
       assert.match(await page.locator('main').innerText(), /beta is full/)
       await page.getByRole('checkbox').check()
@@ -140,7 +153,7 @@ try {
       assert.equal(await page.getByRole('tab', { name: test.scope === 'upload' ? 'Your agent' : 'This computer', exact: true }).isDisabled(), true)
       await selectedTab.focus(); await page.keyboard.press('ArrowRight'); assert.equal(await selectedTab.getAttribute('aria-selected'), 'true')
       if (test.scope === 'upload') { assert.equal(await allow.isDisabled(), true); await page.getByRole('checkbox').check(); assert.equal(writes.length, 0) }
-      assert.match(await page.locator('main').innerText(), test.scope === 'upload' ? /add, read and delete/ : /All your current and future hosted captures/)
+      assert.match(await page.locator('main').innerText(), test.scope === 'upload' ? /add, read and delete/ : /All your current and future uploads/)
       await page.screenshot({ path: `${evidence}/${test.name}-pending.png`, fullPage: true })
       await allow.evaluate(e => { e.click(); e.click() })
       await page.waitForFunction(() => document.querySelector('.hosted-panel')?.getAttribute('aria-busy') === 'false')
@@ -150,7 +163,7 @@ try {
     if (test.unavailable || test.invalid || test.scope === 'admin') assert.equal(await page.getByRole('alert').count(), 1)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     assert.equal(await page.evaluate(() => [...document.querySelectorAll('main *, dialog[open] *')].filter(e => e.getClientRects().length && getComputedStyle(e).position !== 'absolute').some(e => { const r = e.getBoundingClientRect(); return r.width > innerWidth + 1 || r.left < -1 || r.right > innerWidth + 1 })), false, 'no clipped content hidden by global overflow CSS')
-    assert.doesNotMatch(await page.locator('body').innerText(), /Uploads are on|Read access is on|Manage|simulated|Try a state/)
+    assert.doesNotMatch(await page.locator('body').innerText(), /Uploads are on|Read access is on|Manage|simulated|Try a state|\bHosting\b|\bHosted\b/)
     assert.equal(await page.evaluate(() => localStorage.length), 0)
     assert(!(await page.content()).includes('must-not-render'))
     assert(!(await page.content()).includes('synthetic-csrf'))
@@ -162,9 +175,14 @@ try {
       await page.getByRole('link', { name: 'Continue with Google' }).waitFor()
       assert.equal(writes[0].path, '/auth/logout'); assert.equal(writes[0].csrf, 'synthetic-csrf')
     }
+    assert(calls.length > 0)
+    for (const call of calls) {
+      assert.equal(call.host, apiOrigin ? new URL(apiOrigin).host : `127.0.0.1:${server.address().port}`, 'fetches must use configured API origin')
+      assert.match(call.cookie || '', /fixture=1/, 'credentialed API fetch retains the host cookie')
+    }
     results.push(test.name); await page.close()
   }
-  const receipt = { synthetic: true, artifact: root, passed: results, count: results.length, screenshots: evidence, assets: Object.fromEntries(await Promise.all(['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg'].map(async name => [name, createHash('sha256').update(await readFile(`${root}/${name}`)).digest('hex')]))), limits: 'Controlled synthetic API only; not live OAuth, service, native, or deployment proof. 640×450 CSS pixels is a 200%-equivalent layout, not browser zoom.' }
+  const receipt = { synthetic: true, artifact: root, apiOrigin: apiOrigin || 'same-origin', passed: results, count: results.length, screenshots: evidence, assets: Object.fromEntries(await Promise.all(['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg'].map(async name => [name, createHash('sha256').update(await readFile(`${root}/${name}`)).digest('hex')]))), limits: 'Controlled synthetic API only; not live OAuth, service, native, or deployment proof. 640×450 CSS pixels is a 200%-equivalent layout, not browser zoom.' }
   await import('node:fs/promises').then(fs => fs.writeFile(`${evidence}/receipt.json`, JSON.stringify(receipt, null, 2)))
   console.log(JSON.stringify(receipt, null, 2))
-} finally { await browser.close(); await new Promise(r => server.close(r)) }
+} finally { await browser.close(); if (apiServer) await new Promise(r => apiServer.close(r)); await new Promise(r => server.close(r)) }

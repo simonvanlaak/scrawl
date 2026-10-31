@@ -117,6 +117,7 @@ enum LiveTranscriber {
             }
           }
           continuation.finish()
+          completion.yield(.inputFinished)
         } catch { continuation.finish(throwing: error); completion.finish(throwing: error) }
       }
       let terminal = Task {
@@ -155,7 +156,7 @@ enum LiveTranscriber {
 
 #if compiler(>=6.2)
 private enum LiveProgress { case samples(Int), chunksDrained }
-private enum ChunkProgress { case resultsDrained, terminalFinished }
+private enum ChunkProgress { case inputFinished, resultsDrained, terminalFinished }
 
 /// Both owners must succeed before done. Errors bypass success even
 /// when the reader is still blocked. A request's return is not result delivery.
@@ -174,14 +175,15 @@ private func finishLiveInput(_ events: AsyncThrowingStream<LiveProgress, Error>)
 }
 
 private func finishChunk(_ events: AsyncThrowingStream<ChunkProgress, Error>) async throws {
-  var drained = false; var finished = false
+  var fed = false; var drained = false; var finished = false
   for try await event in events {
     try Task.checkCancellation()
     switch event {
+    case .inputFinished: fed = true
     case .resultsDrained: drained = true
     case .terminalFinished: finished = true
     }
-    if drained && finished { return }
+    if fed && drained && finished { return }
   }
   throw HelperError("chunk ended without results and terminal drain")
 }

@@ -4,8 +4,15 @@ use super::*;
 #[test]
 fn retired_live_phone_is_absent_from_owned_desktop_admission() {
     let ui = include_str!("ui.rs");
-    for retired in ["iphone_preview", "start_recording_iphone", "CaptureSource::Phone"] {
-        assert!(!ui.contains(retired), "desktop lifecycle restored live phone state: {retired}");
+    for retired in [
+        "iphone_preview",
+        "start_recording_iphone",
+        "CaptureSource::Phone",
+    ] {
+        assert!(
+            !ui.contains(retired),
+            "desktop lifecycle restored live phone state: {retired}"
+        );
     }
 }
 

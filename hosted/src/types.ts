@@ -4,6 +4,7 @@ export interface Env {
  DB: D1Database;
  BUCKET: R2Bucket;
  SITE_ORIGIN: string;
+ LEGACY_SITE_ORIGIN?: string;
  API_ORIGIN: string;
  GOOGLE_CLIENT_ID: string;
  GOOGLE_CLIENT_SECRET: string;

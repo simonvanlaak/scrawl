@@ -3,14 +3,20 @@ import {createRemoteJWKSet,jwtVerify} from 'jose';
 import {DAY,random,hash,json,fail,stmt,body,cookie,setCookie,session,csrf,usage,slots,rate,envelope,bearer} from './common.ts';
 const jwks=new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const provider=(env: Env)=>({issuer:env.OAUTH_ISSUER||'https://accounts.google.com',authorize:env.OAUTH_AUTHORIZATION_URL||'https://accounts.google.com/o/oauth2/v2/auth',token:env.OAUTH_TOKEN_URL||'https://oauth2.googleapis.com/token',jwks:env.OAUTH_JWKS_URL||'https://www.googleapis.com/oauth2/v3/certs'});
-function returnTo(value: string | null,env: Env) {
- try{const u=new URL(value||'/hosted',env.SITE_ORIGIN);if(u.origin!==env.SITE_ORIGIN||!['/hosted','/hosted/device'].includes(u.pathname)||u.hash)fail('invalid_request');for(const key of u.searchParams.keys())if(key!=='code')fail('invalid_request');return u.pathname+u.search;}catch{fail('invalid_request');}
+function returnTo(value: string | null) {
+ // Validate the raw fixed path, not URL-normalized input (no URLs/dot segments).
+ const match=/^\/(?:connect|hosted)(\/device)?\/?(?:\?([^#]*))?$/.exec(value??'/connect');
+ if(!match)fail('invalid_request');
+ const query=new URLSearchParams(match[2]);
+ if([...query.keys()].some(key=>key!=='code')||query.getAll('code').length>1)fail('invalid_request');
+ const code=query.get('code');
+ return '/connect'+(match[1]||'')+(code!==null?'?'+new URLSearchParams({code}).toString():'');
 }
 export async function authRoutes(request: Request,env: Env,url: URL) {
  const p=url.pathname,m=request.method;
  if(p==='/auth/google/start'&&m==='GET') {
   await rate(env,'oauth:'+request.headers.get('CF-Connecting-IP'));
-  const state=random(),nonce=random(),verifier=random(),dest=returnTo(url.searchParams.get('returnTo'),env);
+  const state=random(),nonce=random(),verifier=random(),dest=returnTo(url.searchParams.get('returnTo'));
   await stmt(env,'INSERT INTO oauth_states VALUES(?,?,?,?,?)',await hash(state),nonce,verifier,dest,Date.now()+600000).run();
   const auth=new URL(provider(env).authorize);
   const bytes=Uint8Array.from((await hash(verifier)).match(/../g)!,x=>parseInt(x,16));
@@ -22,6 +28,7 @@ export async function authRoutes(request: Request,env: Env,url: URL) {
   try {
    const state=url.searchParams.get('state');if(!state||state!==cookie(request,'__Host-apparent_oauth')||!url.searchParams.get('code'))throw new Error();
    const stored=await stmt(env,'DELETE FROM oauth_states WHERE hash=? AND expires_at>? RETURNING *',await hash(state),Date.now()).first<OAuthStateRow>();if(!stored)throw new Error();
+   const dest=returnTo(stored.return_to);
    const config=provider(env);
    const response=await fetch(config.token,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code:url.searchParams.get('code')!,redirect_uri:env.API_ORIGIN+'/auth/google/callback',client_id:env.GOOGLE_CLIENT_ID,client_secret:env.GOOGLE_CLIENT_SECRET,code_verifier:stored.verifier}),signal:AbortSignal.timeout(15000)});
    if(!response.ok)throw new Error();const token=await body(response,32768);if(typeof token.id_token!=='string')throw new Error();
@@ -32,7 +39,7 @@ export async function authRoutes(request: Request,env: Env,url: URL) {
    await stmt(env,"INSERT INTO accounts(id,email,beta,created_at) SELECT ?,?,CASE WHEN (SELECT count(*) FROM accounts WHERE beta='active')<20 THEN 'active' ELSE 'waitlist' END,? ON CONFLICT(id) DO UPDATE SET email=excluded.email",account,payload.email,Date.now()).run();
    const sessionToken=random(),csrfToken=random();
    await stmt(env,'INSERT INTO sessions VALUES(?,?,?,?)',await hash(sessionToken),account,csrfToken,Date.now()+7*DAY).run();
-   const headers=new Headers({Location:env.SITE_ORIGIN+stored.return_to});headers.append('Set-Cookie',setCookie('__Host-apparent_session',sessionToken,7*86400));headers.append('Set-Cookie',setCookie('__Host-apparent_oauth','',0));
+   const headers=new Headers({Location:env.SITE_ORIGIN+dest});headers.append('Set-Cookie',setCookie('__Host-apparent_session',sessionToken,7*86400));headers.append('Set-Cookie',setCookie('__Host-apparent_oauth','',0));
    return new Response(null,{status:302,headers});
   } catch {fail('oauth_failed',401);}
  }
@@ -53,7 +60,7 @@ export async function authRoutes(request: Request,env: Env,url: URL) {
   const b=await body(request);if(b.scope!=='upload'&&b.scope!=='read')fail('invalid_request');
   const deviceCode=random(),userCode=random(6).toUpperCase();
   await stmt(env,'INSERT INTO devices(hash,user_code,scope,expires_at) VALUES(?,?,?,?)',await hash(deviceCode),userCode,b.scope,Date.now()+600000).run();
-  return json({deviceCode,userCode,verificationUri:env.SITE_ORIGIN+'/hosted/device?code='+userCode,expiresIn:600,interval:5});
+  return json({deviceCode,userCode,verificationUri:env.SITE_ORIGIN+'/connect/device?code='+userCode,expiresIn:600,interval:5});
  }
  if(p==='/v1/device/poll'&&m==='POST') {
   const {deviceCode}=await body(request);if(typeof deviceCode!=='string'||! /^[a-f0-9]{64}$/.test(deviceCode))fail('invalid_request');

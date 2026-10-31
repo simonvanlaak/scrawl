@@ -1,12 +1,12 @@
-# Hosted web design V4
+# Connect web design V4
 
-The hosted React UI implements the selected V4 paper-sheet composition. It uses the existing Host Grotesk font and Apparent wordmark unchanged, with revisioned illustrations in `public/hosted/`. There are no prototype controls, native capsule, simulated clipboard, native launch, or locally invented connection states.
+The Connect React UI implements the selected V4 paper-sheet composition. It uses the existing Host Grotesk font and Apparent wordmark unchanged, with revisioned illustrations in `public/hosted/`. Canonical routes are `/connect` and `/connect/device`; `/hosted` counterparts remain rendering aliases. Visible headings are “Upload new captures” and “Read your captures”; read grants still cover current and future uploads. The API remains `https://hosted.tryapparent.com`, independently configured with `VITE_HOSTED_API_ORIGIN`. There are no prototype controls, native capsule, simulated clipboard, native launch, or locally invented connection states.
 
 ## Supported mapping
 
 | Surface / verified input | Web behavior |
 | --- | --- |
-| `/hosted`, anonymous | This computer / Host new captures / Connect. Your agent / Read hosted captures / Review access. Either action opens sign-in; Google authentication alone grants neither permission. |
+| `/connect` (or `/hosted`), anonymous | This computer / Upload new captures / Connect. Your agent / Read your captures / Review access. Either action opens sign-in; Google authentication alone grants neither permission. |
 | `/hosted`, active account | Same initial composition, not an inferred connected state. Connect / Review access opens terminal setup instructions, not native launch or permission mutation. |
 | Setup, upload | `apparent cloud login --server <API origin> --scope upload --consent-upload`, followed by `apparent cloud status` and `apparent cloud status --account`. Explicit consent; new captures only; add/read/delete scope. |
 | Setup, read | `apparent cloud login --server <API origin> --scope read --no-browser`. Separate approval of all current and future hosted captures; no upload/delete. |
@@ -22,7 +22,7 @@ The hosted React UI implements the selected V4 paper-sheet composition. It uses 
 | Log out | Browser session only; POST then anonymous session readback. Does not revoke independent device grants. |
 | Separate lock control | Describes independent read approval and limits. It is not a claim about an agent credential's effective state. |
 
-Account tabs support arrow keys, Home/End and roving focus; optional detail uses native disclosures. The setup dialog uses native modal focus containment, Escape and focus return. No request writes on page load, tab switch, disclosure or setup. `api.ts` remains unchanged; existing server validation, credential handling, fixed return destinations and CSRF boundaries still apply.
+Account tabs support arrow keys, Home/End and roving focus; optional detail uses native disclosures. The setup dialog uses native modal focus containment, Escape and focus return. No request writes on page load, tab switch, disclosure or setup. `api.ts` generates fixed canonical Connect return destinations; existing credential handling and CSRF protections still apply.
 
 Upload and read permission disclosures retain screen images, recording, voice, transcript and context; 20-account beta, 500,000,000-byte account cap with oldest-first eviction, seven-day maximum retention, 90,000,000-byte per-file rejection of the whole bundle, and fixed 30-day grants with manual reapproval and no website renewal.
 

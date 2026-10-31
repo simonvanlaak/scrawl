@@ -42,8 +42,10 @@ function isUpstream(url) {
 // The URL-bearing portion of HTML's shared declarative refresh steps. This
 // does not run timers or scripts; delay-only refreshes reload the current page.
 function refreshDestination(content) {
-  const delay = /^[\t\n\f\r ]*(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)/.exec(content)
-  if (!delay) return null
+  // Chromium consumes repeated decimal points too (for example 0..5).
+  // A run of dots without any digit still does not start a refresh.
+  const delay = /^[\t\n\f\r ]*[0-9.]+/.exec(content)
+  if (!delay || !/[0-9]/.test(delay[0])) return null
   let rest = content.slice(delay[0].length)
   if (!rest || !/^[;,\t\n\f\r ]/.test(rest)) return null
   rest = rest.replace(/^[\t\n\f\r ]*/, "")

@@ -1,0 +1,50 @@
+import type {Env, SessionRow, TokenRow} from './types.ts';
+export const DAY = 86400000;
+export const random = (n=32) => [...crypto.getRandomValues(new Uint8Array(n))].map(x=>x.toString(16).padStart(2,'0')).join('');
+export const hex = (bytes: Uint8Array) => [...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+export const hash = async (value: string) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))));
+export const json = (value: unknown) => Response.json(value);
+export class ApiError extends Error { declare code: string; declare status: number; constructor(code: string,status=400,message=code.replaceAll('_',' ')) {super(message);this.code=code;this.status=status;} }
+export function fail(code: string,status=400): never {throw new ApiError(code,status);}
+export const stmt = (env: Env,sql: string,...args: unknown[]) => env.DB.prepare(sql).bind(...args);
+export function isRecord(value: unknown): value is Record<string, unknown> {return !!value && typeof value==='object' && !Array.isArray(value);}
+export async function body(request: Request | Response,limit=131072): Promise<Record<string, unknown>> {
+ const bytes=await bounded(request,limit);
+ try { const v: unknown=JSON.parse(new TextDecoder().decode(bytes));if(!isRecord(v))fail('invalid_request'); return v; } catch { fail('invalid_request'); }
+}
+export async function bounded(request: Request | Response,limit: number) {
+ if(Number(request.headers.get('Content-Length'))>limit)fail('body_too_large',413);
+ const reader=request.body?.getReader();if(!reader)return new Uint8Array();
+ const chunks=[];let length=0;
+ try {for(;;){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>limit){await reader.cancel();fail('body_too_large',413);}chunks.push(value);}}finally{reader.releaseLock();}
+ const out=new Uint8Array(length);let at=0;for(const c of chunks){out.set(c,at);at+=c.length;}return out;
+}
+export function cookie(request: Request,name: string) {return request.headers.get('Cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1) || '';}
+export const setCookie=(name: string,value: string,age: number)=>`${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${age}`;
+export function session(request: Request,env: Env,required: false): Promise<SessionRow | null>;
+export function session(request: Request,env: Env,required?: true): Promise<SessionRow>;
+export async function session(request: Request,env: Env,required=true) {
+ const token=cookie(request,'__Host-apparent_session');
+ const row=token && await stmt(env,'SELECT s.*,a.email,a.beta,a.interest FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.hash=? AND s.expires_at>?',await hash(token),Date.now()).first<SessionRow>();
+ if(!row&&required)fail('unauthorized',401);return row||null;
+}
+export function csrf(request: Request,env: Env,s: SessionRow) {if(request.headers.get('Origin')!==env.SITE_ORIGIN || request.headers.get('X-CSRF-Token')!==s.csrf)fail('csrf_failed',403);}
+export async function bearer(request: Request,env: Env,write=false) {
+ const token=/^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('Authorization')||'')?.[1];if(!token)fail('unauthorized',401);
+ const row=await stmt(env,'SELECT t.*,a.beta FROM tokens t JOIN accounts a ON a.id=t.account_id WHERE t.hash=? AND t.expires_at>?',await hash(token),Date.now()).first<TokenRow>();
+ if(!row)fail('unauthorized',401);if(row.beta!=='active')fail('beta_required',403);if(write&&row.scope!=='upload')fail('forbidden',403);return row;
+}
+export async function usage(env: Env,account: string) {return (await stmt(env,"SELECT COALESCE(sum(bytes),0) AS bytes FROM captures WHERE account_id=? AND status!='deleted' AND expires_at>? AND (status='ready' OR pending_until>?)",account,Date.now(),Date.now()).first<{bytes: number}>())!.bytes;}
+export async function slots(env: Env) {const {used}=(await stmt(env,"SELECT count(*) AS used FROM accounts WHERE beta='active'").first<{used: number}>())!;return {used,limit:20,remaining:Math.max(0,20-used)};}
+export async function rate(env: Env,key: string,max=30) {
+ const window=Math.floor(Date.now()/3600000);
+ const row=await stmt(env,'INSERT INTO rate_limits(key,window,count) VALUES(?,?,1) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN window=excluded.window THEN count+1 ELSE 1 END,window=excluded.window RETURNING count',key,window).first<{count: number}>();
+ if(row!.count>max)fail('slow_down',429);
+}
+export async function envelope(env: Env,value: string,decrypt=false) {
+ const bytes=Uint8Array.from(atob(env.TOKEN_ENCRYPTION_KEY||''),c=>c.charCodeAt(0));if(bytes.length!==32)throw new Error('key configuration');
+ const key=await crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['encrypt','decrypt']);
+ if(decrypt){const b=Uint8Array.from(atob(value),c=>c.charCodeAt(0));return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b.slice(0,12)},key,b.slice(12)));}
+ const iv=crypto.getRandomValues(new Uint8Array(12)),cipher=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(value)));
+ return btoa(String.fromCharCode(...iv,...cipher));
+}

@@ -40,6 +40,46 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn publication_coordination_blocks_other_threads_until_last_guard_in_either_drop_order() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    for drop_first_acquired in [true, false] {
+        let fixture = Fixture::new();
+        let first = coordinate(&fixture.0).unwrap();
+        let second = coordinate(&fixture.0).unwrap();
+        let path = fixture.0.clone();
+        let (started, start_rx) = mpsc::channel();
+        let (acquired, acquire_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            let _guard = coordinate(&path).unwrap();
+            acquired.send(()).unwrap();
+        });
+        start_rx.recv_timeout(Duration::from_secs(4)).unwrap();
+        let blocked_with_both = acquire_rx.recv_timeout(Duration::from_millis(100)).is_err();
+        let remaining = if drop_first_acquired {
+            drop(first);
+            second
+        } else {
+            drop(second);
+            first
+        };
+        let blocked_with_one = acquire_rx.recv_timeout(Duration::from_millis(100)).is_err();
+        drop(remaining);
+        // Always release and join before asserting, including on the old broken behavior.
+        worker.join().unwrap();
+        assert!(blocked_with_both, "worker entered with both guards alive");
+        assert!(
+            blocked_with_one,
+            "worker entered before the final guard dropped"
+        );
+        // A fresh lease must also work after the owning thread's last guard is gone.
+        let _fresh = coordinate(&fixture.0).unwrap();
+    }
+}
+
+#[test]
 fn publication_checks_real_image_audio_movie_and_exact_manifest_inputs() {
     let fixture = Fixture::new();
     let (_, mut bundle, summary) = fixture.build();

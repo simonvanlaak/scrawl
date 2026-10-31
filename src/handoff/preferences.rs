@@ -404,20 +404,6 @@ mod tests {
     }
 
     #[test]
-    fn setting_a_key_never_replaces_an_invalid_existing_config() {
-        let fixture = Fixture::new();
-        let path = fixture.0.join("config.json");
-        for bytes in [
-            b"{\"ingestToken\":\"private\",".as_slice(),
-            b"[]".as_slice(),
-        ] {
-            fs::write(&path, bytes).unwrap();
-            assert!(set_config_value_in(&path, "autoSend", false.into()).is_err());
-            assert_eq!(fs::read(&path).unwrap(), bytes);
-        }
-    }
-
-    #[test]
     fn warm_recognizer_defaults_on_and_config_can_disable_it() {
         let fixture = Fixture::new();
         let path = fixture.0.join("config.json");

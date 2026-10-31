@@ -134,7 +134,6 @@ fn offer_image_handoff(
     offer_text(summary)
 }
 
-
 const DEMO_VIDEO_REQUEST: &str = "Use make-it-apparent for complex visible changes. Share verified video proof or explain why you can't.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.

@@ -57,7 +57,7 @@ fn walk_directory(path: &Path, trusted: bool) -> io::Result<File> {
         if trusted {
             let m = dir.metadata()?;
             let uid = unsafe { libc::geteuid() };
-            let sticky_root = m.uid() == 0 && m.mode() & libc::S_ISVTX != 0;
+            let sticky_root = m.uid() == 0 && m.mode() & u32::from(libc::S_ISVTX) != 0;
             if (m.uid() != 0 && m.uid() != uid) || (m.mode() & 0o022 != 0 && !sticky_root) {
                 return Err(invalid());
             }

@@ -37,3 +37,64 @@ test('explicit capability reservation is pending, stable, single-capture and rea
   assert.deepEqual((await (await f.call('/v1/shares',{token:b.read})).json()).shares,[]);
  }finally{await f.close();}
 });
+
+test('revocation, re-share and read-time expiry guard HTML, previews, manifests and ranges',async()=>{
+ const f=await setup();try{
+  const a=await f.identity('lifecycle'),b=await f.identity('foreign'),p=await reserve(f,a);await ready(f,a,p);
+  const share=async()=>{const r=await f.call(p+'/share',{token:a.token,method:'POST'});assert.equal(r.status,200);return r.json();};
+  const s=await share(),path=new URL(s.url).pathname;
+  const list=await (await f.call('/v1/shares',a)).json(),management=list.shares[0].id;
+  assert.equal((await f.call('/v1/shares/'+management,{...b,method:'DELETE'})).status,404);
+  assert.equal((await f.call('/v1/shares/'+management,{cookie:a.cookie,method:'DELETE'})).status,403);
+  assert.equal((await f.call('/v1/shares/'+management,{cookie:a.cookie,csrf:a.csrf,origin:'https://evil.example',method:'DELETE'})).status,403);
+  const part=await f.call(path+'/files/summary.md',{headers:{Range:'bytes=1-3'}});assert.equal(part.status,206);assert.equal(part.headers.get('Content-Range'),'bytes 1-3/5');assert.equal(await part.text(),'ell');
+  assert.equal((await f.call(path+'/files/summary.md',{headers:{Range:'bytes=8-9'}})).status,416);
+  assert.equal((await f.call('/v1/shares/'+management,{...a,method:'DELETE'})).status,200);
+  for(const suffix of ['', '/manifest.json','/thumbnail.png','/files/summary.md'])for(const method of ['GET','HEAD']){const r=await f.call(path+suffix,{method,headers:{Range:'bytes=0-1'}});assert.equal(r.status,410);assert.equal(r.headers.get('Cache-Control'),'no-store');assert.equal(r.headers.get('Referrer-Policy'),'no-referrer');assert.match(r.headers.get('X-Robots-Tag'),/noindex/);const text=await r.text();assert.ok(!text.includes('hello'));assert.ok(!text.includes('og:image'));}
+  assert.equal(await (await f.call(p+'/files/summary.md',{token:a.read})).text(),'hello','revoking public access preserves the private original');
+  const second=await share();assert.notEqual(second.url,s.url);const next=new URL(second.url).pathname;
+  await f.db.prepare('UPDATE captures SET expires_at=? WHERE id=?').bind(Date.now()-1,id(171)).run();
+  for(const suffix of ['', '/manifest.json','/thumbnail.png','/files/summary.md'])assert.equal((await f.call(next+suffix)).status,410);
+ }finally{await f.close();}
+});
+
+test('public reads spend the durable allowance, reject unshared IDs and fail closed',async()=>{
+ const f=await setup();try{
+  const a=await f.identity('budget'),p=await reserve(f,a);await ready(f,a,p);
+  assert.equal((await f.call('/s/'+a.token+'/manifest.json')).status,404);assert.equal((await f.call('/s/'+id(171))).status,404);
+  const s=await (await f.call(p+'/share',{token:a.token,method:'POST'})).json(),path=new URL(s.url).pathname;
+  const before=(await f.db.prepare('SELECT b_used FROM r2_budget').first()).b_used;
+  assert.equal(await (await f.call(path+'/files/summary.md')).text(),'hello');assert.equal((await f.db.prepare('SELECT b_used FROM r2_budget').first()).b_used,before+1);
+  await f.db.prepare('UPDATE r2_budget SET b_cap=b_used').run();assert.equal((await f.call(path+'/manifest.json')).status,200,'metadata does not call R2');
+  const denied=await f.call(path+'/files/summary.md',{headers:{Range:'bytes=0-1'}});assert.equal(denied.status,503);assert.equal((await denied.json()).error.code,'budget_exhausted');
+  await f.db.prepare('DELETE FROM r2_budget').run();assert.equal((await f.call(path+'/files/summary.md')).status,503);
+  await f.call(p,{token:a.token,method:'DELETE'});assert.equal((await f.call(path)).status,410);
+ }finally{await f.close();}
+});
+
+test('pending progress reflects confirmed files, failed state is not ready, default-off grant gate',async()=>{
+ const f=await setup();try{
+  const a=await f.identity('progress'),p=await reserve(f,a),s=await (await f.call(p+'/share',{token:a.token,method:'POST'})).json(),path=new URL(s.url).pathname;
+  for(const status of ['paused','failed','uploading']){
+   assert.equal((await f.call(p+'/share/progress',{token:a.token,method:'POST',body:{state:status,uploadedBytes:999999,totalBytes:999999}})).status,200);
+   const m=await (await f.call(path+'/manifest.json')).json();assert.equal(m.status,status==='uploading'?'pending':status);assert.equal(m.uploadedBytes,0);assert.equal(m.totalBytes,5);assert.equal(m.files.length,0);
+  }
+  await f.call(p+'/files/summary.md',{token:a.token,method:'PUT',raw:'hello'});
+  const m=await (await f.call(path+'/manifest.json')).json();assert.equal(m.uploadedBytes,5);assert.equal(m.status,'pending');
+  const html=await (await f.call(path)).text();assert.ok(!html.includes('og:image'));assert.ok(html.includes('Uploading'));assert.ok(!html.includes('<video'));
+ }finally{await f.close();}
+ const disabled=await fixture();try{const a=await disabled.identity('off'),p=await reserve(disabled,a);const r=await disabled.call(p+'/share',{token:a.token,method:'POST'});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'sharing_disabled');}finally{await disabled.close();}
+});
+
+test('owner management paginates all links deterministically without borrowing a foreign cursor',async()=>{
+ const f=await setup();try{
+  const a=await f.identity('pages'),p=await reserve(f,a);await ready(f,a,p);
+  const s=await (await f.call(p+'/share',{token:a.token,method:'POST'})).json();
+  const original=await f.db.prepare('SELECT * FROM shares').first();await f.db.prepare('UPDATE shares SET revoked_at=1').run();
+  const inserts=Array.from({length:105},(_,n)=>f.db.prepare('INSERT INTO shares(id,capture_id,account_id,hash,envelope,created_at,revoked_at) VALUES(?,?,?,?,?,?,1)').bind(id(n+1000),id(171),original.account_id,id(n+2000),original.envelope,original.created_at));
+  await f.db.batch(inserts);
+  let before=null;const found=[];do{const r=await f.call('/v1/shares'+(before?'?before='+encodeURIComponent(before):''),a);assert.equal(r.status,200);const page=await r.json();assert.ok(page.shares.length<=100);found.push(...page.shares.map(x=>x.id));before=page.nextCursor;assert.ok(before===null||/^\d+:[a-f0-9]{32}$/.test(before));}while(before);
+  assert.equal(found.length,106);assert.equal(new Set(found).size,106);
+  assert.equal((await f.call('/v1/shares?before=garbage',a)).status,400);
+ }finally{await f.close();}
+});

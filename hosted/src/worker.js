@@ -2,14 +2,16 @@ import {ApiError,fail} from './common.js';
 import {authRoutes} from './auth.js';
 import {captureRoutes,cleanup} from './captures.js';
 import {shareRoutes} from './shares.js';
-import {renderShare} from './share-view.js';
+import {renderShare,shareViewScript,shareViewStyles} from './share-view.js';
 
 export default {
  async fetch(request,env) {
   let response;
   try {
    const url=new URL(request.url);
-   if(request.method==='OPTIONS') {
+   if(['/share-view.js','/share-view.css'].includes(url.pathname)&&['GET','HEAD'].includes(request.method)) {
+    response=new Response(request.method==='HEAD'?null:url.pathname.endsWith('.js')?shareViewScript:shareViewStyles,{headers:{'Content-Type':url.pathname.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8'}});
+   }else if(request.method==='OPTIONS') {
     if(request.headers.get('Origin')!==env.SITE_ORIGIN)fail('forbidden',403);
     response=new Response(null,{status:204,headers:{'Access-Control-Allow-Methods':'GET, POST, PUT, DELETE, OPTIONS','Access-Control-Allow-Headers':'Authorization, Content-Type, X-CSRF-Token','Access-Control-Max-Age':'600'}});
    }else response=await authRoutes(request,env,url)||await shareRoutes(request,env,url,renderShare)||await captureRoutes(request,env,url);

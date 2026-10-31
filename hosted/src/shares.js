@@ -53,10 +53,13 @@ export async function shareRoutes(request,env,url,render) {
   available(row);return json({url:publicUrl(env,await envelope(env,row.envelope,true)),status:state(row),expiresAt:new Date(row.expires_at).toISOString()});
  }
  if(url.pathname==='/v1/shares'&&request.method==='GET') {
-  const a=await owner(request,env),{results}=await stmt(env,join+' WHERE s.account_id=? ORDER BY s.created_at DESC LIMIT 100',a.account_id).all();
-  const shares=[];for(const row of results) {const status=state(row);shares.push({id:row.id,captureId:row.capture_id,title:'Apparent recording',status,createdAt:new Date(row.created_at).toISOString(),expiresAt:new Date(row.expires_at).toISOString(),url:['revoked','expired','deleted'].includes(status)?null:publicUrl(env,await envelope(env,row.envelope,true))});}
+  const a=await owner(request,env),cursor=url.searchParams.get('before');
+  if(cursor!==null&&!/^\d{1,16}:[a-f0-9]{32}$/.test(cursor))fail('invalid_cursor');
+  const [time,id]=cursor?cursor.split(':'):[];if(cursor&&!Number.isSafeInteger(Number(time)))fail('invalid_cursor');
+  const {results}=await stmt(env,join+' WHERE s.account_id=?'+(cursor?' AND (s.created_at<? OR (s.created_at=? AND s.id<?))':'')+' ORDER BY s.created_at DESC,s.id DESC LIMIT 101',a.account_id,...(cursor?[Number(time),Number(time),id]:[])).all();
+  const rows=results.slice(0,100),shares=[];for(const row of rows) {const status=state(row);shares.push({id:row.id,captureId:row.capture_id,title:'Apparent recording',status,createdAt:new Date(row.created_at).toISOString(),expiresAt:new Date(row.expires_at).toISOString(),url:['revoked','expired','deleted'].includes(status)?null:publicUrl(env,await envelope(env,row.envelope,true))});}
   // Explicit cursor paging avoids hiding older links from management.
-  return json({shares});
+  const last=rows.at(-1);return json({shares,nextCursor:results.length>100?`${last.created_at}:${last.id}`:null});
  }
  const revoke=/^\/v1\/shares\/([a-f0-9]{32})$/.exec(url.pathname);
  if(revoke&&request.method==='DELETE') {
@@ -69,7 +72,7 @@ export async function shareRoutes(request,env,url,render) {
  const [,secret,action,encoded]=publicMatch,row=await bySecret(env,secret),base=publicUrl(env,secret),status=state(row);
  if(!action) {
   const model=await descriptor(env,row,base);
-  if(status==='ready') {
+  if(status==='ready'&&request.method!=='HEAD') {
    model.summary=await evidenceText(env,row,'summary.md',131072,secret);
    const metadata=await evidenceText(env,row,'apparent.json',1048576,secret);
    try{const transcript=JSON.parse(metadata).transcript;model.transcript=Array.isArray(transcript?.segments)&&transcript.segments.length?transcript.segments.map(s=>`[${Number.isSafeInteger(s.t0)?s.t0:0}ms–${Number.isSafeInteger(s.t1)?s.t1:0}ms] ${typeof s.text==='string'?s.text:''}`).join('\n'):typeof transcript?.text==='string'?transcript.text:'';}catch{model.transcript='Transcript preview unavailable. Download apparent.json for the original evidence.';}
@@ -77,10 +80,12 @@ export async function shareRoutes(request,env,url,render) {
   // Terminal pages contain no evidence, assets, title or preview metadata.
   const current=await bySecret(env,secret);if(state(current)!==status)fail('share_changed',409);
   const code=['revoked','expired','deleted'].includes(status)?410:200;
-  return new Response(request.method==='HEAD'?null:render(model),{status:code,headers:{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}});
+  return new Response(request.method==='HEAD'?null:render(model),{status:code,headers:{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; img-src 'self'; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}});
  }
  available(row);
- if(action==='manifest.json')return json(await descriptor(env,row,base));
+ if(action==='manifest.json') {
+  const model=await descriptor(env,row,base);available(await bySecret(env,secret));return json(model);
+ }
  let path=action==='thumbnail.png'?'contact-sheet.png':encoded;
  try{path=path.split('/').map(x=>{const s=decodeURIComponent(x);if(s.includes('/')||s.includes('\\'))fail('invalid_path');return s;}).join('/');}catch{fail('not_found',404);}
  if(!validPath(path))fail('not_found',404);

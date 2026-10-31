@@ -75,10 +75,20 @@ fn writable_output_ancestor_is_not_trusted() {
     let f = Fixture::new();
     let parent = f.0.join("shared");
     fs::create_dir(&parent).unwrap();
-    mode(&parent, 0o777);
     let bundle = new_id().unwrap();
     let (path, bytes) = output(&parent, &bundle, 0);
-    assert!(FinalizerSuccess::validate(&new_id().unwrap(), &bundle, &path, &bytes).is_err());
+    for ancestor_mode in [0o777, 0o1777] {
+        mode(&parent, ancestor_mode);
+        // Sticky grants an exception only to root-owned ancestors, never to an
+        // ordinary user's writable directory. Root test runners exercise that
+        // exception without changing any fixture ownership.
+        let root_sticky = ancestor_mode == 0o1777 && unsafe { libc::geteuid() } == 0;
+        assert_eq!(
+            FinalizerSuccess::validate(&new_id().unwrap(), &bundle, &path, &bytes).is_ok(),
+            root_sticky,
+            "ancestor mode {ancestor_mode:o}"
+        );
+    }
 }
 #[test]
 fn durable_production_and_caller_identities_roundtrip() {

@@ -98,7 +98,7 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 
 | Gate | Required evidence | State |
 |---|---|---|
-| F0 | Ancestry, isolated branch, hook unchanged, owned plan, committed/pushed/read-back PR | In progress; see foundation result below |
+| F0 | Ancestry, isolated branch, hook unchanged, owned plan, committed/pushed/read-back PR | Plan checkpoint published as draft #199; final evidence commit readback belongs to handoff |
 | E1 | One recorder/finalizer used by GUI and Agent; no engine caller effects | Unrun |
 | E2 | Real multiprocess contention, restart receipts, crash recovery, retention leases | Unrun |
 | E3 | One policy-free config transaction; nested/secret preservation and consent races | Existing primitive found; extraction unrun |
@@ -106,8 +106,8 @@ B2/B3 are different file sets but shared runtime integration is serialized. Do n
 | A1 | Fresh standalone Agent installation, no Desktop GUI runtime dependency; real lifecycle | Unrun |
 | D1 | Host discriminator native matrix and measured latency on both supported OSes | Unrun; no host chosen |
 | D2 | Complete Desktop UX, keyboard/accessibility, error/cancel/reconnect/focus/overlay behavior | Unrun |
-| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Baseline pending; migration unrun |
-| P1 | Public build/package/browser visual parity, URL/download compatibility, privacy-clean output | Baseline pending; migration unrun |
+| C1 | Connect strict TS/service tests + browser routes/auth/CORS/CSRF/complete transfer/revocation | Existing service and synthetic browser baseline passed; migration unrun |
+| P1 | Public build/package/browser visual parity, URL/download compatibility, privacy-clean output | Existing build/package/public tests passed; migration unrun |
 | X1 | Linux x86_64/aarch64 build/package + CPU/decoder/encoder checks; native X11 and Wayland (Hyprland/GNOME/KDE) capability/limitations accurate | Unrun platform matrix |
 | X2 | macOS supported architectures/minimum OS; Swift helper/Metal, signed identity/TCC persistence, virtual-display native flows and export | Unrun; Linux build cannot prove this |
 | R1 | Thin root wrappers, fresh dependency installs, feature map, moved CI paths, signed/install/update assets and docs references | Unrun; no merge/release authorized |
@@ -122,8 +122,17 @@ At merged checkpoint, oversized migration inputs include `src/ui.rs` 7372, `src/
 
 Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d4113394ea85155163a5f8173bf8d8`; only this non-embedded plan changes afterward. This file will record exact observed results before handoff; no native GUI, live OAuth, deployment or release proof is implied by baseline checks.
 
-- Baseline run: pending. Linux uses `cargo ... -j 3 --offline`; `taskpolicy` is absent. Runner records command, cwd, source SHA, exit and duration. Rust build uses this actual Linux checkout (platform modules are present).
-- `python3 -m unittest discover -s tests`: passed (hook regressions); exact count to be recorded from log.
-- `python3 -m unittest discover -s scripts/cd -p 'test_*.py'`: passed; exact count to be recorded from log.
-- Backend/site dependency setup and owning checks: pending; private Bun 1.3.10 provisioned outside checkout because no Bun command was installed.
+- All baseline checks below exited **0**. Evidence root: `/srv/clanker-hermes/cache/scratch/capture-boundaries-baseline/`. Each initial check has `<name>.json` (command/cwd/exit/duration) and `<name>.log` (including starting HEAD). Sources were `3b95d124` or first plan checkpoint `415c43fe`; all product/build inputs are identical between these and the final docs-only commit. No claim of fresh native proof.
+- `cargo build -j 3 --offline` (`rust-build.log`) and `cargo test -j 3 --offline -- --test-threads=2` (`rust-test.log`): **664 passed, 3 ignored**, no failures. Do not sum nested subprocess summaries. Ignored: `handoff::sync_live_check::sync_to_pro`, `pause_transcribe::tests::compare_real_audio_with_batch`, `speech::tests::downloads_and_runs_parakeet` (external Mac/real-audio/download probes). Linux uses this actual checkout, with platform modules present; `taskpolicy` is absent.
+- `python3 -m unittest discover -s tests`: **22 passed**, `hooks.log`. `python3 -m unittest discover -s scripts/cd -p 'test_*.py'`: **13 passed**, `delivery.log`.
+- `npm ci --prefix hosted` and `(cd hosted && npm test)`: **52 passed**, no skips (`hosted-install.log`, `hosted-test.log`); test script includes strict TypeScript build and Miniflare Worker/D1/R2 integration. No production service requests.
+- Bun **1.3.10** was installed under the evidence root because Bun was absent. Node **22.23.4**, npm **10.9.9**; CI Node pin is **22.23.0**, so this is local major-version-matched proof, not the exact CI environment. `(cd site && bun install --frozen-lockfile)` passed without lock edits.
+- With `APPARENT_PUBLIC_SITE=1 VITE_HOSTED_API_ORIGIN=https://hosted.tryapparent.com`: `(cd site && npm run build && node scripts/package-apparent.mjs)` passed (`site-build.log`, `site-package.log`), including TS, client, SSR and prerender. Public package generated locally only, never deployed. `node --test scripts/test-brand-favicon.mjs scripts/test-github-stars.mjs scripts/test-latest-download.mjs scripts/test-platform-os.mjs scripts/test-public-homepage.mjs scripts/test-video-demo.mjs`: **18 passed** (`site-tests.log`).
+- Rebuilt/repackaged with `APPARENT_PUBLIC_SITE=1 VITE_HOSTED_API_ORIGIN=http://127.0.0.1:18809`, then `(cd site && HOSTED_TEST_API_ORIGIN=http://127.0.0.1:18809 SITE_EVIDENCE=<evidence-root>/browser-evidence npm run test:hosted)`: **29 synthetic cross-origin scenarios passed**, count independently checked against receipt list (`site-cross-build.log`, `site-cross-browser.log`, `browser-evidence/receipt.json`). Canonical/legacy URLs, approval scope/readback, CSRF refusal, expiry, errors and responsive layouts exercised. Desktop computer setup and narrow upload-approval screenshots inspected: command, checkbox, scope and action readable without clipping. Controlled synthetic API only; not live OAuth, deployed service, native or actual browser-zoom proof.
+- Initial and final publication use the unmodified pre-push hook (fresh Linux build/full Rust suite); logs `push-initial.log` and `push-final.log`. Foundation self-review requires only this plan plus the three inherited #198 files versus pinned main; no independent review spawned because this slice changes no runtime behavior, and nested agents are explicitly excluded.
 - VM launcher and platform skills inspected; no guest started or worker app replaced. Native baseline is explicitly unrun, not unavailable. This docs-only slice does not require new GUI proof.
+- Draft plan PR: https://github.com/tryapparent/apparent/pull/199, base `main`. Existing #198 remains untouched; main stayed at `dd801e42` through foundation fetch/readback. No issue comments, merge, release, app install, user preference writes or outbound messages to people.
+
+### Coordinator handoff / next dispatch
+
+Dispatch **A1–A4** from the final published checkpoint with the exact file boundaries above. Gate B1 on the inspected config primitive rather than creating another settings abstraction; gate Desktop implementation on the native host discriminator. Outstanding blockers are acceptance dependencies, not failed baselines: unchosen host, no standalone Agent runtime, process-local current ownership/leases, native platform matrix still unrun, and oversized lock/source files constraining dependency edits. Before integration of concurrent PRs (#181/#185/#191/#192 and capture fixes), inspect their actual changed behavior and refresh affected proof; their open status is not permission to fold them into this plan.

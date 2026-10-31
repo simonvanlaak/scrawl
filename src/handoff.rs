@@ -23,6 +23,7 @@ pub use opencode::*;
 pub use preferences::*;
 
 use preferences::lenient_experiments;
+const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
 use serde::Deserialize;
 
 // Retain the schema here for the source-based feature-map audit, which locates

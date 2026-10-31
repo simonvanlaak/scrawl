@@ -1,5 +1,5 @@
 //! Desktop preference schema policy, tolerant parsing and effective read timing.
-use super::clipboard::AGENT_DEMO_VIDEO;
+use super::AGENT_DEMO_VIDEO;
 use super::{Config, config_store, default_config_path, update_config_in};
 use anyhow::{Context, Result};
 use serde::Deserialize;

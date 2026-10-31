@@ -1,5 +1,5 @@
 //! Desktop clipboard offers and guarded, unsent draft paste.
-use super::{experiment, load_bundle};
+use super::{AGENT_DEMO_VIDEO, experiment, load_bundle};
 use crate::model::ApparentBundle;
 use anyhow::{Context, Result, bail, ensure};
 use std::fs;
@@ -134,7 +134,7 @@ fn offer_image_handoff(
     offer_text(summary)
 }
 
-pub(super) const AGENT_DEMO_VIDEO: &str = "agentDemoVideo";
+
 const DEMO_VIDEO_REQUEST: &str = "Use make-it-apparent for complex visible changes. Share verified video proof or explain why you can't.";
 
 /// The request belongs to copy/paste, not the archived summary or automatic session message.

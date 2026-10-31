@@ -452,6 +452,70 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   VM, live config, deployment, merge, release or outbound delivery. Existing
   #199 and #208 remain draft review records; neither is GitHub-merged here.
 
+### Approved Engine leaf staging and independent CI integration (2026-10-31)
+
+- Canonical was clean at the required `9a678fafd168bffe286c8bbcb8a9f2274f72c32d`,
+  with the remote at the same head. Adopted #214 commits `799b58e6`, `5532469f`
+  in order with `cherry-pick -x` as `e2f0acdc`, `8f449a12`. Leaf checkpoint
+  `8f449a1299fa4c9b9b2fc7a145e0a8276340c02c` has the exact donor whole tree
+  `d56dc355913ccdda50a0364eec2d4686c76d93c5`: additive Engine module declarations
+  and new `model.rs`, `recording/mod.rs`, `recording/tests.rs` only. All root,
+  existing provider/lifecycle, manifest, lock and hook bytes remain unchanged.
+- Preparation only: these are distinct Rust types from the production root
+  donors. No donor deletion, re-export adoption, visibility widening, second
+  producer or standalone Agent is claimed. Exact donor-block equivalence is
+  exercised by the temporary package test. Caller 32 / repair 42 retains root
+  ownership; paired adoption must use that caller's frozen candidate, including
+  the explicit `CANDIDATE_EDGE_NO_VIDEO` visibility change and private-test
+  observation repair described in the staging handoff. #213 host work is not
+  imported. Parent-approved staging self-review is reused, not recast as a new
+  independent review; no nested agent ran.
+- After the parent explicitly admitted green #212, verified its actual sequence
+  `34b0fa4592ebddf6cf8f4b504bd75ac41ac9d002` then
+  `6eadc2018d276d5081c1882ea5ac0bc4d9c0209c` and adopted with `-x` as
+  `58574e82`, `fc658cb3`. Combined code checkpoint
+  `fc658cb327dd9bc3dc872738d5fa6a95491b641c`, tree
+  `f3af8c8b26aecf1fae8669a14ca743cfa3c2ff8c`, is exactly the disjoint union of
+  the four leaf paths and six CI/guard paths. Every adopted path matches its
+  approved donor bytes and mode; all other paths are unchanged. Guard change
+  is only lossless `u32::from(libc::S_ISVTX)`; root-owned sticky exception,
+  user-owned writable rejection and `O_NOFOLLOW` remain intact. Parent-supplied
+  review 49 approval covers that exact repair and regression test.
+- Fresh combined Linux verification passed in a private HOME-child temporary
+  fixture: `cargo test --manifest-path capture/engine/Cargo.toml -j 3 --offline
+  --locked -- --test-threads=2` (32 passed, no failures/ignored/filtered: suites
+  10+3+1+11+7); matching `cargo build` passed; `cargo tree --offline --locked`
+  has unchanged dependency nodes and no GPUI. The actual Engine CI selector also
+  passed with `CARGO_NET_OFFLINE=true` (fmt, library build, full 32 tests).
+  `python3 scripts/ci/check-value-streams.test.py` passed all six selector tests;
+  base-to-head `git diff --check` passed. Expected staged NO_VIDEO dead-code
+  warning remains; no warning suppression or source-expectation weakening.
+- Fresh unchanged mandatory pre-push hooks passed for both published code
+  checkpoints: 10 hook tests, root `cargo build -j 3 --offline`, full root
+  `cargo test -j 3 --offline -- --test-threads=2`, 674 passed / 0 failed /
+  3 ignored. An interrupted first attempt is not credited; the next attempt
+  correctly rejected two Unix socket path-length fixture failures. Removing
+  only the extra TMPDIR suffix (using the configured scratch root) allowed the
+  full hook to pass. No hook bypass, production edit or foreign-worker change.
+- Reused, explicitly parent-verified upstream proof: #212 run `41216210451`
+  completed successfully at `6eadc201`, all five jobs (Linux Engine, macOS 15
+  Engine, Connect, hosted, public). Parent read Mac job `124581159536`: library
+  build and complete 22 Engine tests (3+1+11+7), including ordinary-runner
+  `writable_output_ancestor_is_not_trusted`. This closes the previously known
+  Engine Mac compile gate for the approved guard repair, not full Mac root or
+  native GUI/media acceptance. Web proof is reused because all web code,
+  build inputs, manifests/locks and CI entrypoint bytes match that candidate;
+  no fresh local web run is claimed. Combined 32-test Mac CI after canonical
+  publication remains a parent-owned watch gate, not an observed result here.
+- Private receipts/logs are in
+  `~/.local/share/apparent/refactor-evidence/engine-leaf-integration/`:
+  `exact-donor.json`, `combined-exact.json`, `checkpoint-push-short-tmp.log`,
+  `combined-push.log`, `combined-engine-{tests,build,selector}.log`,
+  `ci-selector.log`, `tree-{before,after}.txt`. This non-embedded ledger is the
+  only subsequent docs exception. No install, VM, native capture, live config,
+  outbound message, GitHub merge, deployment or release. Whole architecture,
+  production leaf adoption and standalone Agent acceptance remain open.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

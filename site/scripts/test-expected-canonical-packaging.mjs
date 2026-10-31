@@ -15,7 +15,7 @@ function packageHomepage(html, accept) {
   const root = mkdtempSync(join(tmpdir(), "apparent-canonical-"))
   try {
     mkdirSync(join(root, "scripts"))
-    for (const name of ["package-apparent.mjs", "expected-homepage-canonical.mjs"]) {
+    for (const name of ["package-apparent.mjs", "package-page-text.mjs", "expected-homepage-canonical.mjs", "upstream-link-guard.mjs"]) {
       if (existsSync(join(site, "scripts", name))) cpSync(join(site, "scripts", name), join(root, "scripts", name))
     }
     symlinkSync(join(site, "node_modules"), join(root, "node_modules"), "dir")

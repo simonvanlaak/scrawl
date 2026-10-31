@@ -13,11 +13,11 @@ const dist = join(site, "dist")
 const out = join(site, "dist-apparent")
 const html = readFileSync(join(dist, "index.html"), "utf8")
 const text = packagePageText(html)
-if (!hasExpectedHomepageCanonical(html) || !text.includes("Visual feedback gets lost") || !text.includes("We believe work should be")) {
-  throw new Error("Refusing to package a stale or unrelated build")
-}
 if (hasUpstreamLinks(html)) {
   throw new Error("Refusing to publish upstream download or canonical links")
+}
+if (!hasExpectedHomepageCanonical(html) || !text.includes("Visual feedback gets lost") || !text.includes("We believe work should be")) {
+  throw new Error("Refusing to package a stale or unrelated build")
 }
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })

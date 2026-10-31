@@ -33,6 +33,7 @@ for (const url of [
   'http://app.tryapparent.com/', 'https://app.tryapparent.com:8443/',
   'https://app.tryapparent.com/other', 'https://app.tryapparent.com/?next=elsewhere',
   'https://app.tryapparent.com/#elsewhere', '/app.tryapparent.com',
+  'https://app.tryapparent.com/?', 'https://app.tryapparent.com/#',
 ]) {
   test(`refuses unrelated canonical ${url} before writing output`, () => {
     const html = page(url)
@@ -52,6 +53,10 @@ for (const html of [
   '<html><head><template><link rel="canonical" href="https://app.tryapparent.com/"></template></head><body><section class="pond-demo"></section></body></html>',
   page('https://app.tryapparent.com/', '<p>pond-demo</p>'),
   page('https://app.tryapparent.com/', '<section class="not-pond-demo"></section>'),
+  page('https://app.tryapparent.com/', '<!-- <section class="pond-demo"></section> -->'),
+  page('https://app.tryapparent.com/', '<template><section class="pond-demo"></section></template>'),
+  page('https://app.tryapparent.com/', '<script>"<section class=pond-demo></section>"</script>'),
+  page('https://app.tryapparent.com/', '<noscript><section class="pond-demo"></section></noscript>'),
   page('https://app.tryapparent.com/').replace('</head>', '<link rel="canonical" href="https://evil.invalid/"></head>'),
 ]) {
   test(`refuses text/inert/ambiguous identity: ${html}`, () => run(html, ({ result, candidate, manifest }) => {

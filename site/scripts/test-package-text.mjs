@@ -19,7 +19,7 @@ function packageFixture(html) {
     mkdirSync(join(root, "dist-apparent"))
     writeFileSync(join(root, "dist-apparent", "previous.txt"), "previous artifact")
     symlinkSync(join(site, "node_modules"), join(root, "node_modules"), "dir")
-    for (const name of ["package-apparent.mjs", "package-page-text.mjs"]) {
+    for (const name of ["package-apparent.mjs", "package-page-text.mjs", "expected-homepage-canonical.mjs", "upstream-link-guard.mjs"]) {
       if (existsSync(join(site, "scripts", name))) cpSync(join(site, "scripts", name), join(root, "scripts", name))
     }
     for (const name of [

@@ -516,6 +516,48 @@ Foundation test logs live outside git. Initial source checkpoint is `3b95d12430d
   outbound message, GitHub merge, deployment or release. Whole architecture,
   production leaf adoption and standalone Agent acceptance remain open.
 
+### Approved diagnostic Desktop host checkpoint (2026-10-31)
+
+- After the leaf/CI ledger checkpoint `44c5f1a9` was published, adopted #213's
+  verified sequence `13c0032ef6811f8de8835ea427ba9205c7ae7fe3`,
+  `28d395bdc9919e4caad09a2137dec3f720632baf`,
+  `9a193764f20211660f602ad37625c4e8e4a22006` with `cherry-pick -x` as
+  `d33457ac`, `2489615a`, `6da993b7`. Code checkpoint
+  `6da993b7842523ff4f575845b183031e97acec6f`, whole tree
+  `1a3091b114b22a576ebe732a42c54f63ec065f74`, adds only the 16 files in
+  `capture/desktop/host-spike/`. That complete subtree (blobs and modes)
+  `4c03032ed0f51ccdef01112597de7ba04b1a29e0` equals approved donor `9a193764`.
+  All preceding Engine/CI bytes, root Rust, providers, manifests/locks, hooks,
+  live config and default runtime remain unchanged. This ledger is the only
+  subsequent tracked change.
+- Reused parent-supplied independent review 47 approval of the original
+  diagnostic IPC/security/correctness boundary at `28d395bd`, with no findings.
+  Its eight JS files are unchanged at `9a193764`; only README, package metadata
+  and lock metadata changed. Parent verified the same 13 dependency packages,
+  versions, edges and flags, authentic registry URLs/integrities, and Node
+  minimum >=22.12.0; parent's fresh private-copy npm ci/build/four-test proof is
+  inherited, not claimed as a new install here. No nested review was launched.
+- Fresh canonical `npm --prefix capture/desktop/host-spike run build` and
+  `npm --prefix capture/desktop/host-spike test` passed on Node v22.23.4:
+  three local renderer assets built, all four diagnostic/HTTP tests passed,
+  none skipped. No dependency install or GUI was needed. Base-to-head
+  `git diff --check` passed. Mandatory unchanged checkpoint hook freshly passed
+  10 guard tests, root build and full root suite: 674 passed / 0 failed /
+  3 ignored. Logs/identity: `host-build.log`, `host-tests.log`, `host-exact.json`,
+  `host-checkpoint-push.log` in the private Engine integration evidence folder.
+- Ruling remains **Electron ordinary-window candidate only**, GPUI/native
+  overlays remain default. Native Electron window, preload IPC, GUI teardown,
+  overlays, capture and latency acceptance are unrun here. No production Desktop
+  enablement, feature-map change, D1 completion, standalone Agent readiness or
+  architecture completion is claimed. Parent owns physical/native proof.
+- The earlier ledger push also exposed invocation-only TMPDIR leakage from the
+  short-lived HOME-child Engine fixture. Restoring the documented scratch root
+  made all 19 agent transport tests and the affected Settings test pass, then
+  the complete mandatory hook passed 674/0/3 before `44c5f1a9` publication.
+  `final-fixture-focused-{agent,settings}.log` and
+  `final-ledger-push-complete.log` retain that repair proof; no source was changed
+  to hide a fixture failure. Interrupted attempts are not credited.
+
 ### Coordinator handoff / next dispatch
 
 Implement the mapped seams, not A1–A4 investigation-only jobs. The sole integration

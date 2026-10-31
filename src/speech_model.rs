@@ -324,9 +324,12 @@ pub fn missing(why: &str, locale: &str, error: Option<&str>) -> MissingTranscrip
 
 /// Marks a freshly written bundle whose transcript can come later; if the model has arrived
 /// meanwhile, transcribes it now.
-pub fn mark_pending(bundle_dir: &Path) {
-    let _ = std::fs::write(bundle_dir.join(PENDING), b"");
-    if current().state == State::Ready {
+pub fn mark_pending(bundle_dir: &Path) -> Result<()> {
+    crate::bundle_pipeline::publication::write(bundle_dir, PENDING, b"")
+}
+
+pub(crate) fn resume_pending(bundle_dir: &Path) {
+    if current().state == State::Ready && bundle_dir.join(PENDING).is_file() {
         let dir = bundle_dir.to_path_buf();
         std::thread::spawn(move || transcribe_one(&dir));
     }
@@ -359,7 +362,7 @@ fn transcribe_one(dir: &Path) {
                 "transcribing {} again failed: {error:#}",
                 dir.display()
             ));
-            let _ = std::fs::remove_file(dir.join(PENDING));
+            // Keep durable pending work on I/O/validation/transcription failure.
         }
     }
 }
@@ -368,10 +371,24 @@ fn transcribe_one(dir: &Path) {
 /// keyframe's words, `apparent.json` and `summary.md`. Returns `false` (and keeps the marker)
 /// while there's still no model.
 pub fn transcribe_again(dir: &Path) -> Result<bool> {
+    transcribe_again_with(dir, crate::helper::transcribe)
+}
+
+fn transcribe_again_with(dir: &Path, transcribe: impl FnOnce(&Path) -> Result<crate::model::TranscriptData>) -> Result<bool> {
+    use crate::bundle_pipeline::publication;
+    let _publication = publication::coordinate(dir)?;
+    let root = publication::Directory::open(dir, false)?;
+    let names = root.names()?;
+    if [publication::IN_PROGRESS, crate::recover::UNFINISHED, crate::recover::UNSAFE_VIDEO]
+        .iter().any(|name| names.iter().any(|n| n == name)) {
+        return Ok(false);
+    }
     let (dir, mut bundle) = crate::handoff::load_bundle(dir)?;
+    let old_summary = std::fs::read_to_string(dir.join("summary.md"))?;
+    publication::checked(&dir, &bundle, &old_summary)?;
     let wav = dir.join(bundle.audio.as_deref().unwrap_or("audio.wav"));
     anyhow::ensure!(wav.is_file(), "the bundle has no audio.wav any more");
-    let transcript = crate::helper::transcribe(&wav)?;
+    let transcript = transcribe(&wav)?;
     if transcript
         .missing
         .as_ref()
@@ -385,15 +402,14 @@ pub fn transcribe_again(dir: &Path) -> Result<bool> {
         frame.said = said;
     }
     bundle.transcript = transcript;
-    std::fs::write(
-        dir.join("apparent.json"),
-        serde_json::to_vec_pretty(&bundle).context("Could not encode apparent.json")?,
-    )?;
-    std::fs::write(
-        dir.join("summary.md"),
-        crate::sketch::summary_markdown(&bundle, &dir),
-    )?;
-    let _ = std::fs::remove_file(dir.join(PENDING));
+    let summary = crate::sketch::summary_markdown(&bundle, &dir);
+    publication::publish_after(&dir, || {
+        publication::write(&dir, "apparent.json", &serde_json::to_vec_pretty(&bundle).context("Could not encode apparent.json")?)?;
+        publication::write(&dir, "summary.md", summary.as_bytes())?;
+        Ok((dir.clone(), bundle, summary))
+    })?;
+    root.remove(PENDING)?;
+    root.0.sync_all()?;
     Ok(true)
 }
 

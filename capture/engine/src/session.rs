@@ -10,6 +10,7 @@ pub struct Session {
     runtime: Runtime,
     owner: Lock,
     recording: Lock,
+    bundle: crate::BundleLease,
     record: Record,
 }
 pub enum Admission {
@@ -20,6 +21,69 @@ pub enum Admission {
 pub enum Control {
     Stop,
     Cancel,
+}
+impl Session {
+    fn load(&self) -> io::Result<Record> {
+        self.owner.check(&self.runtime.store)?;
+        self.recording.check(&self.runtime.store)?;
+        self.bundle.lock.check(&self.runtime.store)?;
+        let record = Record::read(&self.runtime.store, &self.record.receipt.request_id)?
+            .ok_or_else(crate::secure::invalid)?;
+        if !identity::equal_secret(&record.token, &self.record.token)
+            || record.receipt.bundle_id != self.record.receipt.bundle_id
+            || !record.receipt.status.active()
+        {
+            return Err(crate::secure::invalid());
+        }
+        Ok(record)
+    }
+    fn transition(&mut self, from: Status, to: Status) -> io::Result<()> {
+        let _tx = self.runtime.transaction()?;
+        let mut record = self.load()?;
+        if record.receipt.status != from {
+            return Err(crate::secure::invalid());
+        }
+        record.receipt.status = to;
+        record.write(&self.runtime.store)?;
+        self.record = record;
+        Ok(())
+    }
+    /// Call only after the media adapter reports its first real frame.
+    pub fn recording(&mut self) -> io::Result<()> {
+        self.transition(Status::Starting, Status::Recording)
+    }
+    pub fn processing(&mut self) -> io::Result<()> {
+        self.transition(Status::Recording, Status::Processing)
+    }
+    pub fn control(&self) -> io::Result<Option<Control>> {
+        let _tx = self.runtime.transaction()?;
+        Ok(self.load()?.control)
+    }
+    pub fn finish(self, result: Result<crate::FinalizerSuccess, ()>) -> io::Result<Receipt> {
+        let _tx = self.runtime.transaction()?;
+        let mut record = self.load()?;
+        if record.control == Some(Control::Cancel) {
+            record.receipt.status = Status::Cancelled;
+            record.receipt.error = Some("cancelled".into());
+        } else if let Ok(output) = result {
+            if record.receipt.status == Status::Processing
+                && output.request == record.receipt.request_id
+                && output.bundle == record.receipt.bundle_id
+                && output.check().is_ok()
+            {
+                record.receipt.status = Status::Saved;
+                record.receipt.bundle_path = Some(output.path);
+            } else {
+                record.receipt.status = Status::Failed;
+                record.receipt.error = Some("invalid_finalizer_result".into());
+            }
+        } else {
+            record.receipt.status = Status::Failed;
+            record.receipt.error = Some("finalization_failed".into());
+        }
+        record.write(&self.runtime.store)?;
+        Ok(record.receipt)
+    }
 }
 impl Runtime {
     pub fn inspect(&self, id: &str) -> io::Result<Option<Receipt>> {
@@ -96,7 +160,7 @@ impl Runtime {
         identity::validate(token, 64)?;
         identity::validate(bundle_id, 32)?;
         let _tx = self.transaction()?;
-        if let Some(record) = self.read_recover(id)? {
+        if let Some(record) = Record::read(&self.store, id)? {
             if !identity::equal_secret(token, &record.token)
                 || record.receipt.bundle_id != bundle_id
             {
@@ -105,6 +169,7 @@ impl Runtime {
                     "request identity or authority mismatch",
                 ));
             }
+            self.read_recover(id)?;
             return Ok(Admission::Existing);
         }
         let owner = Lock::open(&self.store, &format!("owner-{id}.lock"))?;
@@ -132,10 +197,17 @@ impl Runtime {
             record.write(&self.store)?;
             return Ok(Admission::Existing);
         }
+        let Some(bundle) = self.lease_locked(bundle_id, crate::LeaseKind::Write)? else {
+            record.receipt.status = Status::Rejected;
+            record.receipt.error = Some("bundle_busy".into());
+            record.write(&self.store)?;
+            return Ok(Admission::Existing);
+        };
         Ok(Admission::Acquired(Session {
             runtime: self.clone(),
             owner,
             recording,
+            bundle,
             record,
         }))
     }

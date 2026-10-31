@@ -22,7 +22,7 @@ assert(!(await readFile(`${root}/sitemap.xml`, 'utf8')).includes('/connect'))
 for (const asset of ['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg']) {
   assert.deepEqual(await readFile(`${root}/${asset}`), await readFile(`public/${asset}`), `packaged ${asset}`)
 }
-let scenario = {}, writes = [], approved = false, signedOut = false, interest = false
+let scenario = {}, writes = [], calls = [], approved = false, signedOut = false, interest = false
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (url.pathname.startsWith('/v1/') || url.pathname === '/auth/logout') {
@@ -30,6 +30,7 @@ const server = createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token')
     if (req.method === 'OPTIONS') return res.writeHead(204).end()
+    calls.push({ host: req.headers.host, cookie: req.headers.cookie })
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store')
     if (scenario.loading && url.pathname === '/v1/session') await new Promise(r => setTimeout(r, 650))
     if (scenario.unavailable) return res.writeHead(503).end('{}')
@@ -80,7 +81,7 @@ try {
     { name: 'legacy-device', legacy: true, device: true }, { name: 'legacy-anonymous-device', legacy: true, device: true, anonymous: true },
     { name: 'canonical-no-slash', noSlash: true }, { name: 'canonical-device-slash', device: true, deviceSlash: true },
   ]) {
-    scenario = test; writes = []; approved = false; signedOut = false; interest = false
+    scenario = test; writes = []; calls = []; approved = false; signedOut = false; interest = false
     scenario.expiresAt = Date.now() + 2500
     const page = await browser.newPage({ viewport: { width: test.width || 1100, height: test.height || 900 } })
     const errors = []; page.on('pageerror', e => errors.push(String(e)))
@@ -174,9 +175,14 @@ try {
       await page.getByRole('link', { name: 'Continue with Google' }).waitFor()
       assert.equal(writes[0].path, '/auth/logout'); assert.equal(writes[0].csrf, 'synthetic-csrf')
     }
+    assert(calls.length > 0)
+    for (const call of calls) {
+      assert.equal(call.host, apiOrigin ? new URL(apiOrigin).host : `127.0.0.1:${server.address().port}`, 'fetches must use configured API origin')
+      assert.match(call.cookie || '', /fixture=1/, 'credentialed API fetch retains the host cookie')
+    }
     results.push(test.name); await page.close()
   }
-  const receipt = { synthetic: true, artifact: root, passed: results, count: results.length, screenshots: evidence, assets: Object.fromEntries(await Promise.all(['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg'].map(async name => [name, createHash('sha256').update(await readFile(`${root}/${name}`)).digest('hex')]))), limits: 'Controlled synthetic API only; not live OAuth, service, native, or deployment proof. 640×450 CSS pixels is a 200%-equivalent layout, not browser zoom.' }
+  const receipt = { synthetic: true, artifact: root, apiOrigin: apiOrigin || 'same-origin', passed: results, count: results.length, screenshots: evidence, assets: Object.fromEntries(await Promise.all(['hosted/source-pond-v4.png', 'hosted/agent-pond-v4.png', 'hosted/agent-reading-v4.png', 'HostGrotesk-Variable.ttf', 'apparent-wordmark.svg'].map(async name => [name, createHash('sha256').update(await readFile(`${root}/${name}`)).digest('hex')]))), limits: 'Controlled synthetic API only; not live OAuth, service, native, or deployment proof. 640×450 CSS pixels is a 200%-equivalent layout, not browser zoom.' }
   await import('node:fs/promises').then(fs => fs.writeFile(`${evidence}/receipt.json`, JSON.stringify(receipt, null, 2)))
   console.log(JSON.stringify(receipt, null, 2))
 } finally { await browser.close(); if (apiServer) await new Promise(r => apiServer.close(r)); await new Promise(r => server.close(r)) }

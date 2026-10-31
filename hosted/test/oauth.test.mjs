@@ -37,6 +37,8 @@ const sessionCookie=r=>r.headers.get('Set-Cookie').match(/__Host-apparent_sessio
 
 test('Connect canonical and legacy OAuth destinations normalize, including outstanding stored states',async()=>{
  const p=await provider(),f=await fixture({...p.bindings,SITE_ORIGIN:'https://app.tryapparent.com',API_ORIGIN:'https://hosted.tryapparent.com',LEGACY_SITE_ORIGIN:'https://hosted.tryapparent.com'});try{
+ const start=await f.call('/auth/google/start');
+ assert.equal(new URL(start.headers.get('Location')).searchParams.get('redirect_uri'),'https://hosted.tryapparent.com/auth/google/callback');
  let n=0;
  for(const path of ['/connect','/hosted','/connect/device?code=ABCDEF123456','/hosted/device?code=ABCDEF123456']) {
   for(const stored of [false,true]) {
@@ -70,6 +72,10 @@ test('Connect CORS and CSRF share exact explicit origins; device scope remains i
    assert.equal(response.headers.get('Access-Control-Allow-Credentials'),allowed?'true':null);
   }
   assert.equal((await f.call('/v1/waitlist',{...a,origin,method:'POST',body:{interestedAtFiveDollars:false}})).status,allowed?200:403);
+  for(const path of ['/auth/logout','/v1/waitlist','/v1/device/approve','/v1/device/reject']) {
+   // Even a trusted origin needs CSRF; an untrusted origin cannot use valid CSRF.
+   assert.equal((await f.call(path,{...a,origin,csrf:allowed?'wrong':a.csrf,method:'POST',body:{userCode:'ABCDEF123456',interestedAtFiveDollars:true}})).status,403,path+' '+String(origin));
+  }
  }
  for(const origin of [canonical,legacy])for(const scope of ['read','upload']) {
   const d=await(await f.call('/v1/device/start',{method:'POST',body:{scope}})).json();

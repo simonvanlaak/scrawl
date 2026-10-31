@@ -31,7 +31,9 @@ node --test scripts/test-brand-favicon.mjs scripts/test-github-stars.mjs scripts
 
 For private T3 preview inspection, `HOSTED_FIXTURE_ONLY=1 HOSTED_FIXTURE_PORT=5173 node scripts/test-hosted-browser.mjs` runs the synthetic server only. Do not confuse it with backend integration or use it in production.
 
-Observed: public build/typecheck/package passed, hosted browser fixtures passed, and the existing six-file public site test command passed (18 tests). T3 preview and fixture phone/desktop screenshots were inspected. The general `npm run build` typechecked and built both bundles but failed its existing feature audit: missing `added` for `site-belief-pond`, `agent-capture-control`, `export-cli`, and `onboarding`. `site/src/features.json` belongs to the Rust worker and was not changed here.
+To exercise credentialed same-site cross-origin fetches without real accounts, build with `VITE_HOSTED_API_ORIGIN=http://127.0.0.1:18809 APPARENT_PUBLIC_SITE=1 npm run build`, package, then run `HOSTED_TEST_API_ORIGIN=http://127.0.0.1:18809 npm run test:hosted`. Use a free test port. The fixture runs UI and API on separate ports, handles credentialed preflight, and checks every API request's host and cookie. Both modes run 29 scenarios, including canonical routes and explicit legacy account/device compatibility. This loopback proof does not establish production subdomain cookie/CORS configuration. Rebuild with the production API origin before deployment; never publish a loopback-configured artifact.
+
+Baseline before Connect: public build/typecheck/package, hosted browser fixtures and the six-file public site command (18 tests) passed; T3 preview and fixture phone/desktop screenshots were inspected. The general `npm run build` had an existing feature audit failure: missing `added` for `site-belief-pond`, `agent-capture-control`, `export-cli`, and `onboarding`. Connect updates only its own feature-map name/note, not those unrelated entries; use the public build mode above.
 
 ## Release prerequisites
 

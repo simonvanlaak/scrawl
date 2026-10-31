@@ -264,6 +264,21 @@ This checks the GUI and release contract; it does not establish GitHub publicati
 
 ## Building and testing
 
+Generic multiple-source ScreenCast sessions use a fresh authorized
+`OpenPipeWireRemote` connection for each independent Recorder/node. A duplicate
+FD is not a second protocol connection: independent `pipewiresrc` cores must
+never read the same socket. These consumers still share the approved Session;
+the last consumer releases its lease. Partial failure and cancellation drop all
+already-created remotes rather than delivering a partial authorization.
+
+Session creation uses the installed zbus protocol APIs on a dedicated connection.
+The standard Request and Session token paths are owned before `CreateSession`
+is sent. Stop/deadline covers connection setup, the method reply and the withheld
+Response interval, not only SelectSources/Start. Cleanup attempts Request.Close
+then Session.Close under the existing budgets and releases the dedicated
+connection. Private-bus tests cover late Session creation during Request.Close;
+this is not proof of native picker dismissal or backend resource destruction.
+
 ### Private portal resource diagnostics
 
 For an explicitly owned test app, set `APPARENT_PORTAL_DIAGNOSTICS=1` at launch.
@@ -274,10 +289,11 @@ No CLI, capture bundle, clipboard, timeline or public telemetry field is added.
 Keep the log private and bound its retention in the test harness.
 
 Schema 1 binds PID plus Linux process start ticks, authorization `generation`,
-the actual ashpd connection's unique `bus` name and serialized `session` path.
+the authorization's dedicated zbus connection's unique `bus` name and actual
+`session` path (including its owned token path before CreateSession responds).
 `request_pending` names the exact owned Request before the method call;
 `request_response` ends that pending identity. `held_fd` records each actual
-OpenPipeWireRemote descriptor (`role=remote`) and each owned stream clone
+OpenPipeWireRemote descriptor (`role=remote`, `consumer_index`, `node`) and each owned stream clone
 (`role=stream`, `parent_fd`, `clone_index`, Start-returned `node`). The clone
 also records `monitor` and a SHA-256 of its monitor `mapping_id`, not raw source
 names. Compare that hash with the frozen output inventory. `media_binding`
@@ -297,14 +313,14 @@ not that GStreamer, the backend, or the server released its copies.
 `*_close_returned` records only the method result. Neither proves OS release.
 
 An independent observer must read exact held targets, both selected node
-bindings and the completed state in the **same app lifetime**, and keep the
-lazy process-lifetime D-Bus socket separate. A global `pw-dump` does not prove
+bindings and the completed state in the **same app lifetime**, and keep each
+authorization's D-Bus socket separate from its PipeWire remotes. A global `pw-dump` does not prove
 visibility of a portal's private remote. Join selected node/client IDs and
 `object.serial` only with evidence of the same PipeWire remote/server;
 otherwise report private-graph visibility UNKNOWN separately from observed
 descriptor/session release. An object ID reused with a different serial is
 not the old object. A foreign backend survivor is not a recording leak.
-With diagnostics enabled, a second `OpenPipeWireRemote` call for the same
+With diagnostics enabled, an additional `OpenPipeWireRemote` call for the same
 authorized Session supplies a **fresh observer connection**, never a clone of
 the recording socket. `role=observer` records its held descriptor separately.
 A bounded, read-only Linux adapter uses the installed PipeWire 0.3 library to
@@ -322,6 +338,14 @@ resource verdict. An independent global view may join these facts only after
 matching the Core cookie and source/client serials. The observer connection is
 already closed before normal recording starts.
 
+Schema 1 keeps its parent/clone join: each stream's `parent_fd`, socket cookie
+and target identify its own `role=remote`, not one remote shared by all nodes.
+Each recording remote gets a separate `graph_snapshot` filtered to its node.
+One multiple-source Session can therefore have several independent socket
+identities under one bus/session/generation. Do not require two Session paths
+to accept two consumers; do require distinct recording socket identities. The
+fresh observer is shared only as read-only graph facts, never as a recording FD.
+
 Registry disappearance still does **not** prove source deletion. PipeWire
 `pw_global_update_permissions` sends the same `global_remove` notification when
 read permission is revoked as object destruction does. A permission-scoped
@@ -331,8 +355,9 @@ shared backend client alone as a recording leak. Native GUI acceptance and an
 authoritative backend/server deletion observation remain separate gates.
 
 `cargo test --offline linux::portal -- --test-threads=2` includes an isolated
-private D-Bus portal that returns real Unix descriptors through ashpd, checks
-clone identity and actual final socket EOF, and tests pending Request handling.
+private D-Bus portal that returns real Unix descriptors through zbus, checks
+per-consumer socket identity, selected-node media construction, shared Session
+lifetime, partial/late socket EOF, and pending CreateSession/SelectSources handling.
 This is transport/lifetime proof, not native compositor acceptance.
 
 Build dependencies (Ubuntu/Debian; CI installs the same):

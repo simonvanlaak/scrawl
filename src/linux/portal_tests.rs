@@ -14,6 +14,8 @@ struct DiagnosticPortal {
     peers: flume::Sender<std::os::unix::net::UnixStream>,
     next: AtomicU32,
     multiple_nodes: bool,
+    remote_count: AtomicU32,
+    remote_gate: Option<(flume::Sender<()>, flume::Receiver<bool>)>,
 }
 
 async fn diagnostic_response(connection: &zbus::Connection, header: zbus::message::Header<'_>,
@@ -45,6 +47,7 @@ impl DiagnosticPortal {
     async fn select_sources(&self, _session: OwnedObjectPath, options: HashMap<String, OwnedValue>,
         #[zbus(connection)] connection: &zbus::Connection,
         #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<OwnedObjectPath> {
+        assert_eq!(options["multiple"].downcast_ref::<bool>().unwrap(), true);
         diagnostic_response(connection, header, &options, HashMap::new()).await
     }
 
@@ -62,10 +65,15 @@ impl DiagnosticPortal {
             ("streams", Value::from(streams)), ("restore_token", Value::from("PRIVATE-CANARY-NEVER-LOG"))])).await
     }
 
-    fn open_pipe_wire_remote(&self, _session: OwnedObjectPath, _options: HashMap<String, OwnedValue>) -> zbus::zvariant::OwnedFd {
+    async fn open_pipe_wire_remote(&self, _session: OwnedObjectPath, _options: HashMap<String, OwnedValue>) -> zbus::fdo::Result<zbus::zvariant::OwnedFd> {
+        if self.remote_count.fetch_add(1, Ordering::Relaxed) == 2
+            && let Some((entered, release)) = &self.remote_gate {
+            entered.send(()).unwrap();
+            if !release.recv_async().await.unwrap() { return Err(zbus::fdo::Error::Failed("synthetic partial connection failure".into())); }
+        }
         let (fd, peer) = std::os::unix::net::UnixStream::pair().unwrap();
         self.peers.send(peer).unwrap();
-        zbus::zvariant::OwnedFd::from(OwnedFd::from(fd))
+        Ok(zbus::zvariant::OwnedFd::from(OwnedFd::from(fd)))
     }
 }
 
@@ -111,7 +119,8 @@ fn diagnostic_authorization_private_bus_fixture() {
         let (closed, closes) = flume::bounded(4);
         let (peers, remote_peers) = flume::bounded(4);
         let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
-            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: false }).unwrap().build().await.unwrap();
+            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: false,
+                remote_count: AtomicU32::new(0), remote_gate: None }).unwrap().build().await.unwrap();
         let (release, released) = flume::bounded(1);
         let (ready, is_ready) = flume::bounded(1);
         let worker = std::thread::spawn(move || {
@@ -170,12 +179,15 @@ fn diagnostic_authorization_private_bus_fixture() {
 fn multiple_node_consumers_run_on_private_bus() {
     let data = std::env::temp_dir().join(format!("apparent-multiple-{}", crate::make_bundle_id()));
     std::fs::create_dir(&data).unwrap();
+    for mode in ["success", "partial-failure", "cancel"] {
     let output = std::process::Command::new("dbus-run-session").arg("--").arg(std::env::current_exe().unwrap())
         .args(["--exact", "linux::portal::protocol_tests::multiple_node_consumers_private_bus_fixture", "--ignored", "--nocapture"])
         .env("APPARENT_TEST_OWNED_REQUEST_BUS", "1").env("APPARENT_PORTAL_DIAGNOSTICS", "1")
+        .env("APPARENT_TEST_REMOTE_MODE", mode)
         .env("XDG_DATA_HOME", &data).output().unwrap();
+    assert!(output.status.success(), "{mode}: {}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
     std::fs::remove_dir_all(data).unwrap();
-    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
@@ -185,11 +197,35 @@ fn multiple_node_consumers_private_bus_fixture() {
     futures_lite::future::block_on(async {
         let (closed, closes) = flume::bounded(4);
         let (peers, remote_peers) = flume::bounded(8);
+        let mode = std::env::var("APPARENT_TEST_REMOTE_MODE").unwrap();
+        let (entered, calls) = flume::bounded(1);
+        let (release, released) = flume::bounded(1);
         let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
-            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: true }).unwrap().build().await.unwrap();
-        let worker = std::thread::spawn(|| portal_screencasts_until(false, true, "synthetic-test-only", &AtomicBool::new(false),
-            std::time::Instant::now() + Duration::from_secs(3)).unwrap().0);
-        let mut streams = worker.join().unwrap();
+            .serve_at("/org/freedesktop/portal/desktop", DiagnosticPortal { closed, peers, next: AtomicU32::new(71), multiple_nodes: true,
+                remote_count: AtomicU32::new(0), remote_gate: (mode != "success").then_some((entered, released)) }).unwrap().build().await.unwrap();
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = stopping.clone();
+        let worker = std::thread::spawn(move || portal_screencasts_until(false, true, "synthetic-test-only", &stop,
+            std::time::Instant::now() + Duration::from_secs(3)));
+        if mode != "success" {
+            calls.recv_timeout(Duration::from_secs(2)).unwrap();
+            if mode == "cancel" { stopping.store(true, Ordering::Release); }
+            else { release.send(false).unwrap(); }
+            assert!(worker.join().unwrap().is_err());
+            closes.recv_timeout(Duration::from_secs(2)).expect("partial grant Session.Close");
+            if mode == "cancel" { release.send(true).unwrap(); }
+            let count = if mode == "cancel" { 3 } else { 2 };
+            for index in 0..count {
+                use std::io::Read;
+                let mut peer = remote_peers.recv_timeout(Duration::from_secs(2)).unwrap();
+                peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut bytes = Vec::new();
+                peer.read_to_end(&mut bytes).expect("all partial/late remote descriptors must reach actual EOF");
+                assert_eq!(bytes.is_empty(), index != 0, "observer cannot read a recording socket");
+            }
+            return;
+        }
+        let mut streams = worker.join().unwrap().unwrap().0;
         assert_eq!(streams.len(), 2);
         let cookie = |stream: &Stream| {
             let mut cookie = 0u64;
@@ -229,6 +265,117 @@ fn multiple_node_consumers_private_bus_fixture() {
 }
 
 struct FakeRequest(Arc<AtomicBool>);
+struct WithheldCreatePortal {
+    entered: flume::Sender<String>,
+    request_closed: flume::Sender<()>,
+    session_closed: flume::Sender<()>,
+    delayed_reply: bool,
+}
+
+struct CreateRequest {
+    closed: flume::Sender<()>,
+    release: flume::Sender<()>,
+    registered: flume::Receiver<()>,
+}
+
+#[zbus::interface(name = "org.freedesktop.portal.Request")]
+impl CreateRequest {
+    async fn close(&self) {
+        self.closed.send(()).unwrap();
+        self.release.send(()).unwrap();
+        // The hostile-but-bounded test service creates its late Session while
+        // Close is in progress, before acknowledging Close to the client.
+        self.registered.recv_async().await.unwrap();
+    }
+}
+
+#[zbus::interface(name = "org.freedesktop.portal.ScreenCast")]
+impl WithheldCreatePortal {
+    #[zbus(property)]
+    fn version(&self) -> u32 { 5 }
+
+    async fn create_session(&self, options: HashMap<String, OwnedValue>,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: zbus::message::Header<'_>) -> zbus::fdo::Result<OwnedObjectPath> {
+        let sender = header.sender().unwrap().to_owned();
+        let id = sender.trim_start_matches(':').replace('.', "_");
+        let token = options["session_handle_token"].downcast_ref::<&str>().unwrap();
+        let session: OwnedObjectPath = format!("/org/freedesktop/portal/desktop/session/{id}/{token}").try_into().unwrap();
+        let token = options["handle_token"].downcast_ref::<&str>().unwrap();
+        let request: OwnedObjectPath = format!("/org/freedesktop/portal/desktop/request/{id}/{token}").try_into().unwrap();
+        let (release, released) = flume::bounded(1);
+        let (registered, registration) = flume::bounded(1);
+        connection.object_server().at(request.clone(), CreateRequest {
+            closed: self.request_closed.clone(), release, registered: registration,
+        }).await.unwrap();
+        self.entered.send(sender.to_string()).unwrap();
+        if self.delayed_reply {
+            released.recv_async().await.unwrap();
+            connection.object_server().at(session.clone(), DiagnosticSession(self.session_closed.clone())).await.unwrap();
+            connection.emit_signal(Some(sender.as_str()), request.clone(), "org.freedesktop.portal.Request", "Response",
+                &(0u32, HashMap::from([("session_handle", Value::from(session))]))).await.unwrap();
+            registered.send(()).unwrap();
+        } else {
+            // Withhold Response but return the method's request handle normally.
+            connection.object_server().at(session, DiagnosticSession(self.session_closed.clone())).await.unwrap();
+            std::thread::spawn(move || { released.recv().unwrap(); registered.send(()).unwrap(); });
+        }
+        Ok(request)
+    }
+}
+
+#[test]
+fn create_session_cancellation_runs_on_private_bus() {
+    let data = std::env::temp_dir().join(format!("apparent-create-{}", crate::make_bundle_id()));
+    std::fs::create_dir(&data).unwrap();
+    for mode in ["reply-stop", "reply-deadline", "response-stop", "response-deadline"] {
+        let output = std::process::Command::new("dbus-run-session").arg("--").arg(std::env::current_exe().unwrap())
+            .args(["--exact", "linux::portal::protocol_tests::create_session_cancellation_private_bus_fixture", "--ignored", "--nocapture"])
+            .env("APPARENT_TEST_OWNED_REQUEST_BUS", mode).env("APPARENT_PORTAL_DIAGNOSTICS", "1")
+            .env("XDG_DATA_HOME", &data).output().unwrap();
+        assert!(output.status.success(), "{mode}: {}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+    std::fs::remove_dir_all(data).unwrap();
+}
+
+#[test]
+#[ignore = "only in the subprocess's isolated bus"]
+fn create_session_cancellation_private_bus_fixture() {
+    let mode = std::env::var("APPARENT_TEST_OWNED_REQUEST_BUS").unwrap();
+    futures_lite::future::block_on(async {
+        let (entered, calls) = flume::bounded(1);
+        let (request_closed, requests) = flume::bounded(1);
+        let (session_closed, sessions) = flume::bounded(1);
+        let _service = zbus::connection::Builder::session().unwrap().name("org.freedesktop.portal.Desktop").unwrap()
+            .serve_at("/org/freedesktop/portal/desktop", WithheldCreatePortal {
+                entered, request_closed, session_closed, delayed_reply: mode.starts_with("reply"),
+            }).unwrap().build().await.unwrap();
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = stopping.clone();
+        let deadline = if mode.ends_with("deadline") { 350 } else { 3000 };
+        let worker = std::thread::spawn(move || portal_screencasts_until(false, true, "synthetic-test-only", &stop,
+            std::time::Instant::now() + Duration::from_millis(deadline)));
+        let owner = calls.recv_timeout(Duration::from_secs(2)).unwrap();
+        let before = std::time::Instant::now();
+        if mode.ends_with("stop") { stopping.store(true, Ordering::Release); }
+        assert!(worker.join().unwrap().is_err());
+        assert!(before.elapsed() < Duration::from_secs(1), "caller must not join native cleanup");
+        requests.recv_timeout(Duration::from_secs(2)).expect("CreateSession's actual Request.Close was not called");
+        sessions.recv_timeout(Duration::from_secs(2)).expect("late/existing Session.Close was not called");
+        let bus = zbus::fdo::DBusProxy::new(&_service).await.unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let alive = std::fs::read_dir("/proc/self/task").unwrap().filter_map(|entry| {
+                std::fs::read_to_string(entry.ok()?.path().join("comm")).ok()
+            }).any(|name| name.trim() == "apparent-portal");
+            let connected = bus.name_has_owner(owner.as_str().try_into().unwrap()).await.unwrap();
+            if !alive && !connected { break; }
+            assert!(std::time::Instant::now() < until, "portal worker or cleanup timer leaked");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    });
+}
+
 #[zbus::interface(name = "org.freedesktop.portal.Request")]
 impl FakeRequest {
     fn close(&self) { self.0.store(true, Ordering::Release); }

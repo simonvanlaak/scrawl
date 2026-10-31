@@ -658,7 +658,7 @@ fn portal_screencasts(window: bool, multiple: bool, key: &str, stopping: &Atomic
 }
 
 // ashpd 0.11.1 returns Request only after Response, and Request has no Drop.
-// Own its standard handle_token/path before sending on ashpd's same connection.
+// Own its standard handle_token/path before sending on the authorization's connection.
 struct OwnedPortalRequest {
     token: String,
     path: zbus::zvariant::OwnedObjectPath,
@@ -709,9 +709,20 @@ async fn cleanup_portal(request: impl std::future::Future<Output = ()>, session:
     bounded(session, budget).await;
 }
 
+async fn open_portal_remote(proxy: &zbus::Proxy<'_>, session: &zbus::zvariant::OwnedObjectPath) -> Result<OwnedFd> {
+    let options = HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+    let fd: zbus::zvariant::OwnedFd = proxy.call("OpenPipeWireRemote", &(session, options)).await?;
+    Ok(fd.into())
+}
+
+async fn close_portal_session(proxy: &zbus::Proxy<'_>, session: &zbus::zvariant::OwnedObjectPath) -> bool {
+    proxy.connection().call_method(Some("org.freedesktop.portal.Desktop"), session,
+        Some("org.freedesktop.portal.Session"), "Close", &()).await.is_ok()
+}
+
 fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &AtomicBool,
     deadline: std::time::Instant) -> Result<(Vec<Stream>, Option<String>)> {
-    use ashpd::desktop::screencast::{Screencast, SourceType, Streams};
+    use ashpd::desktop::screencast::{SourceType, Streams};
     use zbus::zvariant::Value;
 
     type Authorized = (u32, PortalFd, Option<[f64; 4]>, Option<String>, bool);
@@ -723,13 +734,37 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
         .spawn(move || {
             futures_lite::future::block_on(async move {
                 let run = async {
-                    let proxy = Screencast::new().await?;
-                    let session = proxy.create_session().await?;
-                    // Session serializes exactly its actual object path.
-                    let diagnostic = PortalDiagnostic::new(proxy.connection(), serde_json::to_value(&session).ok());
-                    diagnostic.event("session_created", serde_json::json!({}));
+                    // ashpd's Session constructors are private and create_session
+                    // waits for Response before exposing its Request. Use the same
+                    // wire protocol on a dedicated, owned zbus connection instead.
+                    // Stop covers connection/proxy setup too. Disconnecting this
+                    // connection after bounded cleanup also revokes late sessions.
+                    let proxy = futures_lite::future::race(async {
+                        let connection = zbus::Connection::session().await?;
+                        let proxy = zbus::Proxy::new(&connection, "org.freedesktop.portal.Desktop",
+                            "/org/freedesktop/portal/desktop", "org.freedesktop.portal.ScreenCast").await?;
+                        anyhow::Ok(proxy)
+                    }, async { let _ = stop_rx.recv_async().await; bail!("Sharing stopped during connection setup") }).await?;
+                    let mut creation = OwnedPortalRequest::new(proxy.connection())?;
+                    // The standard session_handle_token owns this exact path even
+                    // before the method reply or Response arrives.
+                    let session: zbus::zvariant::OwnedObjectPath = creation.path.as_str().replacen("/request/", "/session/", 1).try_into()?;
+                    let diagnostic = PortalDiagnostic::new(proxy.connection(), Some(serde_json::json!(session.as_str())));
+                    creation.diagnostic = diagnostic.clone();
                     let pending = std::cell::RefCell::new(None);
                     let request = async {
+                        let options = HashMap::from([("handle_token", Value::from(creation.token.as_str())),
+                            ("session_handle_token", Value::from(creation.token.as_str()))]);
+                        let response = creation.perform(&proxy, "CreateSession", &options, &pending).await?;
+                        let (_, result): (u32, HashMap<String, zbus::zvariant::OwnedValue>) = response.body().deserialize()?;
+                        let handle = result.get("session_handle").context("CreateSession omitted its Session")?;
+                        // xdg-desktop-portal historically returns a string, not an
+                        // object path. Accept both, as installed ashpd does.
+                        let returned = handle.downcast_ref::<&str>().map(str::to_owned).or_else(|_| {
+                            handle.downcast_ref::<zbus::zvariant::ObjectPath<'_>>().map(|path| path.as_str().to_owned())
+                        })?;
+                        anyhow::ensure!(returned == session.as_str(), "Portal returned an unexpected Session identity");
+                        diagnostic.event("session_created", serde_json::json!({}));
                         anyhow::ensure!(stop_rx.is_empty() && !stop_rx.is_disconnected(), "Sharing stopped before source selection");
                         let token = saved_token(&request_key);
                         let mut selection = OwnedPortalRequest::new(proxy.connection())?;
@@ -757,7 +792,7 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                         // duplicate the recording socket into a second protocol reader.
                         let graph = if diagnostic.0.is_some() {
                             let nodes: Vec<_> = streams.streams().iter().map(|s| s.pipe_wire_node_id()).collect();
-                            let graph = match proxy.open_pipe_wire_remote(&session).await {
+                            let graph = match open_portal_remote(&proxy, &session).await {
                                 Ok(observer) => {
                                     let mut observer = PortalFd::new(observer, diagnostic.clone(),
                                         serde_json::json!({"role": "observer"}));
@@ -785,7 +820,7 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                             };
                             let node = stream.pipe_wire_node_id();
                             let monitor = stream.source_type() == Some(SourceType::Monitor);
-                            let fd = PortalFd::new(proxy.open_pipe_wire_remote(&session).await?, diagnostic.clone(),
+                            let fd = PortalFd::new(open_portal_remote(&proxy, &session).await?, diagnostic.clone(),
                                 serde_json::json!({"role": "remote", "consumer_index": index, "node": node}));
                             if let Some(graph) = &graph {
                                 // The observer sees all authorized nodes. Bind only this
@@ -824,21 +859,21 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                                 }
                             }, async {
                                 diagnostic.event("session_close_requested", serde_json::json!({}));
-                                let result = session.close().await;
-                                diagnostic.event("session_close_returned", serde_json::json!({"ok": result.is_ok()}));
+                                let ok = close_portal_session(&proxy, &session).await;
+                                diagnostic.event("session_close_returned", serde_json::json!({"ok": ok}));
                             }, Duration::from_secs(1)).await;
                             Err(anyhow!("Sharing request failed; cleanup finished"))
                         }
                     }
                 };
                 match run.await {
-                    Ok((_proxy, session, authorized, token, diagnostic)) => {
+                    Ok((proxy, session, authorized, token, diagnostic)) => {
                         let _ = ready_tx.try_send(Ok((authorized, token)));
                         let _ = stop_rx.recv_async().await;
                         cleanup_portal(async {}, async {
                             diagnostic.event("session_close_requested", serde_json::json!({}));
-                            let result = session.close().await;
-                            diagnostic.event("session_close_returned", serde_json::json!({"ok": result.is_ok()}));
+                            let ok = close_portal_session(&proxy, &session).await;
+                            diagnostic.event("session_close_returned", serde_json::json!({"ok": ok}));
                         }, Duration::from_secs(1)).await;
                     }
                     Err(error) => {

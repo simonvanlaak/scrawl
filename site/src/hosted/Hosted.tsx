@@ -3,7 +3,7 @@ import * as api from "./api"
 import "./hosted.css"
 import { SharedLinks } from "./SharedLinks"
 
-export function isHostedPath(path: string) { return /^\/hosted(?:\/(?:device|shares))?\/?$/.test(path) }
+export function isHostedPath(path: string) { return /^\/(?:connect|hosted)(?:\/(?:device|shares))?\/?$/.test(path) }
 export function Hosted({ devicePage = false, sharesPage = false }: { devicePage?: boolean; sharesPage?: boolean }) {
   return sharesPage ? <SharedLinks /> : <Account devicePage={devicePage} />
 }
@@ -56,7 +56,7 @@ function Account({ devicePage }: { devicePage: boolean }) {
   // A bad deployment config must reach the existing error UI, not crash render.
   let setupOrigin = ""
   try { setupOrigin = api.apiOrigin() } catch { /* Session/sign-in report configuration errors. */ }
-  const heading = loading ? "Checking your account…" : error ? "Not confirmed" : authenticated && !authenticated.beta.access ? (authenticated.beta.enrolled >= authenticated.beta.capacity ? "The beta is full" : "Beta access is limited") : devicePage ? !authenticated ? "Sign in to continue" : !code ? "Start from the CLI" : request?.status === "approved" ? "Approval granted" : request?.status === "rejected" ? "Request rejected" : expired ? "That code expired" : request ? (request.scope === "upload" ? "Automatic uploads" : "Read-only permission") : "Request unavailable" : computer ? "Host new captures" : "Read hosted captures"
+  const heading = loading ? "Checking your account…" : error ? "Not confirmed" : authenticated && !authenticated.beta.access ? (authenticated.beta.enrolled >= authenticated.beta.capacity ? "The beta is full" : "Beta access is limited") : devicePage ? !authenticated ? "Sign in to continue" : !code ? "Start from the CLI" : request?.status === "approved" ? "Approval granted" : request?.status === "rejected" ? "Request rejected" : expired ? "That code expired" : request ? (request.scope === "upload" ? "Automatic uploads" : "Read-only permission") : "Request unavailable" : computer ? "Upload new captures" : "Read your captures"
   function openDialog(kind: "setup" | "read") { setDialogKind(kind); dialog.current?.showModal() }
   function selectTab(next: "computer" | "agent") {
     if (devicePage) return
@@ -74,8 +74,8 @@ function Account({ devicePage }: { devicePage: boolean }) {
   }
   return <div className="pond-page hosted-page">
     <main className="hosted-main">
-      <header className="hosted-header"><a href="/" aria-label="Apparent home"><img src="/apparent-wordmark.svg" width="119" height="28" alt="apparent" /></a><span>Hosting</span></header>
-      <div className="hosted-tabs" role="tablist" aria-label="Hosting permissions" onKeyDown={event => {
+      <header className="hosted-header"><a href="/" aria-label="Apparent home"><img src="/apparent-wordmark.svg" width="119" height="28" alt="apparent" /></a><span>Connect</span></header>
+      <div className="hosted-tabs" role="tablist" aria-label="Connect permissions" onKeyDown={event => {
         if (devicePage || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
         event.preventDefault()
         const next = event.key === "Home" ? "computer" : event.key === "End" ? "agent" : computer ? "agent" : "computer"
@@ -101,13 +101,13 @@ function Account({ devicePage }: { devicePage: boolean }) {
               <button className="hosted-primary" disabled={busy} type="submit">{busy ? "Saving…" : authenticated.waitlist.joined ? "Update interest" : "Join waitlist"}</button>
             </form>
           </> : devicePage ? !authenticated ? <><p>Signing in grants no upload or read permission.</p><SignIn devicePage code={code} /></> : !code ? <p>No device code was supplied. Open the approval link from your app or agent. Do not paste access tokens here.</p> : request && <>
-            <p className="hosted-tagline">{request.scope === "upload" ? "After CLI setup, new captures upload; older ones stay local." : "All your current and future hosted captures. Read-only."}</p>
+            <p className="hosted-tagline">{request.scope === "upload" ? "After CLI setup, new captures upload; older ones stay local." : "All your current and future uploads. Read-only."}</p>
             <div className="hosted-permission">
-              <p>{request.scope === "upload" ? "This computer can add, read and delete hosted captures. Agent read approval is separate." : "Cannot upload or delete. Upload permission is independent. Approval does not mean a capture has been read."}</p>
+              <p>{request.scope === "upload" ? "This computer can add, read and delete uploaded captures. Agent read approval is separate." : "Cannot upload or delete. Upload permission is independent. Approval does not mean a capture has been read."}</p>
               <p>Captures can include screen images, recording, voice, transcript and window context.</p>
               {request.status === "approved" ? <p role="status">Approval granted. The CLI must finish connecting. This page cannot check the computer's upload setting or credential.</p> : request.status === "rejected" ? <p role="status">Nothing was approved. Start a new request in the CLI.</p> : expired ? <p role="status">Nothing was approved. Request a new code in the CLI.</p> : <>
                 <p className="hosted-quiet">Only approve a request you just started on a trusted app or agent. {request.expiresAt ? `Expires ${new Date(request.expiresAt).toLocaleString()}.` : "Codes expire ten minutes after they are requested."}</p>
-                {request.scope === "upload" && <label className="hosted-check"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} /><span>I agree to share new capture contents with my hosted account.</span></label>}
+                {request.scope === "upload" && <label className="hosted-check"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} /><span>I agree to share new capture contents with my Connect account.</span></label>}
                 <button className="hosted-primary" disabled={busy || (request.scope === "upload" && !consent)} onClick={approve}>{busy ? "Confirming…" : request.scope === "upload" ? "Allow uploads" : "Allow agent read access"}</button>
               </>}
             </div>
@@ -118,22 +118,22 @@ function Account({ devicePage }: { devicePage: boolean }) {
         </>}
         <details className="hosted-details" key={tab}><summary>{computer ? "Upload details" : "Read details"}</summary>
           <p>Captures can include screen images, recording, voice, transcript and window context.</p>
-          <p>{computer ? "This computer’s grant can add, read and delete hosted captures. Agent read approval is separate." : "All current and future hosted captures. Cannot upload or delete. Upload permission is independent; approval does not mean a capture has been read."}</p>
+          <p>{computer ? "This computer’s grant can add, read and delete uploaded captures. Agent read approval is separate." : "All current and future uploads. Cannot upload or delete. Upload permission is independent; approval does not mean a capture has been read."}</p>
           <p>Google sign-in alone grants no upload or read permission. A capture ID is not a public sharing link.</p>
           <Limits />
         </details>
       </section>
-      {authenticated && <div className="hosted-identity"><p>{authenticated.user.email}</p>{authenticated.beta.access && <a className="hosted-manage-link" href="/hosted/shares">Manage shared links</a>}<button disabled={busy || loading} onClick={() => void act(async () => { await api.logout(authenticated.csrfToken); const next = await api.session(); if (next.authenticated) throw new Error("Sign-out could not be confirmed. Reload and try again."); setAccount(next); setRequest(null) })}>Log out</button></div>}
+      {authenticated && <div className="hosted-identity"><p>{authenticated.user.email}</p>{authenticated.beta.access && <a className="hosted-manage-link" href="/connect/shares">Manage shared links</a>}<button disabled={busy || loading} onClick={() => void act(async () => { await api.logout(authenticated.csrfToken); const next = await api.session(); if (next.authenticated) throw new Error("Sign-out could not be confirmed. Reload and try again."); setAccount(next); setRequest(null) })}>Log out</button></div>}
       <noscript><p>Enable JavaScript to sign in and review permissions. No approval happens without an explicit confirmation.</p></noscript>
     </main>
     <dialog ref={dialog} className="hosted-dialog" aria-labelledby="hosted-dialog-title">
       <button className="hosted-dialog-close" aria-label="Close dialog" onClick={() => dialog.current?.close()}>×</button>
       <h2 id="hosted-dialog-title">{dialogKind === "read" ? "Separate read approval" : !authenticated ? "Sign in" : computer ? "Start on this computer" : "Start with your agent"}</h2>
-      {dialogKind === "read" ? <><p>Connecting this computer does not grant an agent read access.</p><p>A separate read grant covers all current and future hosted captures, including screen images, recording, voice, transcript and window context. It cannot upload or delete. This page cannot check an agent's credential or whether it has read a capture.</p></> : !authenticated ? <><p>Signing in grants no upload or read permission.</p><SignIn devicePage={devicePage} code={code} /></> : <>
+      {dialogKind === "read" ? <><p>Connecting this computer does not grant an agent read access.</p><p>A separate read grant covers all current and future uploads, including screen images, recording, voice, transcript and window context. It cannot upload or delete. This page cannot check an agent's credential or whether it has read a capture.</p></> : !authenticated ? <><p>Signing in grants no upload or read permission.</p><SignIn devicePage={devicePage} code={code} /></> : <>
         <p>Run this in the {computer ? "recording computer’s" : "agent’s"} terminal. Open its approval link, then let the CLI finish connecting.</p>
         <pre><code>{`apparent cloud login --server ${setupOrigin || "https://YOUR-HOSTED-API-ORIGIN"} --scope ${computer ? "upload --consent-upload" : "read --no-browser"}`}</code></pre>
         {!setupOrigin && <p>Replace <code>https://YOUR-HOSTED-API-ORIGIN</code> with your deployed API origin, not the approval website.</p>}
-        <p>{computer ? "Explicit upload consent is required. Only new captures upload automatically; existing captures stay local. This grant can add, read and delete hosted captures." : "Approve all current and future hosted captures for read-only access. This grant cannot upload or delete; upload permission is independent."}</p>
+        <p>{computer ? "Explicit upload consent is required. Only new captures upload automatically; existing captures stay local. This grant can add, read and delete uploaded captures." : "Approve all current and future uploads for read-only access. This grant cannot upload or delete; upload permission is independent."}</p>
         {computer && <><p>Check the computer’s actual local state:</p><pre><code>{"apparent cloud status\napparent cloud status --account"}</code></pre></>}
         <p>The website cannot inspect local settings or credentials, launch Apparent, or finish the CLI login for you.</p>
       </>}
@@ -152,5 +152,5 @@ function Limits() {
 function message(error: unknown) { return error instanceof Error ? error.message : "The request could not be confirmed. Please reload and retry." }
 function SignIn({ devicePage, code }: { devicePage: boolean; code: string }) {
   try { return <a className="hosted-primary" href={api.signInUrl(devicePage, code)}>Continue with Google</a> }
-  catch { return <p role="alert">Hosted sign-in is not configured correctly. Please try again later.</p> }
+  catch { return <p role="alert">Connect sign-in is not configured correctly. Please try again later.</p> }
 }

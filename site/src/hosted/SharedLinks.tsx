@@ -40,15 +40,15 @@ export function SharedLinks() {
     finally { guard.current = false; if (current === generation.current) setBusy(false) }
   }
   return <div className="pond-page hosted-page">
-    <header className="pond-nav"><a href="/" aria-label="Apparent home"><img src="/apparent-wordmark.svg" width="149" height="35" alt="apparent" /></a><a className="hosted-account-link" href="/hosted/">Account</a></header>
+    <header className="pond-nav"><a href="/" aria-label="Apparent home"><img src="/apparent-wordmark.svg" width="149" height="35" alt="apparent" /></a><a className="hosted-account-link" href="/connect/">Account</a></header>
     <main className="hosted-main">
-      <p className="hosted-eyebrow">Hosted Apparent · beta</p><h1>Manage shared links</h1>
+      <p className="hosted-eyebrow">Apparent Connect · beta</p><h1>Manage shared links</h1>
       <p className="hosted-intro">Anyone with this link can view and download this capture.</p>
       <p>Stop sharing blocks future access without deleting your private recording. It cannot recall downloads or cached previews. Sharing again creates a fresh link.</p>
       <section className="hosted-panel" aria-label="Shared links" aria-busy={loading || busy}>
         {loading && <p role="status">Checking your account…</p>}
         {error && <div role="alert" className="hosted-error"><p>{error}</p><button disabled={busy || loading} onClick={() => void load()}>Reload shared links</button></div>}
-        {!loading && session && !session.authenticated && <><h2>Sign in to continue</h2><p>Sign in to your hosted account, then open Manage shared links.</p><a className="hosted-primary" href={api.signInUrl(false, "")}>Continue with Google</a></>}
+        {!loading && session && !session.authenticated && <><h2>Sign in to continue</h2><p>Sign in to your Connect account, then open Manage shared links.</p><a className="hosted-primary" href={api.signInUrl(false, "")}>Continue with Google</a></>}
         {!loading && session?.authenticated && !error && <>
           <p className="hosted-quiet">Signed in as {session.user.email}</p>
           {rows.length === 0 && !busy && <p>No shared links.</p>}

@@ -28,8 +28,8 @@ html = html.replace(/<link rel="stylesheet"[^>]*href="(\/assets\/[^"]+\.css)"[^>
 writeFileSync(join(dist, "index.html"), html)
 
 // Unlinked account routes: no prerendered account data and no sitemap entries.
-for (const [route, device, shares] of [["hosted", false, false], ["hosted/device", true, false], ["hosted/shares", false, true]] as const) {
-  const title = shares ? "Manage shared links — Apparent" : device ? "Connect a device — Apparent" : "Your hosted account — Apparent"
+for (const [route, device, shares] of [["connect", false, false], ["connect/device", true, false], ["connect/shares", false, true], ["hosted", false, false], ["hosted/device", true, false], ["hosted/shares", false, true]] as const) {
+  const title = shares ? "Manage shared links — Apparent" : device ? "Connect a device — Apparent" : "Connect — Apparent"
   const page = template.replace("<!--app-->", renderHosted(device, shares))
     .replace(/<title>.*?<\/title>/, `<title>${title}</title>`)
     .replace(/<link rel="canonical"[^>]*>/, "")

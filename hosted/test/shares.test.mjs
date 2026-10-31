@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {fixture,id,file,digest} from './helpers.mjs';
 import {readFile} from 'node:fs/promises';
 
-async function setup(){
- const f=await fixture({SHARING_ENABLED:'true'});
+async function setup(bindings={}){
+ const f=await fixture({SHARING_ENABLED:'true',...bindings});
  // Baseline remains valid before this additive migration exists.
  try{await f.db.exec((await readFile('migrations/0003.sql','utf8')).replaceAll('\n',' '));}catch(e){if(e.code!=='ENOENT')throw e;}
  return f;
@@ -55,6 +55,29 @@ test('revocation, re-share and read-time expiry guard HTML, previews, manifests 
   const second=await share();assert.notEqual(second.url,s.url);const next=new URL(second.url).pathname;
   await f.db.prepare('UPDATE captures SET expires_at=? WHERE id=?').bind(Date.now()-1,id(171)).run();
   for(const suffix of ['', '/manifest.json','/thumbnail.png','/files/summary.md'])assert.equal((await f.call(next+suffix)).status,410);
+ }finally{await f.close();}
+});
+
+test('Connect and explicit legacy origins share management CSRF but never grant foreign authority',async()=>{
+ const canonical='https://app.tryapparent.com',legacy='https://hosted.tryapparent.com';
+ const f=await setup({SITE_ORIGIN:canonical,LEGACY_SITE_ORIGIN:legacy});try{
+  const a=await f.identity('connect-sharing'),p=await reserve(f,a);await ready(f,a,p);
+  for(const origin of [canonical,legacy]){
+   const created=await f.call(p+'/share',{token:a.token,method:'POST'});assert.equal(created.status,200);
+   const share=await created.json(),path=new URL(share.url).pathname;
+   const list=await f.call('/v1/shares',{cookie:a.cookie,origin});assert.equal(list.status,200);assert.equal(list.headers.get('Access-Control-Allow-Origin'),origin);
+   const management=(await list.json()).shares.find(s=>s.url===share.url).id;
+   for(const rejected of ['https://evil.example','null',undefined,canonical+'/',canonical+'.evil.example']){
+    const denied=await f.call('/v1/shares/'+management,{cookie:a.cookie,csrf:a.csrf,origin:rejected,method:'DELETE'});
+    assert.equal(denied.status,403);assert.equal(denied.headers.get('Access-Control-Allow-Origin'),null);
+    assert.equal((await f.call(path+'/manifest.json')).status,200,'denied mutation must preserve capability');
+   }
+   assert.equal((await f.call('/v1/shares/'+management,{cookie:a.cookie,csrf:'wrong',origin,method:'DELETE'})).status,403);
+   const stopped=await f.call('/v1/shares/'+management,{cookie:a.cookie,csrf:a.csrf,origin,method:'DELETE'});
+   assert.equal(stopped.status,200);assert.equal(stopped.headers.get('Access-Control-Allow-Origin'),origin);
+   assert.equal((await f.call(path+'/manifest.json')).status,410);
+   assert.equal(await(await f.call(p+'/files/summary.md',{token:a.read})).text(),'hello');
+  }
  }finally{await f.close();}
 });
 

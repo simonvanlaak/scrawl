@@ -13,7 +13,7 @@ Base: 676396128a978f2af14e1e6427ef2f29d00f4efb (#180), verified ancestor of this
 ## Shared wire contract
 
 - POST /v1/captures/:id/share (upload bearer) after private reservation returns {url,status,expiresAt}. Repeated call reuses active capability; revoked re-share creates new secret.
-- GET /v1/shares (owner bearer or browser session) returns {shares:[{id,captureId,url,status,createdAt,expiresAt,title}]}.
+- GET /v1/shares (owner bearer or browser session) returns {shares:[{id,captureId,url,status,createdAt,expiresAt,title}],nextCursor:string|null}; follow `before=nextCursor` until null.
 - DELETE /v1/shares/:id (upload bearer or browser session + CSRF) revokes without deleting capture.
 - GET /s/:64hex capability, /manifest.json, /thumbnail.png, /files/:allowlisted-path; no account credential accepted as capability. All content read-only and scoped.
 - Public storage reads always use existing getObject budget gate. No public R2 URLs or schema reseed.

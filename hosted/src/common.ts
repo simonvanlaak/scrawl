@@ -28,7 +28,13 @@ export async function session(request: Request,env: Env,required=true) {
  const row=token && await stmt(env,'SELECT s.*,a.email,a.beta,a.interest FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.hash=? AND s.expires_at>?',await hash(token),Date.now()).first<SessionRow>();
  if(!row&&required)fail('unauthorized',401);return row||null;
 }
-export function csrf(request: Request,env: Env,s: SessionRow) {if(request.headers.get('Origin')!==env.SITE_ORIGIN || request.headers.get('X-CSRF-Token')!==s.csrf)fail('csrf_failed',403);}
+// CORS and cookie-authenticated mutations must agree on this exact allowlist.
+export function trustedSiteOrigin(origin: string | null,env: Env): origin is string {
+ if(!origin||origin==='null')return false;
+ try {if(new URL(origin).origin!==origin)return false;}catch{return false;}
+ return origin===env.SITE_ORIGIN||origin===env.LEGACY_SITE_ORIGIN;
+}
+export function csrf(request: Request,env: Env,s: SessionRow) {if(!trustedSiteOrigin(request.headers.get('Origin'),env) || request.headers.get('X-CSRF-Token')!==s.csrf)fail('csrf_failed',403);}
 export async function bearer(request: Request,env: Env,write=false) {
  const token=/^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('Authorization')||'')?.[1];if(!token)fail('unauthorized',401);
  const row=await stmt(env,'SELECT t.*,a.beta FROM tokens t JOIN accounts a ON a.id=t.account_id WHERE t.hash=? AND t.expires_at>?',await hash(token),Date.now()).first<TokenRow>();

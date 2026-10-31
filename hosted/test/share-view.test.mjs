@@ -13,6 +13,12 @@ test('untrusted text and URLs cannot create markup or active schemes', () => {
  const html = renderShare({...model,title:'<script>alert(1)</script>',summary:'<img src=x onerror=evil()>',transcript:'</pre><script>evil()</script>',url:'javascript:evil()',thumbnailUrl:'data:text/html,evil',files:[{path:'" onerror="evil',url:'javascript:evil()',size:1,sha256:'<evil>'}]})
  assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<img src=x')); assert.ok(!html.includes('javascript:')); assert.ok(!html.includes('data:text/html')); assert.ok(!html.includes('onerror="evil'))
 })
+test('safe asset links escape metadata and exclude third-party resources', () => {
+ const html = renderShare({...model,files:[{path:'<img src=x onerror="evil()">',url:model.url+'/files/summary.md?x="&y=1',size:1,sha256:'<untrusted>'},{path:'frames/frame-99.png',url:'https://third-party.example/tracker.png',size:1,sha256:'a'}]})
+ assert.ok(html.includes('&lt;img src=x onerror=&quot;evil()&quot;&gt;'))
+ assert.ok(html.includes('&lt;untrusted&gt;'));assert.ok(!html.includes('third-party.example'))
+ assert.ok(!html.includes('<img src=x'))
+})
 test('incomplete and terminal states do not disclose ready evidence', () => {
  for (const status of ['pending','paused','failed','expired','revoked','deleted']) {
   const html = renderShare({...model,status})
@@ -30,4 +36,10 @@ test('polling is same-origin, bounded, and reloads only when ready', async () =>
  assert.equal(calls,24);assert.equal(reloads,0);assert.match(status.textContent,/Reload/)
  context.fetch=async()=>({ok:true,json:async()=>({status:'ready'})});timers.length=0
  vm.runInNewContext(shareViewScript,context);timers.shift()();await new Promise(r=>setImmediate(r));assert.equal(reloads,1)
+})
+test('network failure and delayed timers stop at the wall-clock deadline', async () => {
+ let now=0,calls=0;const timers=[];const output={textContent:''}
+ vm.runInNewContext(shareViewScript,{Date:{now:()=>now},document:{querySelector:()=>({dataset:{manifest:model.url+'/manifest.json'},querySelector:()=>output})},location:{href:model.url,origin:'https://share.example',reload:()=>assert.fail('network failure cannot claim ready')},URL,AbortSignal,fetch:async()=>{calls++;throw new Error('synthetic outage')},setTimeout:fn=>timers.push(fn)})
+ now=5000;timers.shift()();await new Promise(r=>setImmediate(r));assert.equal(calls,1)
+ now=120001;timers.shift()();await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.match(output.textContent,/Reload/);assert.equal(timers.length,0)
 })

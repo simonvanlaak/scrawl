@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import * as api from "./api"
 import "./hosted.css"
+import { SharedLinks } from "./SharedLinks"
 
-export function isHostedPath(path: string) { return /^\/hosted(?:\/device)?\/?$/.test(path) }
-export function Hosted({ devicePage = false }: { devicePage?: boolean }) {
+export function isHostedPath(path: string) { return /^\/hosted(?:\/(?:device|shares))?\/?$/.test(path) }
+export function Hosted({ devicePage = false, sharesPage = false }: { devicePage?: boolean; sharesPage?: boolean }) {
+  return sharesPage ? <SharedLinks /> : <Account devicePage={devicePage} />
+}
+function Account({ devicePage }: { devicePage: boolean }) {
   const [account, setAccount] = useState<api.Session | null>(null)
   const [request, setRequest] = useState<api.Device | null>(null)
   const [code, setCode] = useState("")
@@ -76,7 +80,7 @@ export function Hosted({ devicePage = false }: { devicePage?: boolean }) {
               {request.status === "approved" ? <p role="status">Permission approved. Return to your app or agent to finish connecting.</p> : request.status === "rejected" ? <p role="status">This request was rejected. Start a new request in your app or agent.</p> : expired ? <p role="status">This code has expired. Request a new one from your app or agent.</p> : <button className="hosted-primary" disabled={busy} onClick={() => void act(async () => { if (request.expiresAt && Date.parse(request.expiresAt) <= Date.now()) throw new Error("This code has expired. Request a new code."); await api.approveDevice(authenticated.csrfToken, code); const next = await api.device(code); if (next.status !== "approved") throw new Error("Approval could not be confirmed. Reload to check its status."); setRequest(next) })}>{busy ? "Confirming…" : request.scope === "upload" ? "Allow uploads" : "Allow agent read access"}</button>}
             </>}
           </div>}
-          {!devicePage && authenticated.beta.access && <p role="status">Your account is ready to connect from Apparent. Start the connection in your app or agent; this page does not list or share captures.</p>}
+          {!devicePage && authenticated.beta.access && <><p role="status">Your account is ready to connect from Apparent. Start the connection in your app or agent.</p><a href="/hosted/shares">Manage shared links</a></>}
         </>}
       </section>
       <aside className="hosted-policy" aria-label="Beta limits"><h2>Small beta. Clear limits.</h2><p>20 beta places · 500 MB of hosted storage per account · captures retained for seven days.</p><p>Keep a local copy of anything you need longer. Hosted captures require account authorization; a capture ID is not a public sharing link.</p></aside>

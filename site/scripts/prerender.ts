@@ -28,14 +28,14 @@ html = html.replace(/<link rel="stylesheet"[^>]*href="(\/assets\/[^"]+\.css)"[^>
 writeFileSync(join(dist, "index.html"), html)
 
 // Unlinked account routes: no prerendered account data and no sitemap entries.
-for (const [route, device] of [["hosted", false], ["hosted/device", true]] as const) {
-  const title = device ? "Connect a device — Apparent" : "Your hosted account — Apparent"
-  const page = template.replace("<!--app-->", renderHosted(device))
+for (const [route, device, shares] of [["hosted", false, false], ["hosted/device", true, false], ["hosted/shares", false, true]] as const) {
+  const title = shares ? "Manage shared links — Apparent" : device ? "Connect a device — Apparent" : "Your hosted account — Apparent"
+  const page = template.replace("<!--app-->", renderHosted(device, shares))
     .replace(/<title>.*?<\/title>/, `<title>${title}</title>`)
     .replace(/<link rel="canonical"[^>]*>/, "")
     .replace(/<meta (?:property="og:[^"]+"|name="twitter:[^"]+"|name="description")[^>]*>/g, "")
     .replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, "")
-    .replace("</head>", '<meta name="robots" content="noindex, nofollow" /></head>')
+    .replace("</head>", '<meta name="robots" content="noindex, nofollow" /><meta name="referrer" content="no-referrer" /><meta http-equiv="Cache-Control" content="no-store" /></head>')
   mkdirSync(join(dist, route), { recursive: true })
   writeFileSync(join(dist, route, "index.html"), page)
 }

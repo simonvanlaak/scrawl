@@ -22,4 +22,9 @@
 .hosted-policy h2 { color: #020102; font-size: 20px; }
 .hosted-error { border-left: 3px solid #9f342a; padding: 0 0 0 16px; color: #842b23; margin-bottom: 20px; }
 .hosted-permission { border-top: 1px solid #ddd4e2; margin-top: 24px; padding-top: 8px; }
+.hosted-shares { list-style: none; padding: 0; margin: 0; }
+.hosted-shares li { border-top: 1px solid #ddd4e2; padding: 24px 0; overflow-wrap: anywhere; }
+.hosted-shares h2 { overflow-wrap: anywhere; }
+.hosted-share-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.hosted-share-actions a { text-decoration: underline; text-underline-offset: 4px; }
 @media (max-width: 480px) { .hosted-main { padding: 28px 18px 48px; } .hosted-panel { padding: 20px; } .hosted-identity { display: block; } .hosted-identity button { padding-left: 0; } }

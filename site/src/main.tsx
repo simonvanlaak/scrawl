@@ -9,7 +9,7 @@ import "./cta.css"
 const root = document.getElementById("root")!
 const app = (
   <StrictMode>
-    {isHostedPath(window.location.pathname) ? <Hosted devicePage={window.location.pathname.replace(/\/$/, "") === "/hosted/device"} /> : <App />}
+    {isHostedPath(window.location.pathname) ? <Hosted sharesPage={window.location.pathname.replace(/\/$/, "") === "/hosted/shares"} devicePage={window.location.pathname.replace(/\/$/, "") === "/hosted/device"} /> : <App />}
   </StrictMode>
 )
 

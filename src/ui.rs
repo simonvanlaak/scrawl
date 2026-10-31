@@ -569,10 +569,14 @@ fn start_video_export() {
     say(Some("Choosing export destination…".into()));
     #[cfg(not(target_os = "linux"))]
     say(Some("Exporting…".into()));
+    // Pin the input before another capture can replace latest during a chooser or worker.
+    let loaded = crate::handoff::load_bundle(std::path::Path::new("latest"));
+    let recovery_capture = loaded.as_ref().ok().map(|(dir, _)| dir.clone());
+    let worker_capture = recovery_capture.clone();
     let spawned = std::thread::Builder::new()
         .name("apparent-export".into())
         .spawn(move || {
-            let result = crate::handoff::load_bundle(std::path::Path::new("latest")).and_then(
+            let result = loaded.and_then(
                 |(dir, bundle)| {
                     #[cfg(target_os = "linux")]
                     let out = match platform::choose_export_destination(
@@ -609,7 +613,7 @@ fn start_video_export() {
                 Ok(None) => say(Some("Export cancelled".into())),
                 Err(error) => {
                     apparent_log(format!("Video export failed: {error:#}"));
-                    crate::error_recovery::report("Video export failed", format!("{error:#}"), None);
+                    crate::error_recovery::report("Video export failed", format!("{error:#}"), worker_capture);
                     #[cfg(target_os = "linux")]
                     {
                         let detail = format!("{error:#}");
@@ -634,7 +638,7 @@ fn start_video_export() {
         crate::error_recovery::report(
             "Video export failed",
             format!("Could not start export worker: {error}"),
-            None,
+            recovery_capture,
         );
         #[cfg(target_os = "linux")]
         {
@@ -1072,7 +1076,13 @@ impl ApparentCoordinator {
                 .defer(vec![crate::onboarding::Permission::Accessibility]);
             return;
         }
-        let dir = self.take_paste_target();
+        let dir = match crate::handoff::resolve_bundle_dir(&self.take_paste_target()) {
+            Ok(dir) => dir,
+            Err(error) => {
+                crate::error_recovery::report("Paste failed", format!("{error:#}"), None);
+                return;
+            }
+        };
         if matches!(self.island_phase, IslandPhase::Completed { .. }) {
             self.dismiss_island(cx);
         }
@@ -1914,6 +1924,9 @@ impl ApparentCoordinator {
                 }
                 Err(error) => {
                     apparent_log(format!("iPhone preview could not start: {error:#}"));
+                    crate::error_recovery::report(
+                        "Could not start iPhone capture preview", format!("{error:#}"), None,
+                    );
                     self.set_selection_mode(SelectionMode::Area, cx);
                     return;
                 }
@@ -2847,6 +2860,7 @@ impl ApparentCoordinator {
         {
             let Ok(id) = self.agent_capture_id.clone().map_or_else(crate::agent_capture::new_id, Ok) else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
+                crate::error_recovery::report("Could not start capture", "Could not create capture identity", None);
                 self.cancel_recording(cx);
                 return;
             };
@@ -3061,6 +3075,7 @@ impl ApparentCoordinator {
         {
             let Ok(id) = crate::agent_capture::new_id() else {
                 apparent_log("Could not create capture identity; refusing an untracked recording");
+                crate::error_recovery::report("Could not start iPhone capture", "Could not create capture identity", None);
                 self.cancel_recording(cx);
                 return;
             };
@@ -6181,6 +6196,10 @@ fn close_capture_windows(cx: &mut App) {
     }
 }
 
+pub(crate) fn take_recovery_keys(cx: &mut App) {
+    platform::take_keys(cx);
+}
+
 fn close_review_window(cx: &mut App) {
     for handle in cx.windows() {
         if handle.downcast::<BundleReviewWindow>().is_some() {
@@ -6230,7 +6249,7 @@ fn open_review_window(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) 
     }
     let bounds = Bounds::centered(None, size(px(1120.0), px(740.0)), cx);
     let coord_clone = coord_entity.clone();
-    let _ = cx.open_window(
+    let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
@@ -6277,7 +6296,12 @@ fn open_review_window(coord_entity: &Entity<ApparentCoordinator>, cx: &mut App) 
             })
         },
     );
-    platform::take_keys(cx);
+    if let Err(error) = opened {
+        let capture = coord_entity.read(cx).review_bundle.as_ref().map(|(dir, _)| dir.clone());
+        crate::error_recovery::report("Could not open capture", format!("{error:#}"), capture);
+    } else {
+        platform::take_keys(cx);
+    }
 }
 
 pub(crate) fn start_metric(name: &str, started: Instant) {

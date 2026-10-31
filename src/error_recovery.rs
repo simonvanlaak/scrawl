@@ -78,14 +78,16 @@ fn recovery_capture(
     supplied: Option<&Path>,
     latest: impl FnOnce() -> Option<PathBuf>,
 ) -> Option<PathBuf> {
-    supplied
-        .and_then(completed_capture)
-        .or_else(|| latest().as_deref().and_then(completed_capture))
+    match supplied {
+        // A failed handoff's target is not permission to substitute another capture.
+        Some(path) => completed_capture(path),
+        None => latest().as_deref().and_then(completed_capture),
+    }
 }
 
 type OpenCapture = Rc<dyn Fn(&Path, &mut App)>;
 
-struct RecoveryWindow {
+pub(crate) struct RecoveryWindow {
     request: Request,
     focus: FocusHandle,
     open_capture: OpenCapture,
@@ -111,6 +113,7 @@ pub fn poll(cx: &mut App, open_capture: impl Fn(&Path, &mut App) + Clone + 'stat
                 window.focus(&view.focus);
                 cx.notify();
             });
+            crate::ui::take_recovery_keys(cx);
             return;
         }
     }
@@ -149,6 +152,8 @@ pub fn poll(cx: &mut App, open_capture: impl Fn(&Path, &mut App) + Clone + 'stat
     );
     if let Err(error) = opened {
         crate::capture::apparent_log(format!("error recovery: window failed to open: {error:#}"));
+    } else {
+        crate::ui::take_recovery_keys(cx);
     }
 }
 
@@ -203,7 +208,7 @@ impl Render for RecoveryWindow {
                 cx.stop_propagation();
             }))
             .child(div().text_size(px(22.0)).font_weight(FontWeight::SEMIBOLD).child(self.request.title))
-            .child("Restart Apparent, then open the last completed capture to retry. Restarting may help, but may not resolve the problem.")
+            .child("Restart Apparent, then open the last completed capture to retry. Finish any ongoing recording before restarting. Restarting may not resolve the problem.")
             .when(!available, |d| d.child("No completed capture is available to open."))
             .child(div().flex_1())
             .child(div().flex().justify_end().gap(px(8.0))
@@ -275,13 +280,17 @@ mod tests {
     }
 
     #[test]
-    fn recovery_falls_back_from_unfinished_capture_and_handles_no_capture() {
+    fn recovery_uses_latest_only_without_an_explicit_target() {
         let fixture = Fixture::new();
         let unfinished = fixture.bundle("unfinished", false);
         let completed = fixture.bundle("completed", true);
         assert_eq!(
-            recovery_capture(Some(&unfinished), || Some(completed.clone())),
+            recovery_capture(None, || Some(completed.clone())),
             Some(completed.canonicalize().unwrap())
+        );
+        assert_eq!(
+            recovery_capture(Some(&unfinished), || Some(completed.clone())),
+            None
         );
         assert_eq!(recovery_capture(None, || None), None);
         assert_eq!(
@@ -292,6 +301,62 @@ mod tests {
         assert_eq!(completed_capture(&unfinished), None);
         fs::remove_file(completed.join("apparent.json")).unwrap();
         assert_eq!(completed_capture(&completed), None);
+    }
+
+    #[test]
+    fn operation_recovery_survives_a_newer_latest_capture() {
+        let fixture = Fixture::new();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "error_recovery::tests::operation_recovery_child",
+                "--nocapture",
+            ])
+            .env("APPARENT_CAPTURES_DIR", &fixture.0)
+            .env("APPARENT_RECOVERY_TEST_ROOT", &fixture.0)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn operation_recovery_child() {
+        let Some(root) = std::env::var_os("APPARENT_RECOVERY_TEST_ROOT") else {
+            return;
+        };
+        let fixture = Fixture(PathBuf::from(root));
+        let original = fixture.bundle("original", true).canonicalize().unwrap();
+        // The same real admission boundaries used by Paste and Export. A fresh
+        // process keeps latest/config and the global report slot out of other tests.
+        let paste = crate::handoff::resolve_bundle_dir(Path::new("latest")).unwrap();
+        let (export, _) = crate::handoff::load_bundle(Path::new("latest")).unwrap();
+        let newer = fixture.bundle("newer", true);
+        let manifest_path = newer.join("apparent.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["createdAtMs"] = 200.into();
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            crate::handoff::resolve_bundle_dir(Path::new("latest")).unwrap(),
+            newer.canonicalize().unwrap()
+        );
+        for (title, pinned) in [("Paste failed", paste), ("Video export failed", export)] {
+            report(
+                title,
+                "synthetic failure after latest changed",
+                Some(pinned),
+            );
+            let request = PENDING.lock().unwrap().take().unwrap();
+            assert_eq!(request.capture, Some(original.clone()));
+        }
+        fs::remove_file(original.join("apparent.json")).unwrap();
+        report("Paste failed", "original disappeared", Some(original));
+        assert!(PENDING.lock().unwrap().take().unwrap().capture.is_none());
     }
 
     #[test]

@@ -12,8 +12,8 @@
 //! from the GlobalShortcuts portal (or runtime binds on Hyprland), and clicks and ⇧ from the input devices when the user may
 //! read them (`input`). See `docs/linux.md`.
 
-pub mod appearance;
 pub mod atspi;
+pub mod appearance;
 pub mod auto_paste;
 pub mod clipboard;
 pub mod hyprland;
@@ -36,8 +36,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 pub use x11::{
-    Monitor, WindowInfo, active_window as foreground_window, monitor_at, monitors, primary_monitor,
-    top_level_windows, window_info,
+    Monitor, WindowInfo, active_window as foreground_window, monitor_at, monitors,
+    primary_monitor, top_level_windows, window_info,
 };
 
 /// RandR's name atom identifies an output while this X server is running. A list index does
@@ -135,14 +135,8 @@ fn desktop_rect() -> Option<[f64; 4]> {
     let monitors = monitors();
     let x0 = monitors.iter().map(|m| m.rect[0]).reduce(f64::min)?;
     let y0 = monitors.iter().map(|m| m.rect[1]).reduce(f64::min)?;
-    let x1 = monitors
-        .iter()
-        .map(|m| m.rect[0] + m.rect[2])
-        .reduce(f64::max)?;
-    let y1 = monitors
-        .iter()
-        .map(|m| m.rect[1] + m.rect[3])
-        .reduce(f64::max)?;
+    let x1 = monitors.iter().map(|m| m.rect[0] + m.rect[2]).reduce(f64::max)?;
+    let y1 = monitors.iter().map(|m| m.rect[1] + m.rect[3]).reduce(f64::max)?;
     let rect = Some([x0, y0, x1 - x0, y1 - y0]);
     *cache = Some((std::time::Instant::now(), rect));
     rect
@@ -302,10 +296,7 @@ mod tests {
     #[test]
     fn app_names_read_like_names() {
         assert_eq!(pretty_app_name("firefox"), "Firefox");
-        assert_eq!(
-            pretty_app_name("gnome-terminal-server"),
-            "Gnome Terminal Server"
-        );
+        assert_eq!(pretty_app_name("gnome-terminal-server"), "Gnome Terminal Server");
         assert_eq!(pretty_app_name("org.gnome.Nautilus"), "Nautilus");
         assert_eq!(pretty_app_name("Google-chrome"), "Google Chrome");
     }

@@ -1,8 +1,9 @@
-# Checked bundle publication (Engine adoption prerequisite)
+# Checked bundle publication
 
 The production pipeline returns an error when required persistence, validation,
 recovery-marker cleanup or durability fails. This is a persistence bug fix,
-not a new bundle format, Engine receipt or Engine Saved claim.
+not a new bundle format. This layer alone creates no Engine receipt or Saved
+claim; the adopted callers below consume its checked result.
 
 ## Production entry points and caller ordering
 
@@ -17,27 +18,26 @@ and any fallback. Nested builds on that thread defer their barrier to that outer
 operation. The outer return is the only success eligible for downstream effects.
 An incomplete base build retains `.publication-pending` and recovery work.
 
-The GUI integration is separately owned and is **not implemented by this slice**.
-The current `src/ui.rs` screen and phone `.map(whiteboard::finish_handoff)` calls
-still mutate after the core finalizer returns. Until their owner applies the
-minimal wrapper below, this PR does not prove final GUI clipboard/upload/Saved
-ordering or whiteboard fallback safety. Merely calling `checked` after `.map` is
-insufficient: the pending transcription writer could already have started.
+Both GUI source branches in `src/ui/recording.rs` now use
+`finalize_owned_capture`. It keeps `whiteboard::finish_handoff`, including its
+fallback, inside `Capture::publish` in `src/capture_runtime/mod.rs`. That adapter
+holds an outer coordination lease across `publish_after`, `checked`, Engine
+validation and terminal handling. Only its successful result reaches
+`receive_capture_result` and the existing success effects. Merely checking after
+a whiteboard mutation would not preserve this ordering: a pending writer could
+already have started.
 
-Minimal caller edit, at both `src/ui.rs` stop branches:
+Timed CLI screen/phone and GUI capture acquire Engine admission before starting
+media and retain ownership through source teardown and detached finalization.
+Final real-frame readiness comes from the stopped, joined sampler/phone reader,
+not a pre-stop snapshot or synthetic candidate. Intentional phone stop suppresses
+unsolicited notifications before joining; queued EOF events carry the originating
+session identity and cannot end a replacement preview or recording.
 
-1. Enclose the existing `crate::finalize_capture_bundle(...).map(...)` expression
-   in `publication::publish_after(&bundle_dir, || { existing_expression })`.
-2. Do the same around the phone `session.stop().and_then(...).map(...)` expression.
-   Keep `whiteboard::finish_handoff` **inside** each outer closure.
-3. Preserve the returned `Result` through `receive_capture_result`; no success
-   effect on an error. A restored base must pass this same final barrier.
-
-Use `crate::bundle_pipeline::publication` as the import. No whiteboard algorithm
-or output format change is required. The separately owned UI tests must exercise
-both wrappers with failed final PNG/manifest/cleanup and rollback/fallback cases,
-and verify no Saved, clipboard or upload effects. Core tests exercise the actual
-pipeline entry points and the outer publication closure, not those UI effects.
+Host regressions exercise the real finalization/dispatch seams with success-effect
+spies; they do not execute a desktop clipboard write or hosted upload. Native
+macOS screen/phone/helper and Linux GUI/capture/preview-switch proof remain gates.
+See `capture/engine/README.md` for the runtime path and remaining lease coverage.
 
 ## Engine inputs and writer lease
 
@@ -59,8 +59,8 @@ provision a path satisfying its existing contract, not the shared build scratch.
 
 The lease serializes cooperative finalizers and pending transcript writers, not
 arbitrary same-user processes or subsequent retention/reprocess work. The inputs
-are not a perpetual media attestation. The future caller must not drop its outer
-lease between `checked` and Engine terminal handling.
+are not a perpetual media attestation. `Capture::publish` retains its outer lease
+between `checked` and Engine terminal handling; future callers must do the same.
 
 ## Persistence and validation
 

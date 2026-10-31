@@ -1,10 +1,11 @@
 # Staged capture Engine
 
 This independently compiled Rust package implements admission, durable receipts and
-bundle maintenance exclusion. **No Desktop, timed recording, Agent or retention
-call path consumes it yet.** It does not record media, publish clipboard content,
-route captures, or certify a complete Apparent bundle. Linux process tests are
-real; macOS compilation and process behavior remain unverified.
+bundle maintenance exclusion. Desktop screen/phone capture, timed CLI capture,
+Agent requests using the GUI coordinator and retention now consume it through
+`src/capture_runtime`. The package itself does not record media, publish clipboard
+content, route captures or certify a complete Apparent bundle. Linux host/process
+tests are not native GUI proof; macOS compilation and native behavior remain gates.
 
 ## Caller contract
 
@@ -102,17 +103,45 @@ Namespace directories are permanent owned `0700` directories, opened relative
 to pinned descriptors with no-follow, fsynced and rechecked with their parents.
 Never rename/delete these directories independently of the runtime lock anchors.
 
-## Integration work intentionally left to the parent
+## Adopted callers and inspectable runtime
 
-Wire the common runtime into Desktop/shortcut `Recording::start` paths,
-`src/main.rs` timed recording and `src/agent_capture.rs` before any media starts.
-Replace neither a process-local Registry nor the socket listener lock with an
-unsupported global claim. Poll authenticated intent in the owning adapter,
-keep the guard in its real finalization lifetime, and supply that finalizer's
-validated bytes. Wire bundle leases into `src/retention.rs`, `src/recover.rs`,
-export/reprocess/read paths before removing process-local BUSY/RECORDING guards.
-Audit all call paths together; adding this package alone provides no whole-app
-exclusion or production adoption.
+`src/capture_runtime/mod.rs` admits before media startup, retains the session
+through synchronous source teardown and detached finalization, and consumes exact
+checked publication bytes before returning success. `src/ui/recording.rs` uses
+this for both source types, including Agent requests dispatched through that GUI
+coordinator. `src/main.rs` timed screen/phone captures use the same adapter.
+Readiness is the real producer acknowledgement read after join; a synthetic
+fallback frame cannot advance the Engine to Recording. Retention trash/shrink
+uses Engine `Maintenance` exclusion before its existing process-local claim.
+
+Production opens one persistent `dirs::data_local_dir()/apparent/capture-runtime-v1`:
+
+- Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/apparent/capture-runtime-v1`.
+- macOS: `~/Library/Application Support/apparent/capture-runtime-v1`.
+
+This is runtime authority, not a preference store or disposable cache. Inspect
+path ownership/modes without changing them. Use `Runtime::inspect(request_id)`
+for a sanitized receipt rather than displaying raw `request-*.json` records,
+which contain private owner authority. `inspect` can reconcile an abandoned
+receipt using its owner lock; it is not merely a read of JSON. There is no new
+Engine-inspection CLI here, and `apparent inspect` inspects capture bundles, not
+these receipts. Do not publish raw records, owner tokens or private bundle data.
+
+Never unlink, rotate or replace lock files, identity anchors or namespace
+directories, even if the named process is gone or a receipt looks old. Preserve
+the runtime directory across restart/upgrade and preserve receipts. Do not chmod
+an unsafe existing tree to bypass rejection. Recovery/repair requires separately
+proving every consumer has stopped; stale age or PID checks are not that proof.
+
+Each timed CLI capture generates a fresh internal Engine request ID and separate
+owner token. Those are not legacy socket/wire capture IDs or bundle IDs. Existing
+in-process compatibility receipts and socket listener locks remain; they confer
+no Engine control authority and are not a cross-process receipt API.
+
+This is scoped adoption, not whole-app exclusion. Recovery, export/reprocess and
+other reader/writer lease coverage still need a separate audit before removing
+process-local BUSY/RECORDING guards. Native platform acceptance and affected caller
+review remain separate from package tests or provider approval.
 
 ## Verification and package boundary
 
@@ -128,12 +157,12 @@ cargo tree --manifest-path capture/engine/Cargo.toml --offline
 The package pins cached libc/serde/serde_json dependencies and has its own small,
 unmodified Cargo-generated lockfile. Root Cargo.toml/Cargo.lock now declare and
 resolve this path dependency on macOS and Linux; CI is unchanged. This is package
-integration only, not production caller adoption or a standalone Agent.
+integration plus the scoped caller adoption above, not a standalone Agent.
 There are no Agent, GPUI, recorder or product dependencies inside the Engine.
 Repository hooks still apply: recognized dependency lockfile basenames are
 exempt from the 2,000-physical-line cap; other text remains capped. See
 `../../.githooks/README.md` for the exact names. Native macOS compilation,
-filesystem/crash tests and both products' real integration are outstanding gates.
+filesystem/crash tests and native caller integration remain outstanding gates.
 
 Tests that construct finalizer proofs need a synthetic `TMPDIR` with trusted
 ancestors under the output contract above. A group-writable cache ancestor is

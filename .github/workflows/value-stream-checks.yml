@@ -1,0 +1,115 @@
+name: Independent value-stream checks
+
+on:
+  pull_request:
+    paths: &inputs
+      - 'capture/engine/**'
+      - '.cargo/**'
+      - 'rust-toolchain*'
+      - 'connect/web/**'
+      - 'hosted/**'
+      - 'site/**'
+      - 'assets/brand/**'
+      - 'docs/hosted-api.md'
+      - 'docs/value-stream-checks.md'
+      - 'scripts/ci/check-value-streams.*'
+      - '.github/workflows/value-stream-checks.yml'
+  push:
+    branches: [main, integration/capture-boundaries-plan]
+    paths: *inputs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: value-stream-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.stream }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - stream: capture-engine
+            os: ubuntu-24.04
+          - stream: capture-engine
+            os: macos-15
+          - stream: connect-web
+            os: ubuntu-24.04
+          - stream: hosted-service
+            os: ubuntu-24.04
+          - stream: public-site
+            os: ubuntu-24.04
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check CI entrypoints
+        run: python3 scripts/ci/check-value-streams.test.py
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.stream == 'capture-engine'
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.stream == 'capture-engine'
+        with:
+          workspaces: capture/engine -> target
+          key: value-stream-engine-${{ matrix.os }}
+          cache-on-failure: true
+      - uses: actions/setup-node@v4
+        if: matrix.stream != 'capture-engine'
+        with:
+          node-version: '22.23.0'
+          # Only hosted has an npm lock. Do not cache across Bun lock versions.
+          cache: ${{ matrix.stream == 'hosted-service' && 'npm' || '' }}
+          cache-dependency-path: hosted/package-lock.json
+      - name: Install hosted dependencies
+        if: matrix.stream == 'hosted-service'
+        working-directory: hosted
+        run: npm ci
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.stream == 'public-site'
+        with:
+          bun-version: '1.3.10'
+      - name: Install website dependencies
+        if: matrix.stream == 'public-site'
+        working-directory: site
+        run: bun install --frozen-lockfile
+      # Connect's existing v2 lock requires Bun 1.4.4, not the site's 1.3.10.
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.stream == 'connect-web' || matrix.stream == 'public-site'
+        with:
+          bun-version: '1.4.4'
+      - name: Install Connect dependencies
+        if: matrix.stream == 'connect-web' || matrix.stream == 'public-site'
+        working-directory: connect/web
+        run: bun install --frozen-lockfile
+      - name: Install controlled browser
+        if: matrix.stream == 'connect-web'
+        working-directory: connect/web
+        run: |
+          ./node_modules/.bin/playwright-core install --with-deps chromium
+          echo "CHROME_PATH=$(node --input-type=module -e 'import {chromium} from "playwright-core"; console.log(chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Build and test the selected package
+        shell: bash
+        env:
+          STREAM: ${{ matrix.stream }}
+          CONNECT_EVIDENCE: ${{ runner.temp }}/connect-evidence
+        run: |
+          set -euo pipefail
+          if [[ "$STREAM" == capture-engine ]]; then
+            # Finalizer tests reject writable ancestors. A private home child
+            # avoids runner workspace/temp directory permissions on both OSes.
+            engine_tmp=$(mktemp -d "$HOME/.apparent-engine-ci.XXXXXX")
+            trap 'rm -rf "$engine_tmp"' EXIT
+            export TMPDIR="$engine_tmp"
+          fi
+          bash scripts/ci/check-value-streams.sh "$STREAM"

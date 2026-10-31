@@ -6,7 +6,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {fixture,id,file} from './helpers.mjs';
 
 const instrumented=await build({stdin:{resolveDir:process.cwd(),contents:`
- import worker from './src/worker.js';
+ import worker from './src/worker.ts';
  export default {
   async fetch(request,env){
    let calls=0;
@@ -180,8 +180,11 @@ test('physical reservations cover logical eviction and parallel temporary retrie
 });
 
 test('metered R2 source inventory has no raw bypass or LIST path',async()=>{
- for(const name of await readdir('src'))if(name.endsWith('.js')&&name!=='storage.js')assert.doesNotMatch(await readFile('src/'+name,'utf8'),/\bBUCKET\b/,name+' must use the storage guard');
- const source=await readFile('src/storage.js','utf8');
+ const sources=(await readdir('src')).filter(name=>/\.(?:ts|js)$/.test(name)&&name!=='types.ts');
+ assert.ok(sources.length>0,'runtime source inventory must not be empty');
+ assert.ok(sources.includes('storage.ts'),'inventory must include the storage guard');
+ for(const name of sources)if(name!=='storage.ts')assert.doesNotMatch(await readFile('src/'+name,'utf8'),/\bBUCKET\b/,name+' must use the storage guard');
+ const source=await readFile('src/storage.ts','utf8');
  assert.deepEqual([...source.matchAll(/env\.BUCKET\.(\w+)\(/g)].map(m=>m[1]).sort(),['delete','get','head','put']);
  assert.doesNotMatch(source,/\b(?:month|period|reset)\s*[:=(]/i);
 });

@@ -28,8 +28,8 @@ html = html.replace(/<link rel="stylesheet"[^>]*href="(\/assets\/[^"]+\.css)"[^>
 writeFileSync(join(dist, "index.html"), html)
 
 // Unlinked account routes: no prerendered account data and no sitemap entries.
-for (const [route, device] of [["hosted", false], ["hosted/device", true]] as const) {
-  const title = device ? "Connect a device — Apparent" : "Your hosted account — Apparent"
+for (const [route, device] of [["connect", false], ["connect/device", true], ["hosted", false], ["hosted/device", true]] as const) {
+  const title = device ? "Connect a device — Apparent" : "Connect — Apparent"
   const page = template.replace("<!--app-->", renderHosted(device))
     .replace(/<title>.*?<\/title>/, `<title>${title}</title>`)
     .replace(/<link rel="canonical"[^>]*>/, "")

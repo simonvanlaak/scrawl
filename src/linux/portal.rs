@@ -23,7 +23,7 @@ use crate::model::{CaptureMode, TargetInfo};
 pub struct Stream {
     pub node: u32,
     /// The portal's PipeWire connection; Mutter's streams are on the user's own PipeWire.
-    fd: Option<OwnedFd>,
+    fd: Option<PortalFd>,
     /// Portal compositor coordinates, not XWayland pixels; Hyprland reports (0, 0) for
     /// every output, so do not use this to identify the selected output there.
     pub rect: Option<[f64; 4]>,
@@ -42,7 +42,98 @@ impl Drop for SessionStop {
 impl Stream {
     /// The PipeWire fd for `pipewiresrc fd=`, or -1 for the default PipeWire.
     pub fn fd(&self) -> i32 {
-        self.fd.as_ref().map_or(-1, AsRawFd::as_raw_fd)
+        self.fd.as_ref().map_or(-1, |fd| fd.fd.as_ref().expect("held portal fd").as_raw_fd())
+    }
+
+    pub(super) fn diagnostic_media_binding(&self) {
+        if let Some(fd) = &self.fd { fd.event("media_binding", serde_json::json!({"node": self.node})); }
+    }
+}
+
+/// Opt-in facts only. Never serialize portal options, tokens, errors or source titles.
+/// One context per authorization, shared by its requests and every remote clone.
+#[derive(Clone)]
+struct PortalDiagnostic(Option<Arc<(serde_json::Value, std::sync::atomic::AtomicUsize)>>);
+
+impl PortalDiagnostic {
+    fn new(connection: &zbus::Connection, session: Option<serde_json::Value>) -> Self {
+        if std::env::var("APPARENT_PORTAL_DIAGNOSTICS").as_deref() != Ok("1") { return Self(None); }
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let start = std::fs::read_to_string("/proc/self/stat").ok().and_then(|s|
+            s.rsplit_once(") ").and_then(|(_, fields)| fields.split_whitespace().nth(19)).map(str::to_owned));
+        Self(Some(Arc::new((serde_json::json!({"schema": 1, "pid": std::process::id(),
+            "start_ticks": start, "generation": NEXT.fetch_add(1, Ordering::Relaxed),
+            "bus": connection.unique_name().map(|name| name.as_str()), "session": session}),
+            std::sync::atomic::AtomicUsize::new(0)))))
+    }
+
+    fn event(&self, event: &str, fields: serde_json::Value) {
+        if let Some(base) = &self.0 {
+            let index = base.1.fetch_add(1, Ordering::Relaxed);
+            if index > 256 { return; }
+            let mut value = base.0.clone();
+            value.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            value["event"] = if index == 256 { "diagnostic_truncated" } else { event }.into();
+            apparent_log(format!("portal-resource {value}"));
+        }
+    }
+}
+
+/// Own the actual descriptor, not a raw-number proxy. Drop logs only AFTER OwnedFd drop.
+struct PortalFd {
+    fd: Option<OwnedFd>,
+    diagnostic: PortalDiagnostic,
+    binding: serde_json::Value,
+}
+
+impl PortalFd {
+    fn new(fd: OwnedFd, diagnostic: PortalDiagnostic, mut binding: serde_json::Value) -> Self {
+        if diagnostic.0.is_some() {
+            let raw = fd.as_raw_fd();
+            // Socket cookies distinguish inode reuse. Never export arbitrary /proc path targets.
+            let target = std::fs::read_link(format!("/proc/self/fd/{raw}")).ok()
+                .and_then(|p| p.to_str().filter(|s| s.starts_with("socket:[") && s.ends_with(']')).map(str::to_owned));
+            let mut cookie: u64 = 0;
+            let mut len = std::mem::size_of::<u64>() as libc::socklen_t;
+            // SAFETY: both output pointers reference initialized storage of the advertised size.
+            let ok = unsafe { libc::getsockopt(raw, libc::SOL_SOCKET, libc::SO_COOKIE,
+                (&mut cookie as *mut u64).cast(), &mut len) } == 0 && len as usize == std::mem::size_of::<u64>();
+            binding["fd"] = raw.into();
+            binding["target"] = target.into();
+            binding["socket_cookie"] = if ok { cookie.to_string().into() } else { serde_json::Value::Null };
+            binding["identity_status"] = if binding["target"].is_string() && ok { "OBSERVED" } else { "UNKNOWN" }.into();
+        }
+        let owned = Self { fd: Some(fd), diagnostic, binding };
+        owned.event("held_fd", serde_json::json!({}));
+        owned
+    }
+
+    fn event(&self, event: &str, extra: serde_json::Value) {
+        let mut binding = self.binding.clone();
+        binding.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        self.diagnostic.event(event, binding);
+    }
+
+    fn try_clone(&self, node: u32, index: usize, mapping: Option<&str>, monitor: bool) -> Result<Self> {
+        use sha2::{Digest, Sha256};
+        let mapping_hash = mapping.filter(|_| monitor).map(|s| format!("{:x}", Sha256::digest(s.as_bytes())));
+        match self.fd.as_ref().expect("held portal fd").try_clone() {
+            Ok(fd) => Ok(Self::new(fd, self.diagnostic.clone(), serde_json::json!({
+                "role": "stream", "clone_index": index, "parent_fd": self.fd.as_ref().unwrap().as_raw_fd(),
+                "node": node, "mapping_sha256": mapping_hash, "monitor": monitor}))),
+            Err(error) => {
+                self.event("clone_failed", serde_json::json!({"clone_index": index, "node": node}));
+                Err(error.into())
+            }
+        }
+    }
+}
+
+impl Drop for PortalFd {
+    fn drop(&mut self) {
+        drop(self.fd.take());
+        // This proves this producer handle was dropped, NOT plugin/backend/kernel release.
+        self.event("producer_fd_dropped", serde_json::json!({}));
     }
 }
 
@@ -571,6 +662,7 @@ fn portal_screencasts(window: bool, multiple: bool, key: &str, stopping: &Atomic
 struct OwnedPortalRequest {
     token: String,
     path: zbus::zvariant::OwnedObjectPath,
+    diagnostic: PortalDiagnostic,
 }
 
 impl OwnedPortalRequest {
@@ -579,7 +671,7 @@ impl OwnedPortalRequest {
         let sender = connection.unique_name().context("Portal connection has no unique name")?
             .trim_start_matches(':').replace('.', "_");
         let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}").try_into()?;
-        Ok(Self { token, path })
+        Ok(Self { token, path, diagnostic: PortalDiagnostic::new(connection, None) })
     }
 
     async fn perform<B: serde::Serialize + zbus::zvariant::Type>(&self, proxy: &zbus::Proxy<'_>,
@@ -588,12 +680,14 @@ impl OwnedPortalRequest {
             "org.freedesktop.portal.Request").await?;
         let mut responses = request.receive_signal("Response").await?;
         pending.replace(Some(self.path.clone()));
+        self.diagnostic.event("request_pending", serde_json::json!({"request": self.path.as_str(), "method": method}));
         let reply = proxy.call_method(method, body).await?;
         let returned: zbus::zvariant::OwnedObjectPath = reply.body().deserialize()?;
         anyhow::ensure!(returned == self.path, "Portal returned an unexpected request identity");
         let message = responses.next().await.context("Sharing request ended without Response")?;
         let (status, _): (u32, HashMap<String, zbus::zvariant::OwnedValue>) = message.body().deserialize()?;
         pending.take(); // Response ends the request; never close an unrelated object later.
+        self.diagnostic.event("request_response", serde_json::json!({"request": self.path.as_str(), "status": status}));
         match status {
             0 => Ok(message),
             1 => Err(SharingCancelled.into()),
@@ -620,7 +714,7 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
     use ashpd::desktop::screencast::{Screencast, SourceType, Streams};
     use zbus::zvariant::Value;
 
-    type Authorized = (u32, OwnedFd, Option<[f64; 4]>, Option<String>, bool);
+    type Authorized = (u32, PortalFd, Option<[f64; 4]>, Option<String>, bool);
     let (ready_tx, ready_rx) = flume::bounded::<Result<(Vec<Authorized>, Option<String>)>>(1);
     let (stop_tx, stop_rx) = flume::bounded::<()>(1);
     let request_key = key.to_owned();
@@ -631,11 +725,15 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                 let run = async {
                     let proxy = Screencast::new().await?;
                     let session = proxy.create_session().await?;
+                    // Session serializes exactly its actual object path.
+                    let diagnostic = PortalDiagnostic::new(proxy.connection(), serde_json::to_value(&session).ok());
+                    diagnostic.event("session_created", serde_json::json!({}));
                     let pending = std::cell::RefCell::new(None);
                     let request = async {
                         anyhow::ensure!(stop_rx.is_empty() && !stop_rx.is_disconnected(), "Sharing stopped before source selection");
                         let token = saved_token(&request_key);
-                        let selection = OwnedPortalRequest::new(proxy.connection())?;
+                        let mut selection = OwnedPortalRequest::new(proxy.connection())?;
+                        selection.diagnostic = diagnostic.clone();
                         let mut options = HashMap::from([
                             ("handle_token", Value::from(selection.token.as_str())),
                             ("types", Value::from(if window { 2u32 } else { 1u32 })),
@@ -645,19 +743,23 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                         ]);
                         if let Some(token) = token.as_deref() { options.insert("restore_token", Value::from(token)); }
                         selection.perform(&proxy, "SelectSources", &(&session, options), &pending).await?;
-                        let start = OwnedPortalRequest::new(proxy.connection())?;
+                        let mut start = OwnedPortalRequest::new(proxy.connection())?;
+                        start.diagnostic = diagnostic.clone();
                         let options = HashMap::from([("handle_token", Value::from(start.token.as_str()))]);
                         let response = start.perform(&proxy, "Start", &(&session, "", options), &pending).await?;
                         let (_, streams): (u32, Streams) = response.body().deserialize()?;
                         let token = streams.restore_token().map(str::to_owned);
                         anyhow::ensure!(!streams.streams().is_empty(), "Nothing was shared");
-                        let fd = proxy.open_pipe_wire_remote(&session).await?;
-                        let authorized = streams.streams().iter().map(|stream| {
+                        let fd = PortalFd::new(proxy.open_pipe_wire_remote(&session).await?, diagnostic.clone(),
+                            serde_json::json!({"role": "remote"}));
+                        let authorized = streams.streams().iter().enumerate().map(|(index, stream)| {
                             let rect = match (stream.position(), stream.size()) {
                                 (Some((x, y)), Some((w, h))) => Some([f64::from(x), f64::from(y), f64::from(w), f64::from(h)]),
                                 _ => None,
                             };
-                            anyhow::Ok((stream.pipe_wire_node_id(), fd.try_clone()?, rect, stream.mapping_id().map(str::to_owned), stream.source_type() == Some(SourceType::Monitor)))
+                            let node = stream.pipe_wire_node_id();
+                            let monitor = stream.source_type() == Some(SourceType::Monitor);
+                            anyhow::Ok((node, fd.try_clone(node, index, stream.mapping_id(), monitor)?, rect, stream.mapping_id().map(str::to_owned), monitor))
                         }).collect::<Result<Vec<_>>>()?;
                         anyhow::Ok((authorized, token))
                     };
@@ -666,29 +768,41 @@ fn portal_screencasts_until(window: bool, multiple: bool, key: &str, stopping: &
                         bail!("Screen sharing was cancelled")
                     };
                     match futures_lite::future::race(request, cancelled).await {
-                        Ok((authorized, token)) => anyhow::Ok((proxy, session, authorized, token)),
+                        Ok((authorized, token)) => anyhow::Ok((proxy, session, authorized, token, diagnostic)),
                         Err(error) => {
+                            diagnostic.event("authorization_failed", serde_json::json!({}));
                             // Return failure first; cleanup stays on this detached worker.
                             let _ = ready_tx.try_send(Err(error));
                             let path = pending.take();
                             cleanup_portal(async {
                                 if let Some(path) = path {
+                                    diagnostic.event("request_close_requested", serde_json::json!({"request": path.as_str()}));
                                     apparent_log(format!("Closing pending sharing Request {path}"));
-                                    if let Err(error) = proxy.connection().call_method(Some("org.freedesktop.portal.Desktop"), path,
-                                        Some("org.freedesktop.portal.Request"), "Close", &()).await {
+                                    let result = proxy.connection().call_method(Some("org.freedesktop.portal.Desktop"), path,
+                                        Some("org.freedesktop.portal.Request"), "Close", &()).await;
+                                    diagnostic.event("request_close_returned", serde_json::json!({"ok": result.is_ok()}));
+                                    if let Err(error) = result {
                                         apparent_log(format!("Pending sharing Request.Close failed: {error}"));
                                     }
                                 }
-                            }, async { let _ = session.close().await; }, Duration::from_secs(1)).await;
+                            }, async {
+                                diagnostic.event("session_close_requested", serde_json::json!({}));
+                                let result = session.close().await;
+                                diagnostic.event("session_close_returned", serde_json::json!({"ok": result.is_ok()}));
+                            }, Duration::from_secs(1)).await;
                             Err(anyhow!("Sharing request failed; cleanup finished"))
                         }
                     }
                 };
                 match run.await {
-                    Ok((_proxy, session, authorized, token)) => {
+                    Ok((_proxy, session, authorized, token, diagnostic)) => {
                         let _ = ready_tx.try_send(Ok((authorized, token)));
                         let _ = stop_rx.recv_async().await;
-                        cleanup_portal(async {}, async { let _ = session.close().await; }, Duration::from_secs(1)).await;
+                        cleanup_portal(async {}, async {
+                            diagnostic.event("session_close_requested", serde_json::json!({}));
+                            let result = session.close().await;
+                            diagnostic.event("session_close_returned", serde_json::json!({"ok": result.is_ok()}));
+                        }, Duration::from_secs(1)).await;
                     }
                     Err(error) => {
                         let _ = ready_tx.try_send(Err(error));

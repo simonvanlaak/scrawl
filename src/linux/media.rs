@@ -247,6 +247,7 @@ fn source_launch(source: &Source) -> String {
             format!("ximagesrc use-damage=false show-pointer=true xid={xid}")
         }
         Source::PipeWire { session, crop } => {
+            session.diagnostic_media_binding();
             let mut launch = format!(
                 "pipewiresrc fd={} path={} do-timestamp=true keepalive-time=500 always-copy=true",
                 session.fd(),

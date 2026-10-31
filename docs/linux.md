@@ -261,6 +261,53 @@ This checks the GUI and release contract; it does not establish GitHub publicati
 
 ## Building and testing
 
+### Private portal resource diagnostics
+
+For an explicitly owned test app, set `APPARENT_PORTAL_DIAGNOSTICS=1` at launch.
+Other values and an absent variable disable this diagnostic; it is not a saved
+preference. Read stderr or the existing private `Logs/apparent.log` for lines
+whose message starts with `portal-resource ` followed by one JSON object.
+No CLI, capture bundle, clipboard, timeline or public telemetry field is added.
+Keep the log private and bound its retention in the test harness.
+
+Schema 1 binds PID plus Linux process start ticks, authorization `generation`,
+the actual ashpd connection's unique `bus` name and serialized `session` path.
+`request_pending` names the exact owned Request before the method call;
+`request_response` ends that pending identity. `held_fd` records each actual
+OpenPipeWireRemote descriptor (`role=remote`) and each owned stream clone
+(`role=stream`, `parent_fd`, `clone_index`, Start-returned `node`). The clone
+also records `monitor` and a SHA-256 of its monitor `mapping_id`, not raw source
+names. Compare that hash with the frozen output inventory. `media_binding`
+records the same clone/node used to construct `pipewiresrc fd=… path=…`.
+No restore tokens, arbitrary error messages, window titles, pixels or audio
+are serialized. A maximum of 256 events per authorization is followed by
+`diagnostic_truncated`; a truncated trace cannot establish complete cleanup.
+
+While a descriptor is held, the producer reads its `/proc/self/fd` socket
+target and `SO_COOKIE`. Clones share that socket identity; cookie plus target
+distinguishes descriptor renumbering and socket inode reuse. Failure gives
+`identity_status=UNKNOWN`, never a substitute identity or success. Arbitrary
+filesystem targets are not exported. `producer_fd_dropped` is emitted only
+after the actual OwnedFd is dropped. It proves that producer handle's lifetime,
+not that GStreamer, the backend, or the server released its copies.
+`request_close_requested` / `session_close_requested` are intentions;
+`*_close_returned` records only the method result. Neither proves OS release.
+
+An independent observer must read exact held targets, both selected node
+bindings and the completed state in the **same app lifetime**, and keep the
+lazy process-lifetime D-Bus socket separate. A global `pw-dump` does not prove
+visibility of a portal's private remote. Join selected node/client IDs and
+`object.serial` only with evidence of the same PipeWire remote/server;
+otherwise report private-graph visibility UNKNOWN separately from observed
+descriptor/session release. An object ID reused with a different serial is
+not the old object. A foreign backend survivor is not a recording leak.
+These diagnostics do not themselves connect to, inspect or drain PipeWire.
+
+`cargo test --offline linux::portal -- --test-threads=2` includes an isolated
+private D-Bus portal that returns real Unix descriptors through ashpd, checks
+clone identity and actual final socket EOF, and tests pending Request handling.
+This is transport/lifetime proof, not native compositor acceptance.
+
 Build dependencies (Ubuntu/Debian; CI installs the same):
 
 ```sh

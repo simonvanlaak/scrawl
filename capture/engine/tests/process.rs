@@ -66,6 +66,24 @@ fn worker() {
     };
     let runtime = Runtime::open(Path::new(&root)).unwrap();
     let role = std::env::var("ENGINE_ROLE").unwrap();
+    if role == "write-failure" {
+        // Only this disposable child inherits the limit/disposition. Exercise
+        // the real record writer's write_all failure, not a mock filesystem.
+        unsafe {
+            libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            let limit = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+        }
+        assert!(runtime.admit(A, TOKEN, B).is_err());
+        println!("READY");
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+        return;
+    }
     let (mut session, _lease) = match role.as_str() {
         "read" | "write" | "finalize" | "cleanup" => {
             let kind = match role.as_str() {
@@ -111,7 +129,7 @@ fn worker() {
         child.kill().unwrap();
         child.wait().unwrap();
     }
-    if ["save", "fail", "cancel", "mismatch"].contains(&role.as_str()) {
+    if ["save", "fail", "cancel", "mismatch", "proof"].contains(&role.as_str()) {
         let mut session = session.unwrap();
         session.recording().unwrap();
         session.processing().unwrap();
@@ -136,6 +154,11 @@ fn worker() {
             )
             .unwrap())
         };
+        if role == "proof" {
+            assert!(result.is_ok());
+            std::fs::write(Path::new(&root).join("proof-ready"), b"validated").unwrap();
+            std::io::stdin().read_line(&mut line).unwrap();
+        }
         session.finish(result).unwrap();
         if role == "save" {
             std::io::stdin().read_line(&mut line).unwrap();
@@ -163,6 +186,35 @@ fn competing_admission_and_killed_owner() {
             .unwrap(),
         Admission::Acquired(_)
     ));
+}
+
+#[test]
+fn failed_record_write_does_not_leave_temporary_files() {
+    for existing in [false, true] {
+        let f = Fixture::new();
+        if existing {
+            drop(Runtime::open(&f.0).unwrap().admit(A, TOKEN, B).unwrap());
+        }
+        let record = f.0.join(format!("request-{A}.json"));
+        let before = std::fs::read(&record).ok();
+        let worker = Worker::start(&f.0, "write-failure");
+        let names: Vec<_> = std::fs::read_dir(&f.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(
+            !names
+                .iter()
+                .any(|name| name.to_string_lossy().starts_with("tmp-")),
+            "failed record leaked a temporary file: {names:?}"
+        );
+        assert_eq!(
+            std::fs::read(record).ok(),
+            before,
+            "failed write replaced durable bytes"
+        );
+        drop(worker);
+    }
 }
 
 #[test]
@@ -303,6 +355,32 @@ fn exact_finalizer_and_terminal_receipts_survive_process_exit() {
         );
         assert!(receipt.bundle_path.is_none());
     }
+}
+
+#[test]
+fn crash_after_validated_output_does_not_infer_saved() {
+    let f = Fixture::new();
+    let mut owner = Worker::start(&f.0, "proof");
+    owner
+        .0
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"finalize\n")
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !f.0.join("proof-ready").exists() {
+        assert!(std::time::Instant::now() < deadline, "proof deadline");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    drop(owner); // Kill after exact proof validation, before terminal publication.
+    let runtime = Runtime::open(&f.0).unwrap();
+    let receipt = runtime.inspect(A).unwrap().unwrap();
+    assert_eq!(receipt.status, Status::Failed);
+    assert_eq!(receipt.error.as_deref(), Some("owner_interrupted"));
+    assert!(receipt.bundle_path.is_none());
+    assert!(f.0.join("output.apparent/apparent.json").exists());
+    assert_eq!(runtime.inspect(A).unwrap().unwrap(), receipt);
 }
 
 #[test]

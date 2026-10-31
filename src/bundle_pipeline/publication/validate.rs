@@ -87,8 +87,10 @@ impl Inventory {
         );
         let manifest = fs::bytes(self.file("apparent.json")?, TEXT_CAP)?;
         let value: serde_json::Value = serde_json::from_slice(&manifest)?;
+        let expected_value =
+            serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(expected)?)?;
         ensure!(
-            value == serde_json::from_slice::<serde_json::Value>(&serde_json::to_vec(expected)?)?,
+            value == expected_value,
             "persisted manifest differs from final bundle"
         );
         let _: ApparentBundle = serde_json::from_slice(&manifest)?;
@@ -152,18 +154,27 @@ impl Inventory {
             }
         }
         if let Some(journal) = self.files.get(crate::recover::UNFINISHED) {
-            let old: crate::recover::Unfinished =
-                serde_json::from_slice(&fs::bytes(&journal.file, TEXT_CAP)?)?;
+            let bytes = fs::bytes(&journal.file, TEXT_CAP)?;
+            let _: crate::recover::Unfinished = serde_json::from_slice(&bytes)?;
+            let old: serde_json::Value = serde_json::from_slice(&bytes)?;
             ensure!(
-                old.target == expected.target
-                    && old.duration_ms == expected.duration_ms
-                    && old.video == expected.video
-                    && old.video_offset_ms == expected.video_offset_ms
-                    && old.strokes == expected.strokes
-                    && old.events == expected.events
-                    && old.note == expected.note,
-                "recovery journal belongs to another bundle"
+                old["videoOffsetMs"].as_u64().unwrap_or(0) == expected.video_offset_ms,
+                "recovery video offset differs from final bundle"
             );
+            for field in [
+                "target",
+                "durationMs",
+                "video",
+                "strokes",
+                "events",
+                "note",
+                "interactionTelemetry",
+            ] {
+                ensure!(
+                    old[field] == expected_value[field],
+                    "recovery journal differs from final bundle: {field}"
+                );
+            }
         }
         Ok(manifest)
     }

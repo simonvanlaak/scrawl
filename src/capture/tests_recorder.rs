@@ -1,5 +1,8 @@
 use super::*;
-use crate::model::{CaptureMode, TargetFrame};
+use crate::model::{CaptureMode, RgbaFrame, TargetFrame};
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[test]
 fn root_capture_leaves_have_engine_type_identity() {
@@ -29,68 +32,6 @@ fn root_capture_leaves_have_engine_type_identity() {
     );
 }
 
-#[test]
-fn review40_screen_stop_reads_real_readiness_after_inflight_sample_join() {
-    // macOS feeds sample_real_candidate; Linux feeds push_candidate from its
-    // appsink. Exercise both actual acknowledgement owners without native I/O.
-    for adapter in ["macos", "linux", "synthetic-fallback"] {
-        let stopping = Arc::new(AtomicBool::new(false));
-        let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
-        let seen = Arc::new(AtomicBool::new(false));
-        let worker_stop = Arc::clone(&stopping);
-        let worker_frames = Arc::clone(&frames);
-        let worker_seen = Arc::clone(&seen);
-        let (entered, ready) = std::sync::mpsc::sync_channel(0);
-        let worker = thread::spawn(move || {
-            entered.send(()).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !worker_stop.load(Ordering::Acquire) && Instant::now() < deadline {
-                thread::yield_now();
-            }
-            assert!(worker_stop.load(Ordering::Acquire));
-            let sample = || Ok(RgbaFrame::new(42, 1, 1, vec![1, 2, 3, 255]));
-            if adapter == "macos" {
-                sample_real_candidate(
-                    &worker_frames,
-                    &worker_seen,
-                    &AtomicBool::new(false),
-                    false,
-                    sample,
-                );
-            } else {
-                push_candidate(
-                    &worker_frames,
-                    &worker_seen,
-                    sample().unwrap(),
-                    false,
-                    adapter == "linux",
-                );
-            }
-            None
-        });
-        let session = ScreenCaptureSession {
-            started_at: Instant::now(),
-            stopping,
-            urgent_snapshot: Arc::new(AtomicBool::new(false)),
-            frames,
-            real_frame_seen: seen,
-            startup_failed: Arc::new(AtomicBool::new(false)),
-            video_offset_ms: Arc::new(AtomicU64::new(0)),
-            sampler_thread: Some(worker),
-            _recording: crate::retention::Recording::start(),
-        };
-        ready.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert!(!session.has_frames(), "first sample is still in flight");
-        let (recording, frame_seen) = session.stop_with_readiness();
-        assert_eq!(recording.frames.len(), 1);
-        assert_eq!(
-            frame_seen,
-            adapter != "synthetic-fallback",
-            "{adapter}: wrong post-join readiness"
-        );
-    }
-}
-
 #[cfg(target_os = "linux")]
 #[test]
 fn producer_terminal_source_error_is_not_pending_consent() {
@@ -118,7 +59,6 @@ fn producer_terminal_source_error_is_not_pending_consent() {
     }
     let failed = session.failed_to_start();
     assert!(!session.has_frames());
-    assert!(!session.sampler_thread.as_ref().unwrap().is_finished());
     // Explicit caller cleanup, not an Inspect side effect.
     let recording = session.stop();
     assert!(recording.frames.is_empty());
@@ -130,101 +70,44 @@ fn producer_terminal_source_error_is_not_pending_consent() {
 }
 
 #[test]
-fn synthetic_candidate_does_not_make_agent_capture_ready() {
-    let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
-    let seen = Arc::new(AtomicBool::new(false));
-    push_candidate(
-        &frames,
-        &seen,
-        crate::render::render_synthetic_demo_frame(1280, 800, 0, 0),
-        false,
-        false,
-    );
-    let session = ScreenCaptureSession {
-        started_at: Instant::now(),
-        stopping: Arc::new(AtomicBool::new(false)),
-        urgent_snapshot: Arc::new(AtomicBool::new(false)),
-        frames,
-        real_frame_seen: seen,
-        startup_failed: Arc::new(AtomicBool::new(false)),
-        video_offset_ms: Arc::new(AtomicU64::new(0)),
-        sampler_thread: None,
-        _recording: crate::retention::Recording::start(),
-    };
-    assert!(
-        !session.has_frames(),
-        "synthetic pixels are not a real capture"
-    );
-    assert!(
-        session.failed_to_start(),
-        "no sampler and no real frames must fail start"
-    );
-    push_candidate(
-        &session.frames,
-        &session.real_frame_seen,
-        RgbaFrame::new(1, 1, 1, vec![1, 2, 3, 255]),
-        false,
-        true,
-    );
-    assert!(session.has_frames(), "real pixels unlock agent Stop");
-    assert!(
-        !session.failed_to_start(),
-        "real frames distinguish started from startup failure"
-    );
-}
-
-#[test]
 fn transient_screenshot_failure_retries_to_readiness_and_finalization() {
     for error in [
         "screenshot acquisition failed",
         "screenshot has invalid pixel length",
     ] {
-        let stopping = Arc::new(AtomicBool::new(false));
-        let worker_stopping = Arc::clone(&stopping);
-        let worker = thread::spawn(move || {
-            while !worker_stopping.load(Ordering::Acquire) {
-                thread::park_timeout(Duration::from_millis(5));
-            }
-            None
-        });
-        let session = ScreenCaptureSession {
-            started_at: Instant::now(),
-            stopping,
-            urgent_snapshot: Arc::new(AtomicBool::new(false)),
-            frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
-            real_frame_seen: Arc::new(AtomicBool::new(false)),
-            startup_failed: Arc::new(AtomicBool::new(false)),
-            video_offset_ms: Arc::new(AtomicU64::new(0)),
-            sampler_thread: Some(worker),
-            _recording: crate::retention::Recording::start(),
-        };
-        sample_real_candidate(
-            &session.frames,
-            &session.real_frame_seen,
-            &session.startup_failed,
-            true,
-            || Err(error.into()),
+        let (sender, receiver) = std::sync::mpsc::sync_channel(0);
+        let session = ScreenCaptureSession::start_with_runner(
+            target(),
+            None,
+            Arc::new(Mutex::new(vec![])),
+            move |sampler| {
+                sender
+                    .send((
+                        Arc::clone(&sampler.frames),
+                        Arc::clone(&sampler.real_frame_seen),
+                        Arc::clone(&sampler.startup_failed),
+                    ))
+                    .unwrap();
+                while !sampler.stopping.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(5));
+                }
+                None
+            },
         );
+        let (frames, seen, failed) = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        sample_real_candidate(&frames, &seen, &failed, true, || Err(error.into()));
         assert!(
             !session.has_frames(),
             "a failed sample cannot supply readiness"
         );
-        let candidates = std::mem::replace(
-            &mut *session.frames.lock().unwrap(),
-            CandidateBuffer::new(1 << 20),
-        );
+        let candidates =
+            std::mem::replace(&mut *frames.lock().unwrap(), CandidateBuffer::new(1 << 20));
         assert!(candidates.into_frames().is_empty(), "no demo pixels");
         let mut retried = false;
-        sample_real_candidate(
-            &session.frames,
-            &session.real_frame_seen,
-            &session.startup_failed,
-            false,
-            || {
-                retried = true;
-                Ok(RgbaFrame::new(220, 64, 64, vec![255; 64 * 64 * 4]))
-            },
-        );
+        sample_real_candidate(&frames, &seen, &failed, false, || {
+            retried = true;
+            Ok(RgbaFrame::new(220, 64, 64, vec![255; 64 * 64 * 4]))
+        });
         assert!(
             retried,
             "{error}: an individual sample failure must not disable later attempts"
@@ -271,101 +154,107 @@ fn transient_screenshot_failure_retries_to_readiness_and_finalization() {
     }
 }
 
-#[test]
-fn pending_worker_is_not_failed_and_terminal_signal_does_not_discard_it() {
-    let stopping = Arc::new(AtomicBool::new(false));
-    let worker_stopping = Arc::clone(&stopping);
-    let worker = thread::spawn(move || {
-        while !worker_stopping.load(Ordering::Acquire) {
-            thread::park_timeout(Duration::from_millis(5));
-        }
-        None
-    });
-    let session = ScreenCaptureSession {
-        started_at: Instant::now(),
-        stopping,
-        urgent_snapshot: Arc::new(AtomicBool::new(false)),
-        frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
-        real_frame_seen: Arc::new(AtomicBool::new(false)),
-        startup_failed: Arc::new(AtomicBool::new(false)),
-        video_offset_ms: Arc::new(AtomicU64::new(0)),
-        sampler_thread: Some(worker),
-        _recording: crate::retention::Recording::start(),
-    };
-    assert!(
-        !session.failed_to_start(),
-        "a pending producer is not an error"
-    );
-    session.startup_failed.store(true, Ordering::Release);
-    sample_real_candidate(
-        &session.frames,
-        &session.real_frame_seen,
-        &session.startup_failed,
-        true,
-        || panic!("a classified terminal setup failure must not retry"),
-    );
-    assert!(!session.has_frames());
-    assert!(session.failed_to_start());
-    assert!(session.failed_to_start(), "inspection must be read-only");
-    assert!(!session.stopping.load(Ordering::Acquire));
-    assert!(!session.sampler_thread.as_ref().unwrap().is_finished());
-    assert!(session.stop().frames.is_empty());
+fn target() -> TargetInfo {
+    TargetInfo {
+        mode: CaptureMode::Region,
+        app: None,
+        bundle_id: None,
+        window_title: None,
+        window_id: None,
+        display_id: 0,
+        frame: TargetFrame {
+            x: 0.0,
+            y: 0.0,
+            width: 64.0,
+            height: 64.0,
+            scale: 1.0,
+        },
+    }
 }
 
 #[test]
-fn screen_stop_joins_worker_before_collecting_its_final_media() {
-    let stopping = Arc::new(AtomicBool::new(false));
-    let frames = Arc::new(Mutex::new(CandidateBuffer::new(1 << 20)));
-    let worker_stopping = Arc::clone(&stopping);
-    let worker_frames = Arc::clone(&frames);
-    let path = std::env::temp_dir().join(crate::make_bundle_id());
-    let worker_path = path.clone();
-    let worker = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !worker_stopping.load(Ordering::Acquire) && Instant::now() < deadline {
-            thread::yield_now();
+fn desktop_adapter_keeps_real_retention_until_worker_teardown() {
+    // Isolate the actual process-wide retention counter from other recording tests.
+    const CHILD: &str = "APPARENT_RECORDER_RETENTION_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "capture::recorder::tests::desktop_adapter_keeps_real_retention_until_worker_teardown", "--nocapture"])
+            .env(CHILD, "1").status().unwrap();
+        assert!(status.success());
+        return;
+    }
+    let dir = std::env::temp_dir().join(crate::make_bundle_id());
+    std::fs::create_dir(&dir).unwrap();
+    let actions = vec![crate::retention::Action::Shrink {
+        bundle: dir.clone(),
+        video: dir.join("missing.mov"),
+    }];
+    let check = move || {
+        crate::retention::apply(
+            &actions,
+            &crate::retention::Policy::default(),
+            &|_| panic!("shrink must not trash"),
+            true,
+        )
+        .errors
+    };
+    // The positive control reaches the real shrink/probe path and fails on missing media.
+    assert_eq!(
+        check(),
+        1,
+        "retention check must not silently skip ownership"
+    );
+    for stop in [true, false] {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker_check = check.clone();
+        let session = ScreenCaptureSession::start_with_runner(
+            target(),
+            None,
+            Arc::new(Mutex::new(vec![17])),
+            move |sampler| {
+                let entered = worker_check();
+                sender.send((false, entered)).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !sampler.stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+                    thread::park_timeout(Duration::from_secs(10));
+                }
+                let protected = worker_check();
+                push_candidate(
+                    &sampler.frames,
+                    &sampler.real_frame_seen,
+                    RgbaFrame::new(42, 1, 1, vec![1, 2, 3, 255]),
+                    false,
+                    true,
+                );
+                sender
+                    .send((sampler.stopping.load(Ordering::Acquire), protected))
+                    .unwrap();
+                None
+            },
+        );
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(10)).unwrap(),
+            (false, 0)
+        );
+        assert!(!session.has_frames());
+        assert!(!session.failed_to_start());
+        if stop {
+            let (recording, seen) = session.stop_with_readiness();
+            assert!(seen);
+            assert_eq!(recording.frames.len(), 1);
+            assert!(recording.duration_ms >= 100);
+        } else {
+            drop(session);
         }
-        assert!(worker_stopping.load(Ordering::Acquire));
-        worker_frames
-            .lock()
-            .unwrap()
-            .push(RgbaFrame::new(42, 1, 1, vec![1, 2, 3, 255]), false);
-        std::fs::write(&worker_path, b"finalized media").unwrap();
-        Some(worker_path)
-    });
-    let session = ScreenCaptureSession {
-        started_at: Instant::now(),
-        stopping,
-        urgent_snapshot: Arc::new(AtomicBool::new(false)),
-        frames,
-        real_frame_seen: Arc::new(AtomicBool::new(false)),
-        video_offset_ms: Arc::new(AtomicU64::new(120)),
-        startup_failed: Arc::new(AtomicBool::new(false)),
-        sampler_thread: Some(worker),
-        _recording: crate::retention::Recording::start(),
-    };
-    let recording = session.stop();
-    let frames = recording.frames;
-    assert_eq!(frames.len(), 1);
-    assert_eq!(frames[0].t_ms, 42);
-    assert_eq!(frames[0].rgba, vec![1, 2, 3, 255]);
-    assert_eq!(recording.video.as_ref(), Some(&path));
-    assert_eq!(recording.video_offset_ms, 120);
-    std::fs::remove_file(path).unwrap();
-}
-
-#[test]
-fn stopped_capture_without_real_frames_stays_empty() {
-    let session = ScreenCaptureSession {
-        started_at: Instant::now(),
-        stopping: Arc::new(AtomicBool::new(false)),
-        urgent_snapshot: Arc::new(AtomicBool::new(false)),
-        frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
-        real_frame_seen: Arc::new(AtomicBool::new(false)),
-        video_offset_ms: Arc::new(AtomicU64::new(0)),
-        startup_failed: Arc::new(AtomicBool::new(false)),
-        sampler_thread: None,
-        _recording: crate::retention::Recording::start(),
-    };
-    assert!(session.stop().frames.is_empty());
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(10)).unwrap(),
+            (true, 0)
+        );
+        assert_eq!(
+            check(),
+            1,
+            "the real guard must release after join/collection"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

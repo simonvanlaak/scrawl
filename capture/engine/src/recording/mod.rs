@@ -1,5 +1,7 @@
-//! Pure candidate storage shared with the root through re-exports, not a second recorder.
-//! Native sampling, readiness and session teardown remain in the root application.
+//! Shared candidate storage and recorder-session orchestration.
+//! Native acquisition is injected by the caller; Engine has no Desktop dependency.
+mod session;
+pub use session::{Sampler, ScreenCaptureSession, push_candidate, sample_real_candidate};
 use std::{path::PathBuf, time::Duration};
 
 use crate::model::RgbaFrame;

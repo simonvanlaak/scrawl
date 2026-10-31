@@ -9,6 +9,7 @@ fn extracted_sources_never_request_input_monitoring() {
         include_str!("telemetry.rs"),
         include_str!("artifacts.rs"),
         include_str!("../../capture/engine/src/recording/mod.rs"),
+        include_str!("../../capture/engine/src/recording/session.rs"),
         include_str!("../../capture/engine/src/model.rs"),
     ];
     let calls = [
@@ -35,6 +36,7 @@ fn desktop_types_stay_out_of_the_direct_recorder_and_artifact_sources() {
         recorder,
         artifacts,
         include_str!("../../capture/engine/src/recording/mod.rs"),
+        include_str!("../../capture/engine/src/recording/session.rs"),
         include_str!("../../capture/engine/src/model.rs"),
     ] {
         for dependency in [
@@ -58,5 +60,17 @@ fn desktop_types_stay_out_of_the_direct_recorder_and_artifact_sources() {
     // This seam is in-tree only: do not disguise the remaining native/retention dependencies.
     assert!(recorder.contains("platform::run_sampler"));
     assert!(recorder.contains("crate::retention::Recording"));
+    let session = include_str!("../../capture/engine/src/recording/session.rs");
+    for dependency in [
+        "super::platform",
+        "crate::retention",
+        "gpui",
+        "crate::config",
+    ] {
+        assert!(
+            !session.contains(dependency),
+            "Engine dependency: {dependency}"
+        );
+    }
     assert!(artifacts.contains("crate::render::save_png"));
 }

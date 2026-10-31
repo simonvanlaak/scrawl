@@ -26,10 +26,11 @@ pub fn default_captures_dir() -> PathBuf {
 }
 
 /// A chosen folder that exists (or can be made) and takes writes; otherwise it's logged once and the
-/// built-in folder is used, so a capture is never lost to a missing or unplugged drive.
+/// built-in folder is used when preflight fails. A later unplug or full disk can
+/// still fail an actual capture write.
 fn usable_captures_dir(dir: &Path) -> bool {
     let usable = fs::create_dir_all(dir).is_ok()
-        && fs::metadata(dir).is_ok_and(|meta| meta.is_dir() && !meta.permissions().readonly());
+        && probe_captures_dir(dir);
     if !usable {
         log_config_once(format!(
             "config.json: \"capturesDir\" {} can't be used (missing or not writable); captures go to {}",
@@ -38,6 +39,33 @@ fn usable_captures_dir(dir: &Path) -> bool {
         ));
     }
     usable
+}
+
+/// Exercise effective access (ACLs and mount policy included), not just mode bits.
+/// Exclusive creation never follows or truncates an existing file.
+fn probe_captures_dir(dir: &Path) -> bool {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..32 {
+        let name = format!(".apparent-write-check-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let path = dir.join(name);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(file) => {
+                drop(file);
+                return fs::remove_file(path).is_ok();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// A `"capturesDir"` value as a folder: `~` is the home folder, and only an absolute path counts
@@ -2997,6 +3025,25 @@ mod tests {
         assert_eq!(configured_captures_dir("captures"), None);
         assert_eq!(configured_captures_dir("~someone/captures"), None);
         assert_eq!(configured_captures_dir("  "), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_destination_requires_actual_file_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root bypasses directory search permission; native GUI proof uses a normal user.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let fixture = Fixture::new();
+        let dir = fixture.0.join("write-without-search");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o600)).unwrap();
+        let usable = usable_captures_dir(&dir);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!usable, "write permission bits alone do not permit creating a capture");
+        assert!(usable_captures_dir(&dir));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "no probe files left behind");
     }
 
     #[test]

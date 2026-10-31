@@ -44,7 +44,7 @@
         {"key": "automaticUpdateDownloads", "value": "true | false", "does": "Override background downloads; package restrictions still apply"}
       ],
       "docs": ["docs/config-preferences.md", "docs/onboarding-and-settings.md"],
-      "note": "Candidate; Mac native proof pending. Linux automatic download also installs for next launch; Mac package restrictions remain unchanged."
+      "note": "Candidate; native proof pending. Mac launch reconciles legacy defaults from JSON and package policy, fixes checks to a daily interval and profiling off, and restores the packaged feed. Runtime defaults edits are not a supported live preference interface. Linux automatic download also installs for next launch; Mac package restrictions remain unchanged."
     },
     {
       "id": "site-feature-grid",
@@ -1048,12 +1048,12 @@
       "id": "export-menu",
       "group": "export",
       "name": "Export from the menu",
-      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent with progress beside the menu bar icon.",
+      "says": "Export Last Capture as Video… saves to ~/Movies/Apparent on Mac or a native Save dialog destination on Linux, with visible progress and failure feedback.",
       "status": "experiment:videoExport",
-      "platforms": ["mac"],
+      "platforms": ["mac", "linux"],
       "added": "2026-10-18",
       "config": [{ "key": "videoExport", "value": "true", "does": "Show Export Last Capture as Video… (Settings › Recording › Experimental)" }],
-      "docs": ["README.md#export-as-video"]
+      "docs": ["README.md#export-as-video", "docs/export-and-retention.md#linux-tray-export", "docs/linux.md"]
     },
 
     {
@@ -1142,6 +1142,16 @@
       "platforms": ["mac", "linux"],
       "config": [{ "key": "onboarding", "value": "{…}", "does": "Tour progress; delete it to replay the tour" }],
       "docs": ["README.md#welcome-and-permissions", "docs/onboarding-and-settings.md"]
+    },
+    {
+      "id": "onboarding-first-capture",
+      "group": "install",
+      "name": "Choose and try your Record shortcut",
+      "says": "Onboarding requires an explicit shortcut choice and a successful shortcut-started recording before it can finish. Closing leaves setup unfinished for the next launch.",
+      "status": "experiment:onboardingFirstCapture",
+      "platforms": ["mac", "linux"],
+      "note": "Default off. Desktop-owned Linux shortcuts must be explicitly accepted rather than edited. Native Mac and Linux interaction proof is required before promotion.",
+      "docs": ["docs/onboarding-and-settings.md"]
     },
     {
       "id": "permission-card",

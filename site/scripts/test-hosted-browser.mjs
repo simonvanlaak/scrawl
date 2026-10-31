@@ -113,8 +113,8 @@ const results = []
 const routeResults = []
 function assertResources(resources, connect) {
   for (const { url, type } of resources) {
-    const path = new URL(url).pathname
-    if (connect) assert(!url.includes('fonts.bunny.net'), 'Connect must not request the demo font service')
+    const resource = new URL(url), path = resource.pathname
+    if (connect) assert.notEqual(resource.hostname, 'fonts.bunny.net', 'Connect must not request the demo font service')
     if (!['script', 'stylesheet'].includes(type)) continue
     if (mode === 'dev') {
       assert.doesNotMatch(path, connect ? /\/src\/(?:App|main|styles|pond-hero|cta|belief|Belief|pond|footer|github)/ : /\/src\/hosted\//, `wrong dev resource owner: ${url}`)

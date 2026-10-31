@@ -16,7 +16,7 @@
 .hosted-page button { border: 1px solid var(--rule); background: transparent; padding: 10px 16px; border-radius: 0; }
 .hosted-page button:disabled { cursor: not-allowed; opacity: .4; }
 .hosted-page button:hover:not(:disabled) { border-color: var(--carbon); }
-.hosted-page :is(a, button, input, summary):focus-visible { outline: 2px solid #0000f2; outline-offset: 4px; }
+.pond-page.hosted-page :is(a, button, input, summary):focus-visible { outline: 2px solid #0000f2; outline-offset: 4px; }
 .hosted-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--rule); margin-top: 30px; }
 .hosted-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 9px 0; font-size: 14px; color: #67616a; }
 .hosted-tabs button[aria-selected=true] { color: var(--carbon); border-bottom-color: var(--carbon); }

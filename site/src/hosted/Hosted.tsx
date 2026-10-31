@@ -49,6 +49,9 @@ export function Hosted({ devicePage = false }: { devicePage?: boolean }) {
   const expired = request ? request.status === "expired" || (request.status === "pending" && request.expiresAt ? Date.parse(request.expiresAt) <= now : false) : false
   const computer = tab === "computer"
   const pending = request?.status === "pending" && !expired
+  // A bad deployment config must reach the existing error UI, not crash render.
+  let setupOrigin = ""
+  try { setupOrigin = api.apiOrigin() } catch { /* Session/sign-in report configuration errors. */ }
   const heading = loading ? "Checking your account…" : error ? "Not confirmed" : authenticated && !authenticated.beta.access ? (authenticated.beta.enrolled >= authenticated.beta.capacity ? "The beta is full" : "Beta access is limited") : devicePage ? !authenticated ? "Sign in to continue" : !code ? "Start from the CLI" : request?.status === "approved" ? "Approval granted" : request?.status === "rejected" ? "Request rejected" : expired ? "That code expired" : request ? (request.scope === "upload" ? "Automatic uploads" : "Read-only permission") : "Request unavailable" : computer ? "Host new captures" : "Read hosted captures"
   function openDialog(kind: "setup" | "read") { setDialogKind(kind); dialog.current?.showModal() }
   function selectTab(next: "computer" | "agent") {
@@ -124,8 +127,8 @@ export function Hosted({ devicePage = false }: { devicePage?: boolean }) {
       <h2 id="hosted-dialog-title">{dialogKind === "read" ? "Separate read approval" : !authenticated ? "Sign in" : computer ? "Start on this computer" : "Start with your agent"}</h2>
       {dialogKind === "read" ? <><p>Connecting this computer does not grant an agent read access.</p><p>A separate read grant covers all current and future hosted captures, including screen images, recording, voice, transcript and window context. It cannot upload or delete. This page cannot check an agent's credential or whether it has read a capture.</p></> : !authenticated ? <><p>Signing in grants no upload or read permission.</p><SignIn devicePage={devicePage} code={code} /></> : <>
         <p>Run this in the {computer ? "recording computer’s" : "agent’s"} terminal. Open its approval link, then let the CLI finish connecting.</p>
-        <pre><code>{`apparent cloud login --server ${api.apiOrigin() || "https://YOUR-HOSTED-API-ORIGIN"} --scope ${computer ? "upload --consent-upload" : "read --no-browser"}`}</code></pre>
-        {!api.apiOrigin() && <p>Replace <code>https://YOUR-HOSTED-API-ORIGIN</code> with your deployed API origin, not the approval website.</p>}
+        <pre><code>{`apparent cloud login --server ${setupOrigin || "https://YOUR-HOSTED-API-ORIGIN"} --scope ${computer ? "upload --consent-upload" : "read --no-browser"}`}</code></pre>
+        {!setupOrigin && <p>Replace <code>https://YOUR-HOSTED-API-ORIGIN</code> with your deployed API origin, not the approval website.</p>}
         <p>{computer ? "Explicit upload consent is required. Only new captures upload automatically; existing captures stay local. This grant can add, read and delete hosted captures." : "Approve all current and future hosted captures for read-only access. This grant cannot upload or delete; upload permission is independent."}</p>
         {computer && <><p>Check the computer’s actual local state:</p><pre><code>{"apparent cloud status\napparent cloud status --account"}</code></pre></>}
         <p>The website cannot inspect local settings or credentials, launch Apparent, or finish the CLI login for you.</p>

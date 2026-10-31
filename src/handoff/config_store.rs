@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 
+/// The single preference file: `APPARENT_CONFIG`, otherwise the user's canonical path.
 pub fn default_config_path() -> PathBuf {
     std::env::var_os("APPARENT_CONFIG")
         .map(PathBuf::from)
@@ -33,8 +34,8 @@ pub fn read_value_from(path: &Path) -> Result<serde_json::Value> {
     .with_context(|| format!("Invalid config at {}", path.display()))
 }
 
-/// Sets one top-level key in `path` (`null` removes it), keeping the rest (and its `0600` mode,
-/// since it holds the ingest token).
+/// Set one top-level key (`null` removes it), preserving unrelated JSON and using
+/// private `0600` publication. No schema or preference policy is applied here.
 pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> Result<()> {
     update_config_in(path, |config| {
         if value.is_null() {
@@ -46,10 +47,15 @@ pub fn set_config_value_in(path: &Path, key: &str, value: serde_json::Value) -> 
     })
 }
 
-// One sidecar inode for every CLI/GUI writer, never the replaced config inode.
-// Hosted operations take queue.lock first; this transaction never acquires a
-// queue lock or performs network work. Keep nested edits inside this closure.
-pub(crate) fn update_config_in(
+/// Read the latest object, edit it and atomically publish while holding one
+/// interprocess sidecar lock. Nested reads and multi-key edits belong inside
+/// `edit`, not in a snapshot taken before this call. An edit error or unwind
+/// publishes nothing and releases the lock. The closure must retain an object.
+///
+/// This transaction never acquires other application locks or runs outside work.
+/// The temporary file is synced before rename, as in the original writer; this
+/// does not add a parent-directory fsync or promise new crash-durability semantics.
+pub fn update_config_in(
     path: &Path,
     edit: impl FnOnce(&mut serde_json::Value) -> Result<()>,
 ) -> Result<()> {
@@ -81,7 +87,7 @@ pub(crate) fn update_config_in(
     #[cfg(test)]
     config_write_hook("snapshot", path);
     edit(&mut config)?;
-    let tmp = std::ffi::CString::new(format!(".config-{}.tmp", crate::make_bundle_id()))?;
+    let tmp = temporary_name();
     let mut body = serde_json::to_vec_pretty(&config)?;
     body.push(b'\n');
     let result = (|| -> Result<()> {
@@ -100,6 +106,23 @@ pub(crate) fn update_config_in(
         }
     }
     result
+}
+
+fn temporary_name() -> std::ffi::CString {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // Process identity, clock and counter isolate concurrent writers without an
+    // application bundle-ID dependency. O_EXCL still arbitrates actual creation.
+    std::ffi::CString::new(format!(
+        ".config-{}-{nanos}-{}.tmp",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed)
+    ))
+    .expect("numeric temporary name contains no NUL")
 }
 
 struct ConfigWriter {
@@ -234,3 +257,7 @@ fn config_write_hook(point: &str, path: &Path) {
         }
     });
 }
+
+#[cfg(test)]
+#[path = "config_store_tests.rs"]
+mod tests;

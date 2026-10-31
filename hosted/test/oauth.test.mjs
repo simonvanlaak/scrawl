@@ -43,7 +43,7 @@ test('Connect canonical and legacy OAuth destinations normalize, including outst
  for(const path of ['/connect','/hosted','/connect/device?code=ABCDEF123456','/hosted/device?code=ABCDEF123456']) {
   for(const stored of [false,true]) {
    const {response}=await login(f,p,'route'+n++,stored?{storedReturnTo:path}:{returnTo:path});
-   assert.equal(response.status,302,await response.clone().text());
+   assert.equal(response.status,302);
    assert.equal(response.headers.get('Location'),'https://app.tryapparent.com'+path.replace('/hosted','/connect'));
    assert.doesNotMatch(response.headers.get('Set-Cookie'),/Domain=/i);
   }
@@ -92,7 +92,7 @@ test('controlled OAuth signed provider: concurrent admission max20, overflow wai
  const p=await provider(),f=await fixture(p.bindings);try{
  const pending=await(await f.call('/v1/device/start',{method:'POST',body:{scope:'upload'}})).json();
  const results=await Promise.all(Array.from({length:22},(_,i)=>login(f,p,'person'+i)));
- for(const {response} of results)assert.equal(response.status,302,await response.clone().text());
+ for(const {response} of results)assert.equal(response.status,302);
  const states=await Promise.all(results.map(({response})=>f.call('/v1/session',{cookie:sessionCookie(response)}).then(r=>r.json())));
  assert.equal(states.filter(s=>s.account.beta==='active').length,20);assert.equal(states.filter(s=>s.account.beta==='waitlist').length,2);
  assert.deepEqual(states[0].slots,{used:20,limit:20,remaining:0});

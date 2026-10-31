@@ -60,6 +60,19 @@ The Settings controls for recording, shortcuts and retention use `~/.config/appa
 
 `apparent` is the installed Apparent app's binary on macOS or Linux. If `command -v apparent` finds nothing on a Mac, use `/Applications/Apparent.app/Contents/MacOS/apparent` (or the same path under `~/Applications`); on Linux, use the installed `~/.local/bin/apparent` link or the AppImage's path. Settings › Agents can install the CLI link without replacing another program. Run the command on the computer with Apparent and access to the bundle; elsewhere, read `contact-sheet.png`, `frames/` and `apparent.json` directly. Most commands take a bundle path or `latest`, the newest capture. Quote paths containing spaces, such as macOS `Application Support` paths.
 
+### A hosted capture on another computer
+
+A paste may include `Hosted capture: <32-lowercase-hex-id> (pending; ...)` and an `apparent fetch` command. The local path belongs to the recording computer, not necessarily yours. With a hosted-capable CLI, authorize a **separate read grant** and fetch the complete bundle:
+
+```sh
+apparent cloud login --server https://api.example.com --scope read --no-browser
+apparent fetch <32hex-id> --out ./capture.apparent --wait 120
+```
+
+Use the server origin in the actual paste, not the example. Let the person approve the read scope at the printed verification URI; do not request or paste bearer tokens, reuse an upload token, or silently expose one through clipboard text. Read login does not enable uploads. `--out` must not exist and its parent must exist. Fetch waits for readiness, validates all allowed files and SHA-256 hashes, and atomically publishes the complete bundle; it never merges into existing output. `--wait` is pending polling time (0–900 seconds), not the full download deadline. If pending/offline/quota/auth fails, report that boundary and keep the local original; never infer image content from the ID alone. After successful fetch, open the sheet and frames visually before acting, as with a local bundle.
+
+Uploader account/queue state is discoverable with `apparent cloud status` (`--account` explicitly queries quota). Upload is default off behind `hostedSync` plus `cloud.enabled` and explicit `cloud.uploadConsent` in config.json. Only `cloud login --scope upload --consent-upload` opts in; do not do that merely to read a capture. `cloud disable` cancels pending uploads; `cloud logout` also removes local credentials. `cloud retry` retries eligible jobs under their existing IDs; it cannot revive cancelled or expired captures. Explicit `cloud upload <bundle>` queues a fresh ID on every invocation, including historical or changed bundles; do not use it as an ordinary retry. Device grants expire after 30 days and require a new device login; browser sign-in alone does not renew them. V1 rejects files above 90,000,000 bytes, never drops media to fit. See `docs/hosted-client.md` for private credential artifacts, retry limits and complete-bundle restrictions.
+
 ### Look closer at a moment
 
 Use `zoom` when the problem is motion (an animation, a jump, a flicker) or happens between keyframes, or when you can't tell what a mark points at:
@@ -78,13 +91,25 @@ It prints the path of a PNG sheet of frames around that moment, the time of each
 
 ### Other commands
 
-For a running GUI app on macOS or Linux, `apparent capture state` prints its live phase and
-`capture_id` (only while pending or recording). If you initiated that capture and have retained
-its ID, `apparent capture stop <capture_id>` saves it after frames arrive, while
-`apparent capture cancel <capture_id>` discards it even when the portal is pending. Do not use
-the record shortcut as a stop toggle or act on an ID you did not establish as yours. A wrong ID
-fails; repeating an ended ID does nothing. These commands do not control a separate timed
-`record --duration` invocation and never send a capture to a session.
+For a running GUI app on macOS or Linux, use `apparent capture start --wait --timeout 30`
+to start through the normal interaction-aware screen path and wait for a real frame. It refuses
+occupied sessions rather than toggling. Retain the reply's top-level `capture_id`, including on
+failure or timeout; do not infer ownership from `capture state`. For driver crash recovery,
+retain your own 32-hex request ID first and pass `--request-id <id>`; retrying that ID cannot
+start twice. Portal consent and existing permission checks still apply; no app is auto-launched.
+
+`apparent capture stop <id> --wait --timeout 60` stops only that ID and returns `status: "saved"`
+with its exact `bundle_path` only after successful save. Without `--wait`, Stop still returns
+acceptance, not completion. Stop while starting is `not_ready`; `capture cancel <id>` can discard
+that owned pending capture. `capture inspect <id>` recovers its status/result after a timeout or
+disconnect; retrying Stop cannot stop a newer capture. Receipts survive only in this GUI process,
+not an app restart. Rejected start IDs remain rejected; use a new ID only for a deliberate new take.
+
+`capture state` remains a read-only global phase/active-ID view. Keep stdout JSON separate from
+stderr; failures exit nonzero. Never use a shortcut toggle, `latest` or a directory scan to recover
+an owned take. These commands do not control timed `record --duration`, change export audio,
+send to a session or add automatic paste. See `docs/agent-video-workflow.md` in the repository
+for bounded recovery and video QA. Check installed help before using new flags on an older build.
 
 ```sh
 apparent inspect <bundle>               # summary.md, the text above
